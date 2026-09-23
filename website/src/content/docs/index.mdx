@@ -1,0 +1,173 @@
+---
+title: sling_gql
+description: A GraphQL client for Flutter where the widget is the query. Read a field, get the query.
+template: splash
+hero:
+  title: Read a field.<br/><span class="gradient-text">Get the query.</span>
+  tagline: A GraphQL client for Flutter where your widgets are the query. No documents, no fragments, no hooks-per-operation — just typed Dart.
+  image:
+    html: '<div id="hero-anim" class="hero-anim" role="img" aria-label="Fields read by a widget flow into a GraphQL document; the response flows back and fills the widget."></div>'
+  actions:
+    - text: Get started
+      link: /sling_gql/guides/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: Why sling_gql?
+      link: /sling_gql/guides/why/
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/tpucci/sling_gql
+      icon: github
+      variant: minimal
+---
+
+import { Code, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import HeroAnim from '../../components/HeroAnim.astro';
+
+<HeroAnim />
+
+export const dartSnippet = `QueryBuilder<Query>(
+  builder: (context, query, state) {
+    final launch = query.latestLaunch;
+    return ListTile(
+      title: Text(launch?.name ?? '…'),
+      subtitle: Text(launch?.rocket?.name ?? '…'),
+    );
+  },
+)`;
+
+export const schemaSnippet = `type Launch {
+  id: ID!
+  name: String!
+  details: String
+  status: LaunchStatus!
+  rocket: Rocket!
+  payloads: [Payload!]!
+}`;
+
+export const generatedSnippet = `class Launch extends Accessor {
+  String? get id => scalar<String>('id');
+  String? get name => scalar<String>('name');
+  set name(String? v) => write('name', v);
+  String? get details => scalar<String>('details');
+  String? get status => scalar<String>('status');
+  Rocket? get rocket => object('rocket', Rocket.new);
+  List<Payload>? get payloads => list('payloads', Payload.new);
+}`;
+
+export const gqlSnippet = `query {
+  latestLaunch {
+    __typename
+    name
+    rocket {
+      __typename
+      name
+    }
+  }
+}`;
+
+<section class="landing-section">
+  <h2>You write the widget. sling_gql writes the GraphQL.</h2>
+  <p class="lead">
+    Every getter you touch during <code>build()</code> is recorded. At the end of the frame,
+    everything read by every widget becomes <em>one</em> request. The response fills a cache and
+    the widgets that read it rebuild.
+  </p>
+
+  <div class="code-compare">
+    <div class="pane">
+      <div class="pane-title">lib/screens/latest_launch.dart</div>
+      <Code code={dartSnippet} lang="dart" />
+    </div>
+    <div class="arrow">→</div>
+    <div class="pane">
+      <div class="pane-title">sent to your endpoint</div>
+      <Code code={gqlSnippet} lang="graphql" />
+    </div>
+  </div>
+</section>
+
+<section class="landing-section">
+  <h2>How it works</h2>
+  <p class="lead">Four moving parts, ~600 lines of runtime, one dependency (<code>http</code>).</p>
+  <ol class="steps">
+    <li>
+      <strong>Generated accessors, not proxies</strong>
+      <p>One Dart class per GraphQL type. Every getter records the field on a selection tree, then reads the cache. Static, typed, tree-shakeable.</p>
+    </li>
+    <li>
+      <strong>Skeletons instead of loading branches</strong>
+      <p>Before data arrives, scalars are <code>null</code> and lists have one placeholder item. Your layout renders once, with the same code path.</p>
+    </li>
+    <li>
+      <strong>One request per frame</strong>
+      <p>Selections from every widget — including lazily built list rows — merge into a single document flushed at the end of the frame.</p>
+    </li>
+    <li>
+      <strong>Targeted rebuilds</strong>
+      <p>The response is deep-merged into a path-addressed cache; only widgets that read the affected fields are asked to rebuild.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="landing-section">
+  <h2>A typed API, generated from your schema</h2>
+  <p class="lead">
+    One Dart class per GraphQL type. Every field is a real member — autocomplete, jump to
+    definition, doc comments from the schema. Every field is nullable, because it may not be
+    fetched yet: the compiler makes you handle the skeleton state instead of discovering it at runtime.
+  </p>
+
+  <div class="code-compare">
+    <div class="pane">
+      <div class="pane-title">schema.graphql</div>
+      <Code code={schemaSnippet} lang="graphql" />
+    </div>
+    <div class="arrow">→</div>
+    <div class="pane">
+      <div class="pane-title">lib/generated/schema.dart</div>
+      <Code code={generatedSnippet} lang="dart" />
+    </div>
+  </div>
+
+  <p class="lead" style="margin-top: 1.25rem">
+    Arguments become named parameters, enums become constants, input objects become
+    <code>const</code> classes with <code>toJson()</code>. Regenerate in one command:
+    <code>dart run sling_gql_gen --endpoint …</code>
+  </p>
+</section>
+
+<section class="landing-section">
+  <h2>Proof-of-concept status</h2>
+  <p class="lead">Queries are solid. The rest is a roadmap, not a promise.</p>
+
+  | Capability | Status |
+  | --- | --- |
+  | Selection recording during `build()`, incl. child widgets and lazy slivers | <span class="pill pill-ok">done</span> |
+  | End-of-frame batching across widgets | <span class="pill pill-ok">done</span> |
+  | Arguments → variables, per-args aliases & cache keys | <span class="pill pill-ok">done</span> |
+  | Skeleton state, `prepare`, `refetch`, sticky errors, partial `errors[]` | <span class="pill pill-ok">done</span> |
+  | Optimistic writes | <span class="pill pill-ok">done</span> |
+  | Code generator (objects, enums, inputs, custom scalars) | <span class="pill pill-ok">done</span> |
+  | Normalized cache (`__typename` + `id`) | <span class="pill pill-next">next</span> |
+  | Mutations & subscriptions (mock API already exposes them) | <span class="pill pill-next">next</span> |
+  | Unions / interfaces (`$on`) | <span class="pill pill-no">not started</span> |
+  | Cache expiry, SWR, persistence | <span class="pill pill-no">not started</span> |
+
+  <div class="poc-banner">
+    <strong>This is a feasibility study</strong>, built in a day to answer one question: <em>can
+    "the widget is the query" work in Dart, without JavaScript's <code>Proxy</code>?</em> The answer
+    is yes — read the <a href="/sling_gql/internals/feasibility/">feasibility notes</a> for what
+    changed along the way.
+  </div>
+</section>
+
+<section class="landing-section">
+  <h2>Dive in</h2>
+  <CardGrid>
+    <LinkCard title="Getting started" description="Add the dependency, generate from your endpoint, read your first field." href="/sling_gql/guides/getting-started/" />
+    <LinkCard title="Why sling_gql?" description="The operation-first tax, and the idea that removes it." href="/sling_gql/guides/why/" />
+    <LinkCard title="Batching & waterfalls" description="Why frame timing matters and how to read fields without paying twice." href="/sling_gql/guides/batching-and-waterfalls/" />
+    <LinkCard title="Architecture" description="Selection tree, cache, client, scheduler — the five files that make it work." href="/sling_gql/internals/architecture/" />
+  </CardGrid>
+</section>

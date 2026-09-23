@@ -1,0 +1,113 @@
+---
+title: Feasibility notes
+description: What we believed before building, what held, what surprised us — the honest ledger of a one-day proof of concept.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Inspiration
+
+The model sling_gql implements — *the widget is the query* — comes from
+[GQty](https://gqty.dev), a JavaScript client that records property reads on a `Proxy`
+during render and turns them into a GraphQL document. sling_gql borrows the idea, not the
+implementation: Dart has no `Proxy`, Flutter has no render tick, and sound null safety
+changes what the API can promise. This page records what we believed before building it in
+Dart, and how each belief turned out.
+
+## Assumptions we made — and their verdict
+
+| # | Assumption | Verdict |
+| --- | --- | --- |
+| 1 | Codegen can replace `Proxy` with no loss of ergonomics | <span class="pill pill-ok">held</span> — 414 generated lines for 40 types; getters, named args, cascades all read naturally |
+| 2 | Dart's sound null safety would be a friction point | <span class="pill pill-ok">inverted</span> — it made the "not fetched yet" state explicit and killed a class of bugs |
+| 3 | "Everything read in one frame" can become one request | <span class="pill pill-next">held, with a fix</span> — needed end-of-frame flushing, not a microtask |
+| 4 | Recording reads made by child widgets "just works" | <span class="pill pill-next">held, with a fix</span> — scopes must schedule from `onMiss`, not from `run()` |
+| 5 | A path-addressed cache is enough for a PoC | <span class="pill pill-ok">held</span> — but the cost (double fetch of the same entity) showed up on screen 2 |
+| 6 | Partial GraphQL errors can be ignored for now | <span class="pill pill-no">wrong</span> — they cached `null`s as real values; had to prune |
+| 7 | Public SpaceX GraphQL API is a fine demo backend | <span class="pill pill-no">wrong</span> — its upstream was down; we built a mock API instead |
+| 8 | Waterfalls would be rare with care | <span class="pill pill-no">wrong</span> — the author wrote two in the first screen; only a request-counting test caught them |
+
+## 1. Codegen instead of Proxy
+
+The generator emits one class per object type extending `Accessor`, with one getter (or
+method, when there are arguments) per field. Each delegates to a runtime helper that
+records the selection and reads the cache. The resulting API is very pleasant in an IDE:
+every field is a real member with a doc comment, jump-to-definition works, and the analyzer
+flags typos at compile time.
+
+What we gave up: reacting to fields that were never in the schema snapshot. That is a
+regeneration step away, and you were running a generator for types anyway.
+
+## 2. Nullability
+
+A schema field `name: String!` is not in the cache before the fetch. We considered hiding
+that (a `String` getter that throws or returns `''`) and rejected it within minutes:
+`String?` is the truth, and `?? skeleton` is what you would write in the widget anyway. The one wrinkle is `Launch!` non-null *objects*: they are
+nullable in Dart too, returning a skeleton accessor when missing and `null` only when the
+server sent `null`.
+
+## 3. Frame timing
+
+We flushed on a microtask. Tests passed. The device produced two requests for
+the first screen. Reasons:
+
+- `runApp` builds the tree in `attachRootWidget`, **outside** any frame, then schedules a
+  warm-up frame as a *separate* event-loop task. Microtasks run in between.
+- `SliverList` builds children **during layout**, after the parent's `build()` returned.
+
+The fix — `QueryBuilder` scopes flush in `addPostFrameCallback` and call
+`ensureVisualUpdate()` so a frame exists — made it one request and is now covered by a
+widget test with a `SliverList` of thirty rows.
+
+## 4. Reads after `build()` returned
+
+Accessors are handed to child widgets (`_LaunchRow(launch)`), which read fields in their own
+`build()`. Our first `QueryScope` only scheduled a flush if the *builder body* had missed
+something; child reads landed in the tree but nothing sent them. Moving the scheduling into
+`onMiss` fixed it and, as a side effect, made reads inside callbacks work too.
+
+## 5. The cost of no normalization
+
+`launch(id: "launch-181")` and `launches(first: 20).nodes[0]` are the same entity at two
+paths. The detail screen re-fetches `name`, `date`, `status` the list already had. Not
+wrong, just wasteful — and it becomes wrong the moment a mutation updates one copy.
+Normalizing on `__typename` + `id` is the top roadmap item; `__typename` is already selected
+on every object for this reason.
+
+## 6. Partial errors
+
+GraphQL happily returns `{ data: { company: null }, errors: [...] }`. Our first client
+merged `company: null` into the cache, where it looked exactly like a server saying "there
+is no company". Every rebuild then read `null` with no miss, so nothing refetched and no
+error was surfaced. We now delete the value at each error's `path` before merging and
+attach the errors to the scope.
+
+## 7. The backend
+
+The public `spacex-production.up.railway.app` GraphQL endpoint proxies a REST API that
+returned Cloudflare 525 errors for most fields on the day we built this. A mock API with
+graphql-yoga took an hour, gave us pagination, filters, mutations and subscriptions we
+control, and a stable dataset for tests. In hindsight it should have been the plan from the
+start.
+
+## 8. Waterfalls
+
+Two reads in the example were conditional on fetched data — a header line formatted only
+when `totalLaunches` was known, and a cursor read only in `onPressed`. Both produced an
+extra request. Neither was visible in the UI. The only thing that caught them was a test
+asserting `log.entries.length` after each interaction. **If you adopt this model, adopt
+that test.**
+
+## What we would need to believe to go to production
+
+- Normalization with per-entity notifications (design is straightforward, ~300 lines).
+- Mutations with optimistic writes and response selections via `prepare` functions.
+- Subscriptions over SSE or WebSocket writing into the same cache.
+- A dev overlay attributing each request to the widgets that caused it.
+- Ownership: this replaces the whole data layer. The runtime is small enough to own; the
+  question is whether the team wants to.
+
+<Aside type="tip" title="Bottom line">
+The model works in Dart. Codegen is a better `Proxy` than `Proxy`. The hard parts —
+waterfalls and cache identity — are engineering, not research.
+</Aside>

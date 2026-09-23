@@ -1,0 +1,326 @@
+/* ---------------------------------------------------------------------------
+   sling_gql — theme
+   Deep-space navy + launch-orange accent. Dark is the primary look.
+--------------------------------------------------------------------------- */
+
+:root {
+  --sl-font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl-font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --sling-orange: #ffb347;
+  --sling-coral: #ff5e62;
+  --sling-gradient: linear-gradient(120deg, var(--sling-orange), var(--sling-coral));
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #3a2210;
+  --sl-color-accent: #ff9a3c;
+  --sl-color-accent-high: #ffd3a3;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eceef4;
+  --sl-color-gray-2: #c0c4d0;
+  --sl-color-gray-3: #8a90a4;
+  --sl-color-gray-4: #545a70;
+  --sl-color-gray-5: #333850;
+  --sl-color-gray-6: #1c2033;
+  --sl-color-black: #0b1020;
+  --sl-color-bg-nav: #0d1226;
+  --sl-color-bg-sidebar: #0d1226;
+  --sl-color-hairline-shade: #1c2033;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ffe8cf;
+  --sl-color-accent: #e0731a;
+  --sl-color-accent-high: #7a3b05;
+  --sl-color-white: #14182b;
+  --sl-color-gray-1: #1f2438;
+  --sl-color-gray-2: #3b4158;
+  --sl-color-gray-3: #626987;
+  --sl-color-gray-4: #9aa0b8;
+  --sl-color-gray-5: #cfd3e1;
+  --sl-color-gray-6: #eef0f6;
+  --sl-color-gray-7: #f7f8fc;
+  --sl-color-black: #ffffff;
+}
+
+/* ---------------------------------------------------------------------------
+   Cross-document view transitions: a soft fade between pages, no JS.
+--------------------------------------------------------------------------- */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root) {
+  animation: 180ms ease-out both sling-fade-out;
+}
+::view-transition-new(root) {
+  animation: 260ms ease-in both sling-fade-in;
+}
+@keyframes sling-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes sling-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* Gradient headline utility used on the landing page and in guides. */
+.gradient-text {
+  background: var(--sling-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   Landing page (template: splash)
+--------------------------------------------------------------------------- */
+
+[data-has-hero] .hero {
+  padding-block: clamp(2rem, 6vw, 5rem);
+}
+
+/* the hero visual is a Lottie animation (public/hero.json) */
+@media (min-width: 50rem) {
+  [data-has-hero] .hero {
+    grid-template-columns: 6fr 5fr;
+    gap: 2rem;
+  }
+}
+[data-has-hero] .hero > .hero-html {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.hero-anim {
+  width: 100%;
+  aspect-ratio: 620 / 400;
+  filter: drop-shadow(0 20px 50px rgba(255, 154, 60, 0.15));
+}
+.hero-anim svg {
+  width: 100% !important;
+  height: auto !important;
+}
+
+[data-has-hero] .hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+}
+
+[data-has-hero] .hero .tagline {
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+  color: var(--sl-color-gray-2);
+  max-width: 44ch;
+}
+
+/* the starfield below bleeds outside the content column: clip it at the page level */
+html[data-has-hero],
+html[data-has-hero] body {
+  overflow-x: clip;
+}
+
+/* subtle starfield behind the hero */
+[data-has-hero] .hero {
+  position: relative;
+}
+[data-has-hero] .hero::before {
+  content: '';
+  position: absolute;
+  top: -8rem;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  height: 44rem;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(1px 1px at 20% 30%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 70% 20%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 40% 70%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 85% 60%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(1px 1px at 10% 80%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 55% 45%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(ellipse at 50% 0%, rgba(255, 154, 60, 0.22), transparent 60%);
+}
+:root[data-theme='light'] [data-has-hero] .hero::before {
+  background: radial-gradient(ellipse at 50% 0%, rgba(255, 154, 60, 0.18), transparent 60%);
+}
+
+/* Landing sections */
+.landing-section {
+  margin-block: clamp(3rem, 7vw, 5.5rem);
+}
+.landing-section > h2 {
+  font-size: clamp(1.6rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.4rem;
+}
+.landing-section > .lead {
+  color: var(--sl-color-gray-3);
+  font-size: 1.1rem;
+  max-width: 62ch;
+  margin-top: 0;
+}
+
+/* Two code panes side by side with an arrow between. */
+.code-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  margin-top: 1.5rem;
+}
+.code-compare > * {
+  margin-top: 0 !important;
+}
+.code-compare .pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.code-compare .pane-title {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  margin-bottom: 0.4rem;
+}
+.code-compare .pane .expressive-code,
+.code-compare .pane pre {
+  flex: 1;
+  margin: 0;
+}
+.code-compare .arrow {
+  align-self: center;
+  font-size: 2rem;
+  color: var(--sl-color-accent);
+}
+@media (max-width: 72rem) {
+  .code-compare {
+    grid-template-columns: 1fr;
+  }
+  .code-compare .arrow {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+}
+
+/* Step list */
+.steps {
+  counter-reset: step;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  margin-top: 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+.steps li {
+  margin-top: 0 !important;
+  counter-increment: step;
+  position: relative;
+  padding: 1.25rem 1.25rem 1.25rem 3.5rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  background: var(--sl-color-gray-6);
+  margin: 0;
+}
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 1.1rem;
+  top: 1.1rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sling-gradient);
+  color: #0b1020;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+.steps li strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--sl-color-white);
+}
+.steps li p {
+  margin: 0;
+  color: var(--sl-color-gray-2);
+  font-size: 0.95rem;
+}
+
+/* Status table pills */
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill-ok {
+  background: rgba(70, 200, 120, 0.18);
+  color: #6fe3a1;
+}
+.pill-next {
+  background: rgba(255, 154, 60, 0.18);
+  color: var(--sl-color-accent);
+}
+.pill-no {
+  background: rgba(150, 160, 190, 0.18);
+  color: var(--sl-color-gray-3);
+}
+:root[data-theme='light'] .pill-ok {
+  color: #157a45;
+}
+
+/* Request-count "receipt" cards */
+.receipt {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.receipt > div {
+  margin-top: 0 !important;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background: var(--sl-color-gray-6);
+  text-align: center;
+}
+.receipt .n {
+  font-size: 2.75rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.receipt .label {
+  color: var(--sl-color-gray-3);
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+}
+
+/* Callout banner */
+.poc-banner {
+  border: 1px solid var(--sl-color-accent-low);
+  background: color-mix(in srgb, var(--sl-color-accent-low) 45%, transparent);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  color: var(--sl-color-gray-1);
+  margin-top: 2rem;
+}

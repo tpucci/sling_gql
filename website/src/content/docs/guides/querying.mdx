@@ -1,0 +1,188 @@
+---
+title: Querying data
+description: Reading scalars, nested objects, lists and fields with arguments — and what each read turns into on the wire.
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Querying in sling_gql is reading. This page walks through the generated API for the mock
+API's schema, showing the GraphQL each snippet produces.
+
+## Scalars and nested objects
+
+```dart
+QueryBuilder<Query>(
+  builder: (context, query, state) {
+    final company = query.company;
+    final hq = company?.headquarters;
+    return Column(children: [
+      Text(company?.name ?? '…'),
+      Text('${hq?.city}, ${hq?.country}'),
+    ]);
+  },
+)
+```
+
+```graphql title="generated"
+query {
+  company {
+    __typename
+    name
+    headquarters {
+      __typename
+      city
+      country
+    }
+  }
+}
+```
+
+Three things to notice:
+
+- **Every object selection carries `__typename`.** It is free, and it is what a future
+  normalized cache will key on.
+- **`company?.` is nullable** because the schema says `Company!` *but the cache may not
+  have it yet*. `null` here means "not fetched"; a server `null` would also be `null`. Use
+  `state.hasMissingData` or `company.isSkeleton` when you need to tell them apart.
+- **Nothing is fetched twice.** Reading `company.name` in three widgets produces one
+  `name` in one document.
+
+## Lists
+
+Lists are Dart lists. Before data arrives they contain **exactly one skeleton element**, so
+your `map`/`for` runs once and records the element's fields.
+
+```dart
+final rockets = query.rockets ?? const <Rocket>[];
+return Column(
+  children: [for (final r in rockets) Text('${r.name} · ${r.stages} stages')],
+);
+```
+
+```graphql title="generated"
+query {
+  rockets {
+    __typename
+    name
+    stages
+  }
+}
+```
+
+Lists of scalars (`[String!]!`) come back as `List<String?>?` via `scalarList`:
+
+```dart
+final customers = payload.customers?.join(', ');
+```
+
+<Aside type="caution" title="Do not sort or filter lists during build">
+`rockets.where(...)` runs on skeleton data first, then on real data.
+Ask the server for the shape you want to display (filters, `orderBy`) rather than reshaping
+on the client.
+</Aside>
+
+## Arguments
+
+Fields with arguments are **methods with named parameters**. Required arguments
+(`ID!` without a default) are `required`; everything else is optional.
+
+```dart
+final launch = query.launch(id: widget.id);
+final page = query.launches(
+  first: 20,
+  filter: LaunchFilter(status: LaunchStatus.SUCCESS, year: 2024),
+  orderBy: LaunchOrder.DATE_DESC,
+);
+```
+
+```graphql title="generated"
+query ($v0: ID!, $v1: Int, $v2: LaunchFilter, $v3: LaunchOrder) {
+  launch_18di94z: launch(id: $v0) {
+    __typename
+    # …
+  }
+  launches_5c0z2wq: launches(first: $v1, filter: $v2, orderBy: $v3) {
+    __typename
+    # …
+  }
+}
+```
+
+```json title="variables"
+{ "v0": "launch-181", "v1": 20, "v2": { "status": "SUCCESS", "year": 2024 }, "v3": "DATE_DESC" }
+```
+
+Arguments always travel as **variables**, so input objects and enums need no client-side
+serialization beyond `toJson()`, which the generated input classes implement. The
+**alias** (`launches_5c0z2wq`) is a stable hash of the argument values and is also the
+**cache key**: `launches(first: 20)` and `launches(first: 40)` are different cache entries
+that can coexist in one document. This is what makes
+[pagination](/sling_gql/guides/pagination/) fall out naturally.
+
+<Aside type="note" title="Enums are strings">
+The generator emits a constant holder per enum (`LaunchStatus.SUCCESS == 'SUCCESS'`) and
+types enum fields as `String?`. A Dart `enum` with unknown-value handling is a possible
+refinement; strings keep the PoC honest about values the server may add later.
+</Aside>
+
+## Input objects
+
+```dart
+final filter = LaunchFilter(
+  search: 'Starlink',
+  upcoming: false,
+);
+query.launchesPage(limit: 10, offset: 0, filter: filter);
+```
+
+`LaunchFilter` is a plain `const` class with a `toJson()` that omits `null`s. Nested inputs
+and lists of inputs are serialized recursively.
+
+## Reusing selections ("fragments")
+
+A function that reads fields is a fragment. Call it from any widget or from `prepare`:
+
+```dart title="launch_screen.dart (excerpt)"
+static void prepare(Launch launch) {
+  launch
+    ..name
+    ..date
+    ..status
+    ..details;
+  launch.rocket
+    ?..name
+    ..description
+    ..successRatePct;
+  for (final p in launch.payloads ?? const <Payload>[]) {
+    p..name..type$..orbit;
+  }
+}
+```
+
+Cascade syntax (`..`) reads a getter for its side effect; the analyzer is fine with it
+because the getters are real members. See [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/)
+for when to reach for `prepare`.
+
+## Reading outside of `build()`
+
+Sometimes you need data imperatively — a prefetch, a test, a callback. `SlingClient.resolve`
+runs a selection function against a throwaway scope, fetches what is missing, and returns
+the result once the cache is populated:
+
+```dart
+final name = await client.resolve((q) => q.latestLaunch?.name);
+```
+
+`resolve` batches on a microtask instead of a frame, so it also works in pure Dart tests.
+
+## Imperative refetch
+
+`state.refetch()` re-fetches everything the current widget selected during its last build —
+the natural thing to hook to pull-to-refresh:
+
+```dart
+CupertinoSliverRefreshControl(onRefresh: state.refetch)
+```
+
+Because all pages of a paginated list live in the same widget's selection, one pull
+refetches all loaded pages in **one** request.

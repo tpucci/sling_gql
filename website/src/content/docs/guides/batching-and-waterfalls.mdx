@@ -1,0 +1,153 @@
+---
+title: Batching & waterfalls
+description: How sling_gql turns a whole frame into one request, why Flutter's frame timing matters, and how to avoid paying twice for conditional reads.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## One frame, one request
+
+Every `QueryBuilder` owns a **scope**. During its build, each accessor read that misses
+the cache tells the scope; the scope adds the field to a selection tree and asks the client
+to flush. The client does not flush immediately — it merges every scope's tree into one
+document and sends it **once, at the end of the frame**.
+
+That is why this screen, made of two independent `QueryBuilder`s plus twenty lazily built
+rows, costs a single request:
+
+```dart title="launches_screen.dart (simplified)"
+Column(children: [
+  // Widget 1: header
+  QueryBuilder<Query>(builder: (_, q, s) => Text('${q.company?.name} · ${q.stats?.totalLaunches}')),
+  // Widget 2: list
+  Expanded(child: QueryBuilder<Query>(
+    builder: (_, q, s) {
+      final page = q.launches(first: 20);
+      return ListView.builder(
+        itemCount: page?.nodes?.length ?? 1,
+        itemBuilder: (_, i) => _LaunchRow(page!.nodes![i]), // Widget 3…22, built during layout
+      );
+    },
+  )),
+])
+```
+
+```graphql title="the only request"
+query ($v0: Int) {
+  company { __typename name }
+  stats { __typename totalLaunches }
+  launches_1qouruf: launches(first: $v0) {
+    __typename
+    nodes { __typename status name date id rocket { __typename name } }
+    pageInfo { __typename hasNextPage endCursor }
+    totalCount
+  }
+}
+```
+
+## Why "end of frame" and not "next microtask"
+
+The first version of sling_gql flushed on the next microtask. On a real device
+the first screen produced **two** requests. Two Flutter facts explain it:
+
+1. **The very first build happens outside a frame.** `runApp` mounts and builds the tree in
+   `attachRootWidget`, then schedules a *warm-up frame* as a separate event-loop task. A
+   microtask queued during that build runs *before* the frame.
+2. **Slivers build children during layout**, not during the build phase. `SliverList` rows
+   that read `launch.name` do so after their parent's `build()` returned.
+
+So the microtask fired with the header and the list *container* selected, then the rows
+recorded their fields and triggered a second request. `QueryBuilder` scopes now flush in a
+**post-frame callback** (`frameEndScheduler`), after layout, so lazily built children join
+their parents' request. Imperative `resolve()` keeps the microtask.
+
+<Aside type="note" title="Reads after the builder returned still count">
+Accessors hold a reference to their scope. A row widget that receives a `Launch` and reads
+`launch.name` in its own `build()` — or even inside an `onPressed` — records the miss and
+schedules a flush. You never have to "register" reads.
+</Aside>
+
+## Waterfalls: the one habit to build
+
+The flip side of "what you read is what you fetch" is: **what you don't read isn't
+fetched**. A field read only *after* some fetched data arrived costs a second round trip.
+The example's request-counting test caught two of them in code written by someone who
+knew about the problem.
+
+### Anti-pattern 1 — conditional reads
+
+```dart del={2-4} ins={6-8}
+// ❌ ceo and successRatePct are only read once totalLaunches is non-null
+final text = stats?.totalLaunches == null
+    ? null
+    : '${stats!.totalLaunches} launches · ${stats.successRatePct}% · CEO ${company?.ceo}';
+
+// ✅ read everything first, format second
+final total = stats?.totalLaunches, rate = stats?.successRatePct, ceo = company?.ceo;
+final text = total == null ? null : '$total launches · $rate% · CEO $ceo';
+```
+
+### Anti-pattern 2 — reads inside callbacks
+
+```dart del={2-4} ins={6-9}
+// ❌ endCursor is first read on tap → fetch → the tap adds `null` as a cursor
+CupertinoButton(
+  onPressed: () => setState(() => _cursors.add(page!.pageInfo!.endCursor)),
+)
+
+// ✅ read during build, capture in the closure
+final endCursor = page?.pageInfo?.endCursor;
+CupertinoButton(
+  onPressed: () => setState(() => _cursors.add(endCursor)),
+)
+```
+
+### The rule
+
+> Read every field the widget *might* need at the top of `build()`, into locals.
+> Branch on the locals, not on the accessors.
+
+## `prepare`: fetching for the future
+
+Some reads are legitimately conditional — a collapsed section, a tab that isn't visible
+yet. For those, `QueryBuilder.prepare` runs a selection function **in addition to** the
+builder, so the fields are part of the first request even though nothing displays them yet:
+
+```dart title="launch_screen.dart (excerpt)"
+QueryBuilder<Query>(
+  prepare: (query) {
+    final launch = query.launch(id: widget.id);
+    if (launch != null) LaunchScreen.prepare(launch); // reads payloads, crew, rocket…
+  },
+  builder: (context, query, state) {
+    final launch = query.launch(id: widget.id);
+    // …the payload list is rendered only when _showPayloads is true,
+    // but it was fetched up front → expanding costs 0 requests.
+  },
+)
+```
+
+`prepare` functions are also your **fragments**: export them and reuse the same selection
+in a list row, a detail page, and later in a mutation's response selection.
+
+## Test your request counts
+
+The most valuable test in the repository is the one that counts requests:
+
+```dart title="example/test/app_test.dart (excerpt)"
+expect(log.entries, hasLength(1), reason: 'header + list + rows batched');
+// tap "Load more"
+expect(log.entries, hasLength(2), reason: 'only the second page is fetched');
+// open a launch
+expect(log.entries, hasLength(3), reason: 'detail screen: exactly one request');
+// expand payloads
+expect(log.entries, hasLength(3), reason: 'no request when expanding: prepare paid for it');
+```
+
+Hook `SlingClient.onOperation` to a list, and assert on its length after each interaction.
+Every waterfall shows up as an off-by-one.
+
+<Aside type="tip" title="See it live">
+The example app has an in-app network log (antenna icon). Every document sent is shown with
+its variables — open it after any interaction and you should see at most one new entry.
+</Aside>

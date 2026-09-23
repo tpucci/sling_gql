@@ -1,0 +1,70 @@
+---
+title: Roadmap
+description: What comes after the proof of concept, in the order it should be built.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The PoC proves queries. Each item below is scoped so it can be built and tested against the
+bundled [mock API](/sling_gql/tooling/mock-api/), which already exposes the server side of
+phases 2 and 3.
+
+<Steps>
+
+1. **Normalized cache**
+
+   Store objects with `__typename` + `id` once, reference them from the tree, notify
+   scopes per entity. Unlocks: no double fetch across paths, mutations updating lists,
+   subscriptions updating everything. Config: `Cache(normalization: true | Normalization(identity: …))`.
+
+2. **Mutations**
+
+   `MutationBuilder<Mutation>` / `client.mutate((m) => m.toggleFavorite(launchId: id)..favorite)`.
+   Selection recording works unchanged on a `mutation` root; the response merges into the
+   normalized cache. Optimistic writes already exist. Add `onComplete`/`onError` with
+   refetch hooks.
+
+3. **Subscriptions**
+
+   The mock API serves `launchStatusChanged` and `launchScheduled` over SSE. A
+   `SubscriptionBuilder<Subscription>` records a selection once, opens the stream, and
+   writes each event into the cache.
+
+4. **Unions and interfaces (`$on`)**
+
+   Generator emits `PetOn get $on` with one getter per possible type; printer emits inline
+   fragments `... on Cat { meows }`. Add a union to the mock schema first.
+
+5. **Fine-grained rebuilds**
+
+   Replace root-alias intersection with per-path (or per-entity) subscriptions so a
+   detail refetch does not rebuild an unrelated list.
+
+6. **Cache expiry and SWR**
+
+   `maxAge`, `staleWhileRevalidate`, `WeakReference`-held stale entries, soft `refetch()`
+   that is a no-op on fresh data.
+
+7. **Developer experience**
+
+   In-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
+   log line per operation; `flutter_hooks` adapter (`useSlingQuery`).
+
+8. **Transport options**
+
+   `gql_link` adapter for auth headers, retries and persisted queries, without changing
+   the runtime's `_post` contract.
+
+</Steps>
+
+## Explicitly not planned
+
+- **SSR hydration.** Not applicable.
+- **Lazy / transaction / paginated query variants.** `resolve()` plus widget state cover
+  the same ground.
+
+<Aside type="note" title="Contributing">
+Every runtime change ships with a test in `packages/sling_gql/test`, and every example
+change keeps `example/test/app_test.dart`'s request counts exact. Read `AGENTS.md` at the
+repository root before starting.
+</Aside>

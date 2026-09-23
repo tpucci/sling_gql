@@ -8,3 +8,4 @@ export 'src/scalars.dart';
 export 'src/schema.dart';
 export 'src/type_ref.dart';
 export 'src/type_resolver.dart';
+export 'src/introspection_query.dart';

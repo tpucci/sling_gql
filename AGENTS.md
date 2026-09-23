@@ -12,6 +12,10 @@ on the code.
   `mock-api/schema.graphql` is the **contract**; change it there, then
   `npm run introspect` and regenerate the Dart classes (below). The example
   widget tests (`example/test/app_test.dart`) need the server running.
+- `website/` — Astro + Starlight docs site, deployed to GitHub Pages by
+  `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
+  internal links must include the `/sling_gql/` base path. `npm run build` must
+  pass before committing content.
 - Three Dart packages, no melos/workspace yet:
   - `packages/sling_gql` — the runtime (Flutter package). Tests: `flutter test`.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.

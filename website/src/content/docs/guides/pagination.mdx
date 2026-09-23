@@ -1,0 +1,111 @@
+---
+title: Pagination
+description: Cursor and offset pagination with per-argument cache entries — no special API needed.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+sling_gql has no pagination API. It does not need one: a field called with different
+arguments is a **different cache entry**, and a widget's selection can include as many of
+them as it likes. Pagination is then just state.
+
+## Cursor pagination (Relay style)
+
+The mock API exposes `launches(first, after): LaunchConnection!`. The example keeps a list
+of cursors — one per loaded page — and reads every page during build:
+
+```dart title="launches_screen.dart (excerpt)"
+class _LaunchesScreenState extends State<LaunchesScreen> {
+  static const pageSize = 20;
+  final List<String?> _cursors = [null]; // null = first page
+
+  @override
+  Widget build(BuildContext context) => QueryBuilder<Query>(
+    builder: (context, query, state) {
+      final pages = [
+        for (final cursor in _cursors) query.launches(first: pageSize, after: cursor),
+      ];
+      final launches = [for (final page in pages) ...?page?.nodes];
+
+      final last = pages.last;
+      final hasMore = last?.pageInfo?.hasNextPage ?? false;
+      final endCursor = last?.pageInfo?.endCursor; // read during build, see below
+      final total = last?.totalCount;
+
+      return CustomScrollView(slivers: [
+        CupertinoSliverRefreshControl(onRefresh: state.refetch),
+        SliverList.builder(
+          itemCount: launches.length,
+          itemBuilder: (_, i) => _LaunchRow(launches[i]),
+        ),
+        SliverToBoxAdapter(
+          child: hasMore
+              ? CupertinoButton.filled(
+                  onPressed: () => setState(() => _cursors.add(endCursor)),
+                  child: Text('Load more (${launches.length} / $total)'),
+                )
+              : Text('${launches.length} launches'),
+        ),
+      ]);
+    },
+  );
+}
+```
+
+What happens on the wire:
+
+| Interaction | Request |
+| --- | --- |
+| First frame | `launches_a: launches(first: 20)` — plus the header's `company` and `stats`, batched |
+| "Load more" | `launches_b: launches(first: 20, after: "…")` — **only** the new page; page 1 is served from cache |
+| Pull to refresh | `launches_a` **and** `launches_b` in one document — `refetch()` replays the whole last selection |
+
+```graphql title="request after one “Load more”"
+query ($v0: Int, $v1: String) {
+  launches_fg1t1s: launches(first: $v0, after: $v1) {
+    __typename
+    nodes { __typename status name date id rocket { __typename name } }
+    pageInfo { __typename hasNextPage endCursor }
+    totalCount
+  }
+}
+```
+
+<Aside type="caution" title="Read the cursor during build">
+The first version of this screen read `page.pageInfo.endCursor` inside `onPressed`. Since
+nothing had read `endCursor` during build, it was not fetched; the tap recorded a miss,
+fetched it, and meanwhile appended `null` — the first page — again. The request-counting
+test caught it. Always capture what a callback needs in a local during `build()`.
+</Aside>
+
+## Offset pagination
+
+Identical pattern with `launchesPage(limit, offset)`:
+
+```dart
+final pages = [
+  for (var i = 0; i < _pageCount; i++)
+    query.launchesPage(limit: 20, offset: i * 20, filter: _filter, orderBy: _order),
+];
+final launches = [for (final p in pages) ...?p];
+```
+
+Changing `_filter` or `_order` changes the arguments, hence the alias, hence the cache
+entry — the old pages stay cached (useful if the user toggles back), the new ones are
+fetched.
+
+## Nested connections
+
+Connections are ordinary fields, so they nest: `rocket.launches(first: 5)` inside a
+launch detail is one more sub-selection in the same request.
+
+```dart
+final recent = launch.rocket?.launches(first: 5)?.nodes ?? const <Launch>[];
+```
+
+## What is missing
+
+Because the cache is path-addressed and not normalized, a launch that appears in page 1
+and — after a refetch with new data — in page 2 is stored twice. Toggling a favourite via a
+mutation would update one copy. This is the main motivation for
+[normalization](/sling_gql/guides/caching/#normalization-next) on the roadmap.

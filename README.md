@@ -1,6 +1,7 @@
 # sling_gql
 
-**Proof of concept** — a [GQty](https://gqty.dev)-style GraphQL client for Flutter.
+**Proof of concept** — a GraphQL client for Flutter where the widget is the query.
+Inspired by [GQty](https://gqty.dev). Docs: https://tpucci.github.io/sling_gql/
 
 > Read a field, get the query. No operation documents, no fragments, no
 > `builder`-per-query boilerplate: widgets read typed accessors during

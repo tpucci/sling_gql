@@ -1,0 +1,227 @@
+---
+title: Example app
+description: A two-screen iOS app against the mock API — what each screen demonstrates, the in-app network log, and the request-counting test.
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+`example/` is a small **iOS-only** Cupertino app (`flutter create
+--platforms=ios`; don't add other platforms) built against the mock API. Two
+screens, a launch list and a launch detail, plus an in-app log of every
+GraphQL document sent. Its purpose isn't to be a real app — it's to be
+something you can point at the network log and a widget test and see
+sling_gql's batching claims proven, not asserted.
+
+<FileTree>
+- example/
+  - lib/
+    - main.dart            client + `SlingScope` setup
+    - network_log.dart     records every `PrintedOperation`
+    - screens/
+      - launches_screen.dart
+      - launch_screen.dart
+    - widgets/
+      - skeleton.dart      loading placeholders
+    - generated/schema.dart  committed, generated — see Code generation
+  - test/app_test.dart     the request-counting end-to-end test
+</FileTree>
+
+## Wiring
+
+```dart title="example/lib/main.dart"
+void main() {
+  final log = NetworkLog();
+  final client = SlingClient<Query>(
+    endpoint: Uri.parse(endpoint),
+    rootFactory: Query.root,
+    onOperation: log.add,
+  );
+
+  runApp(SlingScope<Query>(
+    client: client,
+    child: NetworkLogScope(
+      log: log,
+      child: const CupertinoApp(
+        title: 'sling_gql',
+        theme: CupertinoThemeData(brightness: Brightness.light),
+        home: LaunchesScreen(),
+      ),
+    ),
+  ));
+}
+```
+
+`onOperation: log.add` is the only hook the app needs to capture every
+request — `SlingClient` calls it once per flushed operation, batched or not.
+
+## Launches screen
+
+The doc comment at the top of `launches_screen.dart` states exactly what to
+look at:
+
+> Cursor-paginated launch list.
+>
+> What to look at (open the network log, top right):
+> - the header and the list are two independent `QueryBuilder`s, yet the
+>   first frame produces ONE request;
+> - each page is `launches(first: 20, after: <cursor>)` — a distinct
+>   argument set, hence a distinct alias and cache entry. "Load more" adds a
+>   cursor and only the new page is fetched; pull-to-refresh refetches all
+>   pages in one request.
+
+Concretely: `_Header` is its own `QueryBuilder<Query>` reading `query.company`
+and `query.stats`; the list body is a second, separate `QueryBuilder<Query>`
+reading `query.launches(...)` once per loaded cursor. They're unrelated
+widgets with unrelated builders, but because both build in the same frame,
+their selections merge into a single request before either build's data
+exists. "Load more" appends a cursor to `_cursors` and calls `setState` —
+that rebuilds only the list body, so only the new page's arguments are new
+to the selection tree, and only that page gets fetched.
+
+Every field the row needs — `status`, `date`, `rocket?.name` — is read
+unconditionally at the top of `_LaunchRow.build`, matching the "read
+everything you'll need up front" rule; see
+[Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/).
+
+## Launch detail screen
+
+`launch_screen.dart`'s doc comment:
+
+> Launch detail.
+>
+> - `prepare` selects everything the screen will need up front (including
+>   the collapsed payload section), so opening it later costs no request.
+> - Note that `name`/`date`/`status` are fetched again even though the list
+>   already had them: the PoC cache is path-based, not normalized, so
+>   `launch(id:)` and `launches.nodes[i]` are different entries. Normalizing
+>   on `__typename` + `id` is the first item on the roadmap (see AGENTS.md).
+
+`prepare` is a static method, passed to `QueryBuilder.prepare`, that reads
+every field the screen might show — including the payload list that starts
+collapsed:
+
+```dart title="example/lib/screens/launch_screen.dart"
+static void prepare(Launch launch) {
+  launch
+    ..name
+    ..date
+    ..status
+    ..details
+    ..flightNumber;
+  launch.rocket
+    ?..name
+    ..description
+    ..height?.meters
+    ..mass?.kg
+    ..successRatePct;
+  launch.launchpad
+    ?..fullName
+    ..locality;
+  for (final p in launch.payloads ?? const <Payload>[]) {
+    p
+      ..name
+      ..type$
+      ..orbit
+      ..massKg
+      ..customers;
+  }
+  for (final a in launch.crew ?? const <Astronaut>[]) {
+    a
+      ..name
+      ..agency;
+  }
+}
+```
+
+Because `prepare` runs in the same batching pass as `build`, the payload
+section's fields are already in the cache by the time the user taps "Show
+payloads" — toggling `_showPayloads` costs a `setState` and nothing else.
+That's the `0` in the front page's "requests to expand the collapsed payload
+section" stat.
+
+<Aside type="caution" title="Honest caveat: non-normalized cache">
+The comment above is not hedging for style — it's real. `query.launch(id:
+...)` and an entry inside `query.launches(...).nodes` are two unrelated
+cache paths, even when they describe the same launch. Favoriting a launch or
+renaming it from the detail screen would **not** update the row already
+rendered in the list. Fixing this needs a normalized, `__typename`+`id`-keyed
+cache — the first item in [Roadmap](/sling_gql/internals/roadmap/).
+</Aside>
+
+## Network log
+
+`network_log.dart`'s `NetworkLog` is a `ChangeNotifier` that keeps every
+`PrintedOperation` the client sent, newest first, and also prints it to the
+console:
+
+```dart title="example/lib/network_log.dart"
+void add(PrintedOperation op) {
+  entries.insert(0, op);
+  debugPrint('[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}');
+  notifyListeners();
+}
+```
+
+`NetworkLogScope` (an `InheritedNotifier`) makes it available anywhere in the
+tree; `NetworkLogButton` in the nav bar shows the running count and opens
+`NetworkLogScreen`, a plain list of every document and its variables. This is
+the whole debugging story for the PoC — no devtools extension, just "read
+what was actually sent."
+
+## Skeletons
+
+`widgets/skeleton.dart` is two widgets, and the comment on `SkeletonText`
+says the whole point:
+
+```dart title="example/lib/widgets/skeleton.dart"
+/// Renders [text], or a skeleton box of [width] when `null`.
+///
+/// This is the whole "loading state" story: a missing value is `null`,
+/// nothing else to wire.
+```
+
+`SkeletonBox` is a grey rounded rectangle; `SkeletonText` renders the real
+text if it's non-null, or a `SkeletonBox` sized to `width`/font size if it's
+`null`. There's no separate loading branch in `launches_screen.dart` or
+`launch_screen.dart` — every place that shows a string calls `SkeletonText`
+and lets the accessor's `null`-while-fetching semantics do the rest.
+
+## The end-to-end test
+
+`test/app_test.dart` runs against the **real** mock API (`cd mock-api && npm
+start` first — `flutter test` blocks HTTP by default, so the test opts back
+in with `HttpOverrides.global = null`). It pumps the real `LaunchesScreen`,
+taps through to the detail screen, and asserts exact `log.entries` counts at
+each step:
+
+- **1 request for the first frame.** Header (`company`, `stats`) and the
+  list body (`launches(first: 20)`) are separate widgets, separate
+  `QueryBuilder`s, but they build in the same frame and end-of-frame
+  batching merges them into one document.
+- **1 more request for "Load more".** Tapping the button appends a cursor
+  and rebuilds only the list body; only `launches(first: 20, after: <new
+  cursor>)` is new, so only that page is fetched. The test also checks the
+  `after` cursor arrived as a GraphQL variable (`v1`), not inlined into the
+  document string.
+- **1 more request for the detail screen.** Opening a launch triggers
+  `prepare`, which selects everything the screen needs, including the
+  collapsed payloads section, in one shot. The test asserts the outgoing
+  document contains `payloads {` (prepare reached it) and does **not**
+  contain `nodes` (nothing from the list query leaked in) — i.e. this really
+  is one fresh, minimal request, not a byproduct of cache state.
+- **0 requests to expand payloads.** Tapping "Show payloads" only flips
+  local state; `log.entries` stays at 3, proving `prepare` really did pay for
+  that data up front.
+
+This is arguably the single most valuable test in the repo: it's the only
+one that fails the moment someone introduces a waterfall — a field read
+inside an `if` on fetched data, a build split across frames, a missing
+`prepare` call — and it fails immediately, on the exact assertion
+`log.entries.length`. Every other test checks *correctness*; this one checks
+a performance property that's otherwise invisible until a screen is slow.
+
+<Aside type="note">
+`settle()` in the test polls with a 100ms delay up to 50 times rather than
+`pumpAndSettle()`, because this test hits a real HTTP server with real
+`LATENCY_MS` latency — there's no fixed number of frames to pump.
+</Aside>

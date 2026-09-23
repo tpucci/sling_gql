@@ -1,0 +1,236 @@
+---
+title: Code generation
+description: What sling_gql_gen emits from a GraphQL introspection JSON file, and why generated code replaces JS-style Proxy.
+---
+
+import { Steps, Aside, FileTree } from '@astrojs/starlight/components';
+
+`sling_gql_gen` is a pure-Dart CLI. Point it at a GraphQL introspection JSON
+file and it writes one Dart file: a typed `Accessor` subclass per object
+type, a constant holder per enum, and a class per input object. That file is
+the entire "schema binding" — there is no runtime reflection.
+
+## Why generation, not a `Proxy`
+
+In JavaScript this model works because `Proxy` intercepts arbitrary property
+access: `query.launches.nodes[0].name` records each hop as it happens, with
+no schema known ahead of time. Dart has no equivalent — there is no way to
+intercept `.name` on an arbitrary object. sling_gql answers this the only way
+Dart allows: generate one real getter per field, ahead of time, from the
+schema. Every getter is static, typed and tree-shakeable; the interception
+happens inside the getter body instead of before it. See
+[Feasibility notes](/sling_gql/internals/feasibility/) for the fuller story of
+that trade-off.
+
+## Running it
+
+```sh title="from your app directory"
+# introspect a live endpoint…
+dart run sling_gql_gen --endpoint https://api.example.com/graphql --out lib/generated/schema.dart
+
+# …or use an introspection result you already have
+dart run sling_gql_gen --schema graphql/schema.json --out lib/generated/schema.dart
+```
+
+Flags:
+
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--endpoint` | one of | GraphQL URL to introspect (standard introspection query, descriptions included). |
+| `--schema` | one of | Path to an introspection JSON file (the standard `{"__schema": {...}}` result). |
+| `-H`, `--header` | no | HTTP header for `--endpoint`, repeatable: `-H "Authorization: Bearer …"`. |
+| `--out` | yes | Path of the Dart file to write. Parent directories are created as needed. |
+| `--part-of-import` | no | Overrides the `sling_gql` import. Defaults to `package:sling_gql/sling_gql.dart`. |
+
+The generator writes the file, then shells out to `dart format`. A
+formatting failure is logged to stderr but does not fail the run — you get
+unformatted-but-correct code rather than a crash.
+
+<Aside type="tip">
+In this repository the example regenerates from a committed snapshot
+(`example/graphql/schema.json`) produced by the mock API's `npm run introspect`, so the
+generated code is reproducible without a server — see [Mock API](/sling_gql/tooling/mock-api/).
+</Aside>
+
+## What gets emitted
+
+<FileTree>
+- lib/generated/schema.dart
+  - class Query extends Accessor  — the query root, one getter/method per field
+  - class Launch extends Accessor — one class per other OBJECT type
+  - class Rocket extends Accessor
+  - abstract final class LaunchStatus  — one holder per ENUM
+  - class LaunchFilter                — one class per INPUT_OBJECT
+</FileTree>
+
+The query root gets two constructors, the second used once per widget tree:
+
+```dart title="example/lib/generated/schema.dart"
+class Query extends Accessor {
+  Query(super.recorder, super.selection, super.path);
+  Query.root(Recorder r) : super(r, r.root, const []);
+  ...
+}
+```
+
+A field with no arguments becomes a getter that reads straight through the
+cache via `Accessor`'s helpers (`scalar`, `scalarList`, `object`, `list` —
+see [`accessor.dart`](/sling_gql/internals/architecture/)). Every scalar field
+also gets a setter for optimistic writes:
+
+```dart title="example/lib/generated/schema.dart"
+bool? get hasNextPage => scalar<bool>('hasNextPage');
+set hasNextPage(bool? v) => write('hasNextPage', v);
+```
+
+A field with arguments becomes a method instead of a getter. Required,
+non-nullable arguments without a schema default become `required` Dart
+parameters; everything else is optional. The GraphQL type string and the
+argument value both flow into an `Arg`, which is what turns into a GraphQL
+variable when the operation is printed:
+
+```dart title="example/lib/generated/schema.dart"
+LaunchConnection? launches({
+  int? first,
+  String? after,
+  LaunchFilter? filter,
+  String? orderBy,
+}) => object(
+  'launches',
+  LaunchConnection.new,
+  args: {
+    'first': Arg('Int', first),
+    'after': Arg('String', after),
+    'filter': Arg('LaunchFilter', filter?.toJson()),
+    'orderBy': Arg('LaunchOrder', orderBy),
+  },
+);
+```
+
+Enums are read and written as plain `String`, held in a constant class so you
+still get autocomplete and a compile error on typos:
+
+```dart title="example/lib/generated/schema.dart"
+abstract final class LaunchStatus {
+  static const SCHEDULED = 'SCHEDULED';
+  static const SUCCESS = 'SUCCESS';
+  static const FAILURE = 'FAILURE';
+  static const PARTIAL_FAILURE = 'PARTIAL_FAILURE';
+  static const SCRUBBED = 'SCRUBBED';
+}
+```
+
+Input objects become plain immutable Dart classes with a `toJson()` used to
+build the `Arg` value — nothing sling_gql-specific about them:
+
+```dart title="example/lib/generated/schema.dart"
+class LaunchFilter {
+  const LaunchFilter({this.status, this.rocketId, this.year, this.upcoming, this.search});
+
+  final String? status;
+  final String? rocketId;
+  final int? year;
+  final bool? upcoming;
+  final String? search;
+
+  Map<String, Object?> toJson() => {
+    if (status != null) 'status': status,
+    if (rocketId != null) 'rocketId': rocketId,
+    if (year != null) 'year': year,
+    if (upcoming != null) 'upcoming': upcoming,
+    if (search != null) 'search': search,
+  };
+}
+```
+
+## Scalar mapping
+
+| GraphQL type | Dart type |
+| --- | --- |
+| `String`, `ID` | `String` |
+| `Int` | `int` |
+| `Float` | `double` |
+| `Boolean` | `bool` |
+| `Date`, `DateTime`, `timestamptz` (known custom scalars) | `String` |
+| any other custom scalar | `Object` |
+
+The generator has no way to know the JSON shape of an arbitrary custom
+scalar, so anything it doesn't recognize falls back to `Object` and gets a
+doc comment noting it: `/// Unknown custom scalar `Foo`; read as `Object?`.`
+The three custom scalars it *does* know (`Date`, `DateTime`, `timestamptz`)
+are all ISO strings on real-world APIs it has been tested against, so they
+map to `String` like the built-in string types.
+
+## Nullability
+
+Every generated getter and method return type is nullable — `T?`, `R?`,
+`List<R>?` — regardless of what the schema says with `!`. This isn't a
+generator bug: a value can always be *absent from cache* even when the
+schema guarantees the server will never return `null` for it. `Accessor`
+tells the two cases apart (`isSkeleton` vs. an explicit server `null`); see
+`packages/sling_gql/lib/src/accessor.dart`.
+
+## Name sanitization
+
+GraphQL names are far more permissive than Dart identifiers. The generator
+maps them to safe Dart names while always keeping the original GraphQL name
+as the string literal used for cache keys, `Arg` map keys and `toJson` keys
+— sanitization is purely cosmetic on the Dart side.
+
+- **Dart keywords and `Accessor` member names** get a trailing `$`:
+  `type` → `type$`, `class` → `class$`. This also covers accidental
+  collisions with `Accessor` itself (`selection`, `write`, `isSkeleton`, …).
+- **A leading underscore** (Hasura-style `_eq`, `_and`) is replaced with `$`
+  so the identifier stays public in Dart: `_eq` → `$eq`.
+- **Type names** go through the same leading-underscore rule, plus a check
+  against `dart:core`/runtime names (`Object`, `String`, `List`, `Map`,
+  `Cache`, `Accessor`, `Selection`, `Arg`, `Recorder`) — `Object` → `Object$`.
+- **A field whose Dart name equals its own return type name** (common with
+  lowercase table types, e.g. a `users` field returning type `users`) is
+  disambiguated at the member, not the type: it becomes `users$` so it
+  doesn't shadow the class inside its own body.
+
+## What's not supported yet
+
+- **Mutation and subscription root types are skipped entirely** — the
+  generator only emits accessors for the query side; see
+  [Roadmap](/sling_gql/internals/roadmap/) for when that changes.
+- **Unions and interfaces** (`$on`) aren't emitted — the generator
+  only walks `OBJECT`, `ENUM` and `INPUT_OBJECT` kinds. The mock API's
+  schema doesn't have any yet either.
+- **Introspection `__*` types** are filtered out before emission, so they
+  never show up as generated classes.
+
+## Keeping generated code and schema in sync
+
+<Steps>
+
+1. **Edit the schema.** `mock-api/schema.graphql` is the contract; change it
+   there first.
+
+2. **Re-run introspection.**
+
+   ```sh
+   cd mock-api && npm run introspect
+   ```
+
+   This overwrites `example/graphql/schema.json` without needing the server
+   to be running.
+
+3. **Regenerate.**
+
+   ```sh
+   cd example
+   dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
+     --schema graphql/schema.json --out lib/generated/schema.dart
+   ```
+
+</Steps>
+
+<Aside type="caution" title="Never hand-edit the output">
+`example/lib/generated/schema.dart` is committed and starts with
+`// GENERATED CODE - DO NOT MODIFY BY HAND`. A handwritten fix belongs in
+`sling_gql_gen/lib/src/` instead — the emitter's contract is pinned down by
+the hand-written example at the top of `packages/sling_gql/test/core_test.dart`,
+so a helper-signature change needs both files updated together.
+</Aside>

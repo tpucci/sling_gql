@@ -1,0 +1,111 @@
+---
+title: Why sling_gql?
+description: The problem with operation-first GraphQL clients in Flutter, and the idea sling_gql brings to Dart.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The operation-first tax
+
+Every mainstream GraphQL client for Flutter — Ferry, graphql_flutter, Artemis — is
+**operation-first**. You write a `.graphql` document, run a generator, get a typed request
+class and a typed response class, then wire a widget to that request:
+
+```graphql title="launches.graphql"
+query Launches($first: Int) {
+  launches(first: $first) {
+    nodes { id name date rocket { name } }
+  }
+}
+```
+
+```dart title="launches_screen.dart"
+Operation(
+  client: client,
+  operationRequest: GLaunchesReq((b) => b..vars.first = 20),
+  builder: (context, response, error) {
+    if (response.loading) return const Spinner();
+    final launches = response.data?.launches.nodes ?? [];
+    return ListView(children: [for (final l in launches) Text(l.name)]);
+  },
+)
+```
+
+This is safe and explicit, but it has costs you pay on every screen:
+
+- **Two sources of truth.** The document says what is fetched; the widget says what is
+  displayed. They drift. You over-fetch to be safe, or under-fetch and crash on `null`.
+- **Fragments as a chore.** Sharing selections between a list row and a detail page means
+  fragments, fragment spreads, and generated fragment types you have to thread around.
+- **Loading is a branch.** `if (loading)` doubles your widget code and your test cases.
+- **Batching needs server support.** Two widgets, two requests — unless your server
+  supports batching and your client knows how to use it.
+
+## The GQty idea
+
+[GQty](https://gqty.dev) inverted this for React: **the component is the query**. You read
+`me.name` from a proxy during render, the proxy records the access, and after render the
+recorded fields are sent as one document. The cache fills, the component re-renders with
+data.
+
+It has real, measurable benefits:
+
+- **Nothing to keep in sync.** What you display *is* what you fetch.
+- **Fragments are functions.** A `prepare(launch)` that reads fields is reusable anywhere.
+- **Loading is a value.** Missing data is `undefined`; you render a skeleton with `??`.
+- **Batching is free.** Every component rendered in the same tick contributes to one
+  request, with no server cooperation.
+
+It also has a well-known cost — **waterfalls** on conditional reads — which we address
+head-on in [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/).
+
+sling_gql takes that idea and asks what it looks like in Dart, on Flutter's frame model,
+with sound null safety. It is not a port of the JavaScript library; the API and the
+internals are designed for Flutter from scratch.
+
+## Why it seemed impossible in Dart
+
+The JavaScript approach depends on `Proxy` to intercept *arbitrary* property access on
+objects whose shape is only known from the schema. Dart has no `Proxy`. `noSuchMethod`
+exists but fights sound null safety and disables AOT optimisations.
+
+The answer sling_gql explores is: **generate the interception.** One Dart class per GraphQL
+type, one getter per field. Each getter does exactly what a proxy would have done —
+record the field on a selection tree, then read from the cache. It is static, typed,
+and tree-shakeable — and you were going to run a generator for your types anyway.
+
+```dart title="generated (excerpt)"
+class Launch extends Accessor {
+  Launch(super.recorder, super.selection, super.path);
+
+  String? get name => scalar<String>('name');
+  set name(String? v) => write('name', v);
+  Rocket? get rocket => object('rocket', Rocket.new);
+  List<Payload>? get payloads => list('payloads', Payload.new);
+}
+```
+
+<Aside type="note" title="A feature disguised as a limitation">
+A schema field `name: String!` is not guaranteed to be *in the cache* yet. Dart's sound null
+safety refuses to pretend otherwise: every generated getter is `String?`. Your code is
+forced to handle the not-yet-fetched state — which is exactly the skeleton state you want to
+render anyway.
+</Aside>
+
+## What the proof of concept set out to prove
+
+1. **Recording during `build()` is reliable** — including fields read by child widgets, by
+   lazily built sliver rows, and after the builder returned.
+2. **One request per frame is achievable** without server-side batching.
+3. **The API is pleasant in Dart** — nullable getters, named arguments, `prepare` as a
+   plain function.
+4. **The runtime stays small** — no `gql`, no `ferry`, no `build_runner`; one HTTP dependency.
+
+All four held, with two surprises (frame timing and partial errors) documented in the
+[feasibility notes](/sling_gql/internals/feasibility/).
+
+## What it does not try to prove (yet)
+
+Normalization, mutations, subscriptions, unions, cache expiry. They are on the
+[roadmap](/sling_gql/internals/roadmap/), and the bundled [mock API](/sling_gql/tooling/mock-api/)
+already exposes mutations and subscriptions so the next phases have something to talk to.

@@ -1,0 +1,110 @@
+---
+title: Loading states & errors
+description: Skeleton values instead of loading branches, what QueryState tells you, and how errors behave.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Skeletons, not spinners
+
+Before data arrives, accessors return **skeleton values** shaped like the schema:
+
+| Field kind | Skeleton value |
+| --- | --- |
+| Scalar (`String!`, `Int`, enum…) | `null` |
+| Object (`Rocket!`) | a skeleton `Rocket` whose fields are all skeleton values |
+| List of objects (`[Launch!]!`) | a list with **one** skeleton element |
+| List of scalars (`[String!]!`) | `[null]` |
+
+This means the *same* build code renders both states. A `SkeletonText` widget that shows a
+grey box for `null` is all the loading UI you need:
+
+```dart title="widgets/skeleton.dart"
+class SkeletonText extends StatelessWidget {
+  const SkeletonText(this.text, {required this.width, this.style});
+  final String? text;
+  // …
+  @override
+  Widget build(BuildContext context) => text == null
+      ? SkeletonBox(width: width, height: style?.fontSize ?? 15)
+      : Text(text!, style: style);
+}
+```
+
+```dart title="launch row"
+CupertinoListTile(
+  leading: launch.isSkeleton ? const SkeletonBox(width: 28, height: 28) : Icon(_icon(launch.status)),
+  title: SkeletonText(launch.name, width: 160),
+  subtitle: SkeletonText(date == null ? null : '${date.substring(0, 10)} · $rocketName', width: 200),
+)
+```
+
+The one-element skeleton list gives you a **single placeholder row** that has the exact
+layout of a real row — free glimmer UI.
+
+<Aside type="tip" title="isSkeleton vs. null">
+`launch.isSkeleton` is `true` when the object itself is not in cache. Use it for leading
+icons or wrappers where a `null` field alone is ambiguous (a nullable `details: String` may
+legitimately be `null` from the server).
+</Aside>
+
+## `QueryState`
+
+The third argument to the builder describes the widget's scope:
+
+```dart
+QueryBuilder<Query>(
+  builder: (context, query, state) {
+    state.isLoading;       // a request containing this widget's selections is in flight
+    state.hasMissingData;  // the last build read at least one field not in cache
+    state.error;           // last error from a request this widget took part in
+    state.refetch();       // Future<void>: refetch everything selected in the last build
+  },
+)
+```
+
+`isLoading` is what you use for a discreet activity indicator next to the content — the
+content itself is already rendering as skeletons.
+
+## Null from the server vs. not fetched
+
+The cache stores a real `null` when the server sends one. The `missing` sentinel is used
+for paths that were never written. Accessors turn both into `null` for scalars, but only
+`missing` records a miss (and therefore a fetch). So a nullable field the server returned
+as `null` does **not** cause refetch loops.
+
+## Errors
+
+When a request fails — transport error, HTTP 4xx/5xx, or a GraphQL `errors[]` — every
+scope that took part in it gets `state.error` set and is rebuilt.
+
+```dart
+if (state.error != null) {
+  return ErrorView(error: state.error!, onRetry: state.refetch);
+}
+```
+
+Two behaviours are worth knowing:
+
+- **Errors are sticky.** Until you call `refetch()`, a scope that still misses data will
+  *not* schedule a new request for the same document. Without this, a failing query would
+  loop: build → miss → fetch → fail → rebuild → miss → …
+- **Partial errors are pruned.** GraphQL can return `data` *and* `errors`. sling_gql removes
+  the values at each error's `path` before merging, so a `null` the server put at a failed
+  field is not cached as a real `null`. The rest of the response is cached normally, and
+  the scope's error carries the `graphqlErrors` list.
+
+```dart
+final e = state.error;
+if (e is SlingException) {
+  e.message;        // joined messages
+  e.graphqlErrors;  // List<Map> as returned by the server
+  e.statusCode;     // for HTTP failures
+}
+```
+
+<Aside type="note" title="No magic loading or error layer — on purpose">
+Loading is a value you render; errors are a value you check. Both are local to the widget
+that owns the scope, which is easier to reason about than a tree of boundaries that catch
+them for you.
+</Aside>

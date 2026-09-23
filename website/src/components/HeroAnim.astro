@@ -1,0 +1,27 @@
+---
+/**
+ * Plays public/hero.json inside the `#hero-anim` placeholder declared in the
+ * landing page's hero frontmatter. Regenerate the JSON with
+ * `python3 scripts/make_hero_lottie.py`.
+ */
+---
+
+<script>
+  import lottie from 'lottie-web/build/player/lottie_light';
+
+  const container = document.getElementById('hero-anim');
+  if (container) {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const anim = lottie.loadAnimation({
+      container,
+      renderer: 'svg',
+      loop: true,
+      autoplay: !reduce,
+      path: `${import.meta.env.BASE_URL}/hero.json`.replace('//', '/'),
+    });
+    // `#frame=N` freezes the animation on one frame (used for screenshots/debugging).
+    const frame = Number(new URLSearchParams(location.hash.slice(1)).get('frame'));
+    const still = reduce ? 300 : Number.isFinite(frame) && frame > 0 ? frame : null;
+    if (still !== null) anim.addEventListener('DOMLoaded', () => anim.goToAndStop(still, true));
+  }
+</script>

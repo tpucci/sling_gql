@@ -1,0 +1,120 @@
+---
+title: Getting started
+description: Add sling_gql to a Flutter app, generate typed accessors from your GraphQL endpoint, and read your first field.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Proof of concept">
+sling_gql is not on pub.dev and only supports **queries** today. You depend on it straight
+from the Git repository. Everything below works against any GraphQL endpoint that allows
+introspection.
+</Aside>
+
+<Steps>
+
+1. **Add the runtime and the generator.**
+
+   ```yaml title="pubspec.yaml"
+   dependencies:
+     sling_gql:
+       git:
+         url: https://github.com/tpucci/sling_gql
+         path: packages/sling_gql
+
+   dev_dependencies:
+     sling_gql_gen:
+       git:
+         url: https://github.com/tpucci/sling_gql
+         path: packages/sling_gql_gen
+   ```
+
+2. **Generate the typed accessors from your endpoint.**
+
+   ```sh
+   dart run sling_gql_gen \
+     --endpoint https://api.example.com/graphql \
+     --out lib/generated/schema.dart
+   ```
+
+   Add `-H "Authorization: Bearer …"` if introspection needs a header, or pass
+   `--schema introspection.json` if you already have the introspection result on disk.
+
+   You get one class per GraphQL type, a constant holder per enum and a Dart class per
+   input object — see [Code generation](/sling_gql/tooling/code-generation/) for the rules.
+   Re-run the command whenever your schema changes; the compiler will tell you what moved.
+
+3. **Create a client and provide it to the tree.**
+
+   ```dart title="lib/main.dart"
+   import 'package:flutter/cupertino.dart';
+   import 'package:sling_gql/sling_gql.dart';
+
+   import 'generated/schema.dart';
+
+   void main() {
+     final client = SlingClient<Query>(
+       endpoint: Uri.parse('https://api.example.com/graphql'),
+       rootFactory: Query.root,
+       headers: {'Authorization': 'Bearer …'},          // optional
+       onOperation: (op) => debugPrint(op.document),    // optional: log every request
+     );
+
+     runApp(SlingScope<Query>(
+       client: client,
+       child: const CupertinoApp(home: HomeScreen()),
+     ));
+   }
+   ```
+
+4. **Read fields inside a `QueryBuilder`.**
+
+   ```dart title="lib/home_screen.dart"
+   class HomeScreen extends StatelessWidget {
+     const HomeScreen({super.key});
+
+     @override
+     Widget build(BuildContext context) {
+       return QueryBuilder<Query>(
+         builder: (context, query, state) {
+           final launch = query.latestLaunch;
+           return CupertinoPageScaffold(
+             child: Center(
+               child: Text('${launch?.name ?? '…'} on ${launch?.rocket?.name ?? '…'}'),
+             ),
+           );
+         },
+       );
+     }
+   }
+   ```
+
+   That is the whole integration. There is no query document anywhere in your code: the
+   first build records `latestLaunch { name rocket { name } }`, sling_gql sends it once the
+   frame is done, the cache fills, and the builder runs again with real values.
+
+5. **Handle loading and errors where you need to.**
+
+   ```dart
+   builder: (context, query, state) {
+     if (state.error != null) {
+       return ErrorView(error: state.error!, onRetry: state.refetch);
+     }
+     final launch = query.latestLaunch;
+     return Stack(children: [
+       LaunchCard(launch),                             // renders skeletons while null
+       if (state.isLoading) const CupertinoActivityIndicator(),
+     ]);
+   }
+   ```
+
+</Steps>
+
+## Where to go next
+
+- [Querying data](/sling_gql/guides/querying/) — arguments, lists, nesting, and what each
+  read becomes on the wire.
+- [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/) — the one habit to
+  build: read every field you will need at the top of `build()`.
+- [Example app](/sling_gql/tooling/example-app/) — a complete iOS app against the bundled
+  mock API, with a test that asserts request counts.

@@ -1,0 +1,89 @@
+---
+title: Working on the repo
+description: Toolchains, packages, tests and the mock API — everything you need to hack on sling_gql itself.
+---
+
+import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
+
+<FileTree>
+- sling_gql/
+  - .tool-versions  flutter 3.47 · nodejs 24 (asdf)
+  - packages/
+    - sling_gql/  runtime — Accessor, Selection, Cache, SlingClient, QueryBuilder
+    - sling_gql_gen/  generator — introspection JSON → Dart
+  - mock-api/  graphql-yoga server the example and its tests run against
+  - example/  iOS-only Flutter app
+  - website/  this site (Astro + Starlight)
+  - AGENTS.md  conventions and design decisions, read it first
+</FileTree>
+
+<Steps>
+
+1. **Install the toolchains.** Flutter and Node are pinned with asdf; run every command
+   from inside the repo so the pins apply.
+
+   ```sh
+   git clone https://github.com/tpucci/sling_gql && cd sling_gql
+   asdf install
+   ```
+
+2. **Start the mock API.** Space-themed, ~180 launches, cursor and offset pagination,
+   400 ms of artificial latency so skeletons are visible.
+
+   ```sh
+   cd mock-api && npm install && npm start
+   # → http://localhost:4000/graphql  (GraphiQL)
+   ```
+
+3. **Run the tests.**
+
+   ```sh
+   cd packages/sling_gql && flutter test        # runtime, pure Dart + widget tests
+   cd ../sling_gql_gen  && dart test            # generator
+   cd ../../example     && flutter test         # e2e against the running mock API
+   ```
+
+   The example test asserts **exact request counts** after each interaction. It is the one
+   test that catches waterfalls — keep it exact.
+
+4. **Run the example.**
+
+   ```sh
+   cd example && flutter run -d <ios-simulator-id>
+   ```
+
+   Every request is printed to the console and listed in-app (antenna icon).
+
+5. **Change the schema.** `mock-api/schema.graphql` is the contract; everything else is
+   derived from it.
+
+   ```sh
+   cd mock-api && npm run introspect          # → example/graphql/schema.json
+   cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
+     --schema graphql/schema.json --out lib/generated/schema.dart
+   ```
+
+6. **Work on the website.**
+
+   ```sh
+   cd website && npm install && npm run dev   # http://localhost:4321/sling_gql/
+   ```
+
+   It deploys to GitHub Pages on every push to `main` that touches `website/`.
+
+</Steps>
+
+## Conventions
+
+- Runtime stays dependency-light: `package:http` only. No `gql`, no `ferry`, no `build_runner`.
+- Every runtime behaviour change ships with a test in `packages/sling_gql/test`, using
+  `MockClient` from `package:http/testing.dart` rather than the network.
+- The hand-written accessor classes at the top of `packages/sling_gql/test/core_test.dart`
+  are the contract the generator must produce. Change both together.
+- `example/lib/generated/schema.dart` is committed and never edited by hand.
+- In example widgets, read every field you will need at the top of `build()`, into locals.
+
+<Aside type="note">
+`AGENTS.md` at the repository root holds the same conventions in a form meant for coding
+agents, plus the reasoning behind each design decision.
+</Aside>

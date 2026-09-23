@@ -1,0 +1,227 @@
+---
+title: Mock API
+description: The graphql-yoga server every guide and the example app run against — why it exists, how to run it, and what it serves.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+Every code sample and the example app in this repo talk to `mock-api/`, a
+small [graphql-yoga](https://the-guild.dev/graphql/yoga-server) server with a
+fixed, seeded dataset of a launch company, its rockets, launchpads,
+astronauts and ~180 launches. No database, no external network calls.
+
+## Why a mock API
+
+sling_gql started as a port of the public SpaceX GraphQL API, which is the
+schema `sling_gql_gen`'s tests were originally verified against. That public
+API was down while this PoC was being built, so the project grew its own
+server with the same shape of data instead of blocking on someone else's
+uptime. It's also just more convenient for a PoC: deterministic data,
+adjustable latency, and no rate limits.
+
+## Run it
+
+```sh title="mock-api/"
+cd mock-api
+npm install
+npm start        # or: npm run dev  (restarts on file change)
+```
+
+```
+Mock GraphQL API ready at http://0.0.0.0:4000/graphql
+Artificial latency: 400ms per request
+```
+
+Open [http://localhost:4000/graphql](http://localhost:4000/graphql) for
+GraphiQL. The iOS simulator shares the host network, so the example app
+reaches the same `localhost:4000` unchanged.
+
+### Env vars
+
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `4000` | HTTP port, bound on `0.0.0.0`. |
+| `LATENCY_MS` | `400` | Artificial delay awaited once per HTTP request (not per field). |
+
+Turn latency up to actually *see* skeleton placeholders instead of a flash;
+turn it down (`LATENCY_MS=0`) to make widget tests fast.
+
+Every completed operation is logged to stdout as one line, root fields only:
+
+```
+[14:03:21] query launches, stats  (401ms)
+```
+
+<Aside type="note">
+`schema.graphql` is loaded from disk at server start (`readFileSync`) — it is
+never generated. It's the one hand-written contract in the whole pipeline;
+everything else (introspection JSON, generated Dart) is derived from it.
+</Aside>
+
+## Example queries
+
+Cursor-paginated launches, newest first:
+
+```graphql
+{
+  launches(first: 5) {
+    totalCount
+    pageInfo { hasNextPage endCursor }
+    nodes { flightNumber name date status rocket { name } }
+  }
+}
+```
+
+The same data through offset pagination, filtered and explicitly ordered:
+
+```graphql
+{
+  launchesPage(
+    limit: 10
+    offset: 0
+    filter: { status: SUCCESS, year: 2022 }
+    orderBy: NAME_ASC
+  ) {
+    name
+    status
+    date
+  }
+}
+```
+
+Nested cursor pagination — a rocket's own launch history:
+
+```graphql
+{
+  rocket(id: "rocket-falcon") {
+    name
+    launches(first: 5) {
+      totalCount
+      nodes { name date status }
+    }
+  }
+}
+```
+
+`Query` in full, so you know what's available:
+
+```graphql title="mock-api/schema.graphql"
+type Query {
+  company: Company!
+  "Relay-style cursor pagination."
+  launches(first: Int = 20, after: String, filter: LaunchFilter, orderBy: LaunchOrder = DATE_DESC): LaunchConnection!
+  "Classic offset pagination over the same data."
+  launchesPage(limit: Int = 20, offset: Int = 0, filter: LaunchFilter, orderBy: LaunchOrder = DATE_DESC): [Launch!]!
+  launch(id: ID!): Launch
+  nextLaunch: Launch
+  latestLaunch: Launch
+  rockets: [Rocket!]!
+  rocket(id: ID!): Rocket
+  launchpads: [Launchpad!]!
+  astronauts(first: Int = 20, after: String): AstronautConnection!
+  astronaut(id: ID!): Astronaut
+  stats: Stats!
+}
+```
+
+`nextLaunch` and `latestLaunch` are computed relative to real time, not
+stored: `nextLaunch` is the soonest launch with `upcoming: true`,
+`latestLaunch` the most recent one with `upcoming: false`. `stats`
+aggregates over every launch (total count, success rate, a per-year
+histogram) — it powers the header on the example app's list screen.
+
+The `LaunchFilter` input used by both pagination styles:
+
+```graphql title="mock-api/schema.graphql"
+input LaunchFilter {
+  status: LaunchStatus
+  rocketId: ID
+  year: Int
+  upcoming: Boolean
+  "Case-insensitive substring match on name and details."
+  search: String
+}
+```
+
+Filtering, ordering and pagination run in plain JavaScript over the
+in-memory array (`resolvers.mjs`). Page sizes are clamped to `[1, 100]`
+regardless of what a client asks for. Cursors are base64-encoded offsets
+(`cursor:<index>`) — opaque to clients, easy to read in the resolver code.
+
+## Mutations and subscriptions
+
+Wired up in the schema and resolvers, not yet consumed by the runtime or the
+example app — sling_gql is queries-only for now (see
+[Roadmap](/sling_gql/internals/roadmap/)). They exist so that phase has
+something real to build against:
+
+```graphql
+mutation {
+  toggleFavorite(launchId: "launch-1") { id favorite }
+}
+```
+
+```graphql
+subscription {
+  launchScheduled { id name status }
+}
+```
+
+The other two mutations are `scheduleLaunch(input: ScheduleLaunchInput!)` and
+`updateLaunchStatus(id: ID!, status: LaunchStatus!)`; the other subscription
+is `launchStatusChanged`. Both mutations that change a launch also publish to
+the matching subscription topic through graphql-yoga's `createPubSub`.
+
+## The dataset
+
+Generated once at process start from a seeded PRNG (`mulberry32`, seed
+`0xc0ffee`) in `data.mjs`, so ids and content are stable across restarts:
+
+- 1 company, 5 rockets (one per `RocketFamily`), 4 launchpads, 24 astronauts
+- ~181 launches spread from 2010 through a few years out, of which about 15
+  are always in the future (`upcoming: true`, status `SCHEDULED` or
+  `SCRUBBED`)
+
+The only thing that changes between restarts is which launches count as past
+vs. upcoming, since that's computed relative to `Date.now()` rather than
+stored — everything else is deterministic.
+
+## Regenerating the introspection snapshot
+
+The example app's `graphql/schema.json` — the input to `sling_gql_gen` — is
+a snapshot, not fetched live:
+
+```sh
+cd mock-api && npm run introspect
+```
+
+This imports the executable schema directly (no server needs to be running)
+and overwrites `../example/graphql/schema.json`. Run it any time
+`schema.graphql` changes.
+
+## Evolving the schema
+
+<Steps>
+
+1. **Edit `mock-api/schema.graphql`.** It's the one source of truth for
+   shape — add the field, type, or resolver logic (`resolvers.mjs`) you need.
+
+2. **Re-run introspection** to refresh `example/graphql/schema.json`:
+
+   ```sh
+   cd mock-api && npm run introspect
+   ```
+
+3. **Regenerate the Dart accessors** — see
+   [Code generation](/sling_gql/tooling/code-generation/):
+
+   ```sh
+   cd example
+   dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
+     --schema graphql/schema.json --out lib/generated/schema.dart
+   ```
+
+4. **Re-run the example's widget tests**, which hit the running server and
+   assert exact request counts — see [Example app](/sling_gql/tooling/example-app/).
+
+</Steps>

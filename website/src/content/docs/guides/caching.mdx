@@ -1,0 +1,94 @@
+---
+title: Caching
+description: The path-addressed cache the PoC ships with, optimistic writes, and the normalized cache it is designed to grow into.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The cache is the API
+
+There is no "response object" in sling_gql. Widgets read the cache, always. A fetch is just
+a way of filling it. This is what makes optimistic updates trivial and what will make
+normalization powerful — but it also means you should understand its shape.
+
+## Shape: a tree keyed by alias
+
+The cache is one nested `Map`/`List` tree per operation type, keyed by the **alias** the
+selection printer produced — the field name, plus a hash of the arguments when there are
+any:
+
+```json title="client.cache.snapshot"
+{
+  "query": {
+    "company": { "__typename": "Company", "name": "Sling Space", "ceo": "Alex Corren" },
+    "stats": { "__typename": "Stats", "totalLaunches": 181, "successRatePct": 89.8 },
+    "launches_1qouruf": {
+      "__typename": "LaunchConnection",
+      "nodes": [
+        { "__typename": "Launch", "id": "launch-181", "name": "Crew-5", "rocket": { "__typename": "Rocket", "name": "Starship" } }
+      ],
+      "pageInfo": { "__typename": "PageInfo", "hasNextPage": true, "endCursor": "Y3Vyc29yOjE5" },
+      "totalCount": 181
+    },
+    "launch_18di94z": { "__typename": "Launch", "id": "launch-181", "name": "Crew-5", "details": "…" }
+  }
+}
+```
+
+Every `Accessor` is a `(selection node, cache path)` pair — `["launches_1qouruf", "nodes", 0, "rocket"]`
+for the rocket of the first row. Reads walk the path; a missing key returns the `missing`
+sentinel, which is what triggers a fetch.
+
+## Writes deep-merge
+
+Responses are **merged**, not replaced. Widget A fetching `company { name }` and widget B
+fetching `company { ceo }` — in different frames — end up with one `company` object
+holding both. Lists merge element-wise by index.
+
+## Optimistic writes
+
+Every scalar field has a generated setter that writes to the cache and notifies scopes
+whose root fields were touched:
+
+```dart
+launch.name = '${launch.name} ✨';
+```
+
+That is the whole optimistic-update story for now. When mutations land, the pattern will be:
+write optimistically, send the mutation, let the response overwrite, refetch on
+error.
+
+<Aside type="caution" title="Writes are path-local today">
+Setting `launch.name` on the detail screen's `launch_18di94z` does **not** update
+`launches_1qouruf.nodes[0].name`, even though both are `launch-181`. That is the cost of a
+non-normalized cache, and the first thing on the roadmap.
+</Aside>
+
+## Notification granularity
+
+When a response is merged, the client collects the **root aliases** that were written and
+rebuilds every scope whose last selection touched one of them. This is coarse — a detail
+screen refetch rebuilds the list too if both read `launches_x` — but correct, and cheap
+enough for the PoC. Per-leaf-path subscriptions are a planned refinement.
+
+## Normalization (next)
+
+The design leaves room for a normalized layer without changing the accessor API:
+
+1. On write, objects with `__typename` and `id` are stored once in an entity map
+   (`Launch:launch-181`) and referenced from the tree.
+2. Reads resolve references transparently — the path walk stays the same.
+3. Notification becomes per-entity: a mutation returning `Launch:launch-181` rebuilds every
+   scope that read *any* copy of it.
+
+The mock API's `toggleFavorite`, `updateLaunchStatus` and `launchStatusChanged`
+subscription exist precisely to exercise this.
+
+## Not in the PoC
+
+- **Expiry / stale-while-revalidate.** Dart has `WeakReference` and `Finalizer`, so stale
+  entries can be held weakly and evicted by the GC rather than by timers alone.
+- **Persistence.** `Cache.snapshot` is plain JSON-able data; hydrating `Cache(initial)`
+  is already supported, serialization is left to you.
+- **Cache policies** (`cache-first`, `no-cache`…). Today: cache-first, with `refetch()` as
+  the escape hatch.
