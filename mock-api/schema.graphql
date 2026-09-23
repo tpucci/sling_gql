@@ -1,0 +1,225 @@
+"""ISO-8601 timestamp, e.g. 2024-03-14T13:30:00.000Z"""
+scalar DateTime
+
+enum LaunchStatus {
+  SCHEDULED
+  SUCCESS
+  FAILURE
+  PARTIAL_FAILURE
+  SCRUBBED
+}
+
+enum LaunchOrder {
+  DATE_ASC
+  DATE_DESC
+  NAME_ASC
+}
+
+enum RocketFamily {
+  FALCON
+  STARSHIP
+  ATLAS
+  ARIANE
+  VULCAN
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+type Address {
+  street: String!
+  city: String!
+  state: String!
+  country: String!
+}
+
+type Company {
+  id: ID!
+  name: String!
+  founder: String!
+  founded: Int!
+  employees: Int!
+  ceo: String!
+  valuation: Float!
+  summary: String!
+  headquarters: Address!
+}
+
+type Dimension {
+  meters: Float!
+  feet: Float!
+}
+
+type Mass {
+  kg: Int!
+  lb: Int!
+}
+
+type Engine {
+  count: Int!
+  type: String!
+  propellant: String!
+  thrustSeaLevelKN: Float!
+  thrustVacuumKN: Float!
+}
+
+type Rocket {
+  id: ID!
+  name: String!
+  family: RocketFamily!
+  description: String!
+  active: Boolean!
+  stages: Int!
+  costPerLaunch: Int!
+  successRatePct: Int!
+  firstFlight: DateTime!
+  height: Dimension!
+  diameter: Dimension!
+  mass: Mass!
+  engines: Engine!
+  wikipedia: String
+  "Launches flown by this rocket, newest first (nested cursor pagination)."
+  launches(first: Int = 10, after: String): LaunchConnection!
+}
+
+type Launchpad {
+  id: ID!
+  name: String!
+  fullName: String!
+  locality: String!
+  region: String!
+  latitude: Float!
+  longitude: Float!
+  status: String!
+  launchAttempts: Int!
+  launchSuccesses: Int!
+}
+
+type Astronaut {
+  id: ID!
+  name: String!
+  nationality: String!
+  agency: String!
+  bio: String!
+  flights: Int!
+  missions: [Launch!]!
+}
+
+type Payload {
+  id: ID!
+  name: String!
+  type: String!
+  massKg: Float
+  orbit: String!
+  customers: [String!]!
+}
+
+type Links {
+  article: String
+  video: String
+  wikipedia: String
+  patch: String
+  flickrImages: [String!]!
+}
+
+type Launch {
+  id: ID!
+  flightNumber: Int!
+  name: String!
+  details: String
+  date: DateTime!
+  status: LaunchStatus!
+  upcoming: Boolean!
+  rocket: Rocket!
+  launchpad: Launchpad!
+  payloads: [Payload!]!
+  crew: [Astronaut!]!
+  links: Links!
+  "Client-side favourite flag, toggled via Mutation.toggleFavorite."
+  favorite: Boolean!
+}
+
+type LaunchEdge {
+  cursor: String!
+  node: Launch!
+}
+
+type LaunchConnection {
+  edges: [LaunchEdge!]!
+  nodes: [Launch!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type AstronautEdge {
+  cursor: String!
+  node: Astronaut!
+}
+
+type AstronautConnection {
+  edges: [AstronautEdge!]!
+  nodes: [Astronaut!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input LaunchFilter {
+  status: LaunchStatus
+  rocketId: ID
+  year: Int
+  upcoming: Boolean
+  "Case-insensitive substring match on name and details."
+  search: String
+}
+
+type YearCount {
+  year: Int!
+  count: Int!
+}
+
+type Stats {
+  totalLaunches: Int!
+  successRatePct: Float!
+  launchesPerYear: [YearCount!]!
+}
+
+type Query {
+  company: Company!
+  "Relay-style cursor pagination."
+  launches(first: Int = 20, after: String, filter: LaunchFilter, orderBy: LaunchOrder = DATE_DESC): LaunchConnection!
+  "Classic offset pagination over the same data."
+  launchesPage(limit: Int = 20, offset: Int = 0, filter: LaunchFilter, orderBy: LaunchOrder = DATE_DESC): [Launch!]!
+  launch(id: ID!): Launch
+  nextLaunch: Launch
+  latestLaunch: Launch
+  rockets: [Rocket!]!
+  rocket(id: ID!): Rocket
+  launchpads: [Launchpad!]!
+  astronauts(first: Int = 20, after: String): AstronautConnection!
+  astronaut(id: ID!): Astronaut
+  stats: Stats!
+}
+
+input ScheduleLaunchInput {
+  name: String!
+  rocketId: ID!
+  launchpadId: ID!
+  date: DateTime!
+  details: String
+  payloadNames: [String!]
+}
+
+type Mutation {
+  toggleFavorite(launchId: ID!): Launch!
+  scheduleLaunch(input: ScheduleLaunchInput!): Launch!
+  updateLaunchStatus(id: ID!, status: LaunchStatus!): Launch!
+}
+
+type Subscription {
+  launchStatusChanged: Launch!
+  launchScheduled: Launch!
+}

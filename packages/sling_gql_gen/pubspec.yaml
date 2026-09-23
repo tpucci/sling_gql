@@ -1,0 +1,17 @@
+name: sling_gql_gen
+description: >-
+  Code generator for sling_gql: turns a GraphQL introspection JSON into typed
+  Accessor classes matching the sling_gql runtime contract.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  args: ^2.5.0
+  path: ^1.9.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^5.0.0
