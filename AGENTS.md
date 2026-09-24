@@ -1,6 +1,7 @@
 # AGENTS.md — sling_gql
 
-GQty-style GraphQL client for Flutter, **proof of concept, queries only**.
+GQty-style GraphQL client for Flutter, **proof of concept** (queries,
+normalized cache, mutations; no subscriptions yet).
 Read `README.md` first for the user-facing picture; this file is for working
 on the code.
 
@@ -123,18 +124,7 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 
 ## Known gaps / next steps
 
-1. ~~Normalized cache~~ done. Follow-ups: type policies (custom merge per
-   field, connection merging), automatic `gc()`.
-2. `maxAge` / stale-while-revalidate; persistence adapters as separate
-   packages on top of `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`.
-3. ~~Mutations~~ done. Subscriptions next (the mock API exposes two SSE
-   subscriptions). Follow-ups for mutations: write policies for create/delete
-   (prepend a ref to a list), `refetchQueries` sugar, and **list membership
-   after a mutation** (add/remove a `Ref` in a cached list so `me.favorites`
-   and `launches(filter: {favorite: true})` reflect `toggleFavorite` without
-   a full refetch).
-4. Unions/interfaces via `$on` (add one to `mock-api/schema.graphql` first;
-   the generator currently skips none because there are none).
-5. ~~Finer-grained rebuild~~ per `entity.field` now; list-index granularity
-   for inline lists remains.
-6. Dev overlay: which widget caused which request.
+The backlog lives in **`TODO.md`** (numbered, prioritised, single source of
+truth — the website roadmap is folded into it). Pick items by number; strike
+them there when done and keep `website/src/content/docs/internals/roadmap.mdx`
+in sync for the user-facing summary.

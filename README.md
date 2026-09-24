@@ -129,4 +129,5 @@ cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
   40 types, fully static and tree-shakeable; sound null safety makes the
   "maybe not fetched yet" state explicit instead of lying like TS types do.
 
-See `AGENTS.md` for the design decisions and the list of known gaps.
+See `AGENTS.md` for the design decisions and `TODO.md` for the numbered
+backlog (roadmap, DX findings, performance follow-ups).
