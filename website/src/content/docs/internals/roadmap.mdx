@@ -11,11 +11,12 @@ phases 2 and 3.
 
 <Steps>
 
-1. **Normalized cache**
+1. **Normalized cache** — done
 
-   Store objects with `__typename` + `id` once, reference them from the tree, notify
-   scopes per entity. Unlocks: no double fetch across paths, mutations updating lists,
-   subscriptions updating everything. Config: `Cache(normalization: true | Normalization(identity: …))`.
+   Objects with `__typename` + `id` are stored once, referenced from the tree, and scopes
+   are notified per entity field. `launch(id:)` is served from the entity the list wrote.
+   See [Caching](/sling_gql/guides/caching/). Left for later: type policies (custom merge
+   per field, connection merging) and automatic `gc()`.
 
 2. **Mutations**
 
@@ -35,10 +36,11 @@ phases 2 and 3.
    Generator emits `PetOn get $on` with one getter per possible type; printer emits inline
    fragments `... on Cat { meows }`. Add a union to the mock schema first.
 
-5. **Fine-grained rebuilds**
+5. **Fine-grained rebuilds** — mostly done
 
-   Replace root-alias intersection with per-path (or per-entity) subscriptions so a
-   detail refetch does not rebuild an unrelated list.
+   Scopes now rebuild on `entity.field` intersection instead of root aliases. Remaining:
+   list-index granularity for inline lists, and skipping rebuilds when a written value is
+   equal to the cached one inside inline objects.
 
 6. **Cache expiry and SWR**
 

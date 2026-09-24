@@ -1,4 +1,4 @@
-import 'cache.dart';
+import 'cache/cache.dart';
 import 'selection.dart';
 
 /// The sink that accessors report to while a build is being recorded.
@@ -15,13 +15,18 @@ abstract class Recorder {
 
   Cache get cache;
 
+  /// Dependency keys (`entity.field`) read so far in the current scope.
+  /// Filled by the cache on every read; used to decide which scopes to
+  /// rebuild when data changes.
+  Set<String> get deps;
+
   /// Called when a field was read but is not in the cache. For object and
   /// list fields the node itself is reported (its children come as the
   /// skeleton accessors are read).
   void onMiss(Selection leaf);
 
   /// Called on optimistic writes so dependants can be re-rendered.
-  void onWrite(Set<String> touchedRootAliases);
+  void onWrite(Set<String> touched);
 }
 
 /// Base class for all generated schema types.
@@ -41,12 +46,15 @@ abstract class Accessor {
   /// This object's node in the selection tree.
   final Selection selection;
 
-  /// This object's location in the cache (aliases and list indices).
+  /// This object's location in the cache: aliases and list indices, walked
+  /// from the operation root — or from an entity when the first element is a
+  /// [Ref] (see `lookup` on [object]).
   final List<Object> path;
 
   /// True when this object does not exist in cache yet (skeleton state):
   /// every scalar read returns `null` and records a miss.
-  bool get isSkeleton => recorder.cache.read(recorder.operation, path) == missing;
+  bool get isSkeleton =>
+      recorder.cache.read(recorder.operation, path, deps: recorder.deps) == missing;
 
   /// The `__typename` of the cached object, if any.
   String? get $typename => scalar<String>('__typename');
@@ -58,11 +66,15 @@ abstract class Accessor {
   Selection _select(String field, Map<String, Arg>? args) =>
       selection.child(field, args ?? const {});
 
-  Selection _selectObject(String field, Map<String, Arg>? args) =>
-      selection.objectChild(field, args ?? const {});
+  Selection _selectObject(String field, Map<String, Arg>? args, bool keyed) =>
+      selection.objectChild(
+        field,
+        args ?? const {},
+        keyed ? recorder.cache.normalization.selectedKeyField : null,
+      );
 
-  Object? _read(Selection sel) =>
-      recorder.cache.read(recorder.operation, [...path, sel.alias]);
+  Object? _read(Selection sel) => recorder.cache
+      .read(recorder.operation, [...path, sel.alias], deps: recorder.deps);
 
   /// Reads a scalar field. Returns `null` (and records a miss) when not cached.
   T? scalar<T>(String field, {Map<String, Arg>? args}) {
@@ -89,15 +101,31 @@ abstract class Accessor {
 
   /// Reads an object field. Returns a skeleton accessor when not cached,
   /// `null` only when the server explicitly returned `null`.
+  ///
+  /// [keyed] marks the returned type as a normalizable entity (its key field
+  /// is always selected). [lookup] names the entity type a by-id field
+  /// resolves to (`launch(id:)` → `Launch`): when the field itself is not
+  /// cached but the entity is, the accessor is redirected to the entity so no
+  /// request is made for data already fetched through another path.
   R? object<R extends Accessor>(
     String field,
     R Function(Recorder, Selection, List<Object>) ctor, {
     Map<String, Arg>? args,
+    bool keyed = false,
+    String? lookup,
   }) {
-    final sel = _selectObject(field, args);
+    final sel = _selectObject(field, args, keyed || lookup != null);
     final value = _read(sel);
     if (value == null) return null; // explicit null from the server
-    if (value == missing) recorder.onMiss(sel); // skeleton
+    if (value == missing) {
+      if (lookup != null) {
+        final key = recorder.cache.normalization.lookup(lookup, sel.args);
+        if (key != null && recorder.cache.hasEntity(key)) {
+          return ctor(recorder, sel, [Ref(key)]);
+        }
+      }
+      recorder.onMiss(sel); // skeleton
+    }
     // Either cached object or `missing` → skeleton; both read through the cache.
     return ctor(recorder, sel, [...path, sel.alias]);
   }
@@ -108,8 +136,9 @@ abstract class Accessor {
     String field,
     R Function(Recorder, Selection, List<Object>) ctor, {
     Map<String, Arg>? args,
+    bool keyed = false,
   }) {
-    final sel = _selectObject(field, args);
+    final sel = _selectObject(field, args, keyed);
     final value = _read(sel);
     if (value == missing) {
       recorder.onMiss(sel);

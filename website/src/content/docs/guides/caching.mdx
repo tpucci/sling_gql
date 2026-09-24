@@ -1,6 +1,6 @@
 ---
 title: Caching
-description: The path-addressed cache the PoC ships with, optimistic writes, and the normalized cache it is designed to grow into.
+description: The normalized, entity-keyed in-memory cache, how reads follow references, per-field notifications, optimistic writes, eviction and the persistence hooks.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -8,87 +8,145 @@ import { Aside } from '@astrojs/starlight/components';
 ## The cache is the API
 
 There is no "response object" in sling_gql. Widgets read the cache, always. A fetch is just
-a way of filling it. This is what makes optimistic updates trivial and what will make
+a way of filling it. This is what makes optimistic updates trivial and what makes
 normalization powerful — but it also means you should understand its shape.
 
-## Shape: a tree keyed by alias
+## Shape: entities, with the roots as entities too
 
-The cache is one nested `Map`/`List` tree per operation type, keyed by the **alias** the
-selection printer produced — the field name, plus a hash of the arguments when there are
-any:
+The cache is a flat map of **entities**. Every object the response contains that has a
+`__typename` and an `id` is stored once, under `Typename:id`, and referenced from wherever
+it appeared. Objects without an id (`Stats`, `PageInfo`, `Company` here) stay **inline** in
+their parent. The operation roots are entities like any other (`ROOT_QUERY`, `ROOT_MUTATION`):
 
 ```json title="client.cache.snapshot"
 {
-  "query": {
+  "ROOT_QUERY": {
     "company": { "__typename": "Company", "name": "Sling Space", "ceo": "Alex Corren" },
     "stats": { "__typename": "Stats", "totalLaunches": 181, "successRatePct": 89.8 },
     "launches_1qouruf": {
       "__typename": "LaunchConnection",
-      "nodes": [
-        { "__typename": "Launch", "id": "launch-181", "name": "Crew-5", "rocket": { "__typename": "Rocket", "name": "Starship" } }
-      ],
+      "nodes": [ { "__ref": "Launch:launch-181" }, { "__ref": "Launch:launch-180" } ],
       "pageInfo": { "__typename": "PageInfo", "hasNextPage": true, "endCursor": "Y3Vyc29yOjE5" },
       "totalCount": 181
     },
-    "launch_18di94z": { "__typename": "Launch", "id": "launch-181", "name": "Crew-5", "details": "…" }
+    "launch_18di94z": { "__ref": "Launch:launch-181" }
+  },
+  "Launch:launch-181": {
+    "__typename": "Launch", "id": "launch-181", "name": "Crew-5",
+    "rocket": { "__ref": "Rocket:starship" }, "details": "…"
+  },
+  "Rocket:starship": { "__typename": "Rocket", "id": "starship", "name": "Starship" }
+}
+```
+
+Field keys are still the selection **alias** (field name + hash of the arguments), so a
+response merges without any lookup table. Every `Accessor` is a `(selection node, cache
+path)` pair — `["launches_1qouruf", "nodes", 0, "rocket"]` for the rocket of the first row.
+`read` walks the path and **derefs a `Ref` transparently** whenever it meets one; the
+generated code never sees references. A path may also start with a `Ref` to address an
+entity directly: `["Launch:launch-181" as Ref, "name"]`.
+
+## Identity: where the `id` comes from
+
+Normalization only works if `id` is actually in the response. The generator knows which
+object types have an `id` field and emits `keyed: true` on every field returning one
+(`object('rocket', Rocket.new, keyed: true)`). The runtime then prints `id` next to
+`__typename` in every such selection — you never select it by hand:
+
+```graphql
+launches(first: $v0) {
+  __typename
+  nodes {
+    __typename
+    id          # added automatically: Launch is keyed
+    name
   }
 }
 ```
 
-Every `Accessor` is a `(selection node, cache path)` pair — `["launches_1qouruf", "nodes", 0, "rocket"]`
-for the rocket of the first row. Reads walk the path; a missing key returns the `missing`
-sentinel, which is what triggers a fetch.
+`Normalization(keyField: 'uuid')` changes the field name (pass `--key-field uuid` to the
+generator too); `Normalization(identify: (obj) => …)` replaces the whole rule;
+`Normalization.none` turns it off and gives you the old path-addressed behaviour.
 
-## Writes deep-merge
+## Lookups: `launch(id:)` is served from the entity
 
-Responses are **merged**, not replaced. Widget A fetching `company { name }` and widget B
-fetching `company { ceo }` — in different frames — end up with one `company` object
-holding both. Lists merge element-wise by index.
+A root field whose only argument is the key and which returns a keyed type
+(`launch(id: ID!): Launch`) is emitted with `lookup: 'Launch'`. When `launch_18di94z` is not
+in `ROOT_QUERY` yet but `Launch:launch-181` exists, the accessor is redirected to the
+entity. Fields the entity already has are read from cache; fields it lacks miss
+individually and are fetched — **only those**:
+
+```graphql title="Detail screen opened after the list"
+query ($v0: ID!) {
+  launch_18di94z: launch(id: $v0) {
+    __typename
+    id
+    details        # not in the list → fetched
+    flightNumber   # not in the list → fetched
+    # name, date, status, rocket { name } came from the list's entities
+  }
+}
+```
+
+That is the "no double fetch across paths" property; `example/test/app_test.dart` asserts
+it on the real request.
+
+## Writes: entities merge, lists are replaced
+
+Responses are **merged**, not replaced, at the entity level: widget A fetching
+`me { name }` and widget B fetching `me { age }` end up with one `User:1` holding both.
+A list of references is replaced wholesale by the incoming list (there is nothing to merge
+element-wise — the elements themselves merge as entities). Inline objects deep-merge as
+before, and inline lists still merge by index.
+
+Entities that a replaced list no longer references are **not** removed automatically;
+`cache.gc()` sweeps everything unreachable from the roots and returns the keys it dropped.
 
 ## Optimistic writes
 
-Every scalar field has a generated setter that writes to the cache and notifies scopes
-whose root fields were touched:
+Every scalar field has a generated setter that writes to the cache:
 
 ```dart
 launch.name = '${launch.name} ✨';
 ```
 
-That is the whole optimistic-update story for now. When mutations land, the pattern will be:
-write optimistically, send the mutation, let the response overwrite, refetch on
-error.
+Because there is one `Launch:launch-181`, setting `name` on the detail screen **updates the
+list row too**. When mutations land, the pattern will be: write optimistically, send the
+mutation, let the response overwrite, refetch on error.
 
-<Aside type="caution" title="Writes are path-local today">
-Setting `launch.name` on the detail screen's `launch_18di94z` does **not** update
-`launches_1qouruf.nodes[0].name`, even though both are `launch-181`. That is the cost of a
-non-normalized cache, and the first thing on the roadmap.
-</Aside>
+## Eviction
 
-## Notification granularity
+`cache.evict('Launch:launch-181')` removes the entity, drops it from every list that
+referenced it, and blanks object fields that pointed at it so they read as `missing` and
+get re-fetched on the next build. That is the primitive a `deleteLaunch` mutation will use.
 
-When a response is merged, the client collects the **root aliases** that were written and
-rebuilds every scope whose last selection touched one of them. This is coarse — a detail
-screen refetch rebuilds the list too if both read `launches_x` — but correct, and cheap
-enough for the PoC. Per-leaf-path subscriptions are a planned refinement.
+## Notification: per entity field
 
-## Normalization (next)
+Every read records the **dependency keys** it traversed — `ROOT_QUERY.launches_1qouruf`,
+`Launch:launch-181.name` — on the scope that made it (`entity.field`, see `depKey`). Every
+write returns the keys it touched. A scope rebuilds when the two intersect, so:
 
-The design leaves room for a normalized layer without changing the accessor API:
+- a mutation returning `Launch:launch-181 { status }` rebuilds the list row *and* the detail
+  screen, but not a widget that only read the launch's `name`;
+- the detail screen's fetch does not rebuild the header that reads `company`.
 
-1. On write, objects with `__typename` and `id` are stored once in an entity map
-   (`Launch:launch-181`) and referenced from the tree.
-2. Reads resolve references transparently — the path walk stays the same.
-3. Notification becomes per-entity: a mutation returning `Launch:launch-181` rebuilds every
-   scope that read *any* copy of it.
+This is what replaced the coarse root-alias intersection of the first PoC iteration.
 
-The mock API's `toggleFavorite`, `updateLaunchStatus` and `launchStatusChanged`
-subscription exist precisely to exercise this.
+## Persistence hooks
+
+Reads are synchronous — they happen inside `build()` — so the store is in memory and stays
+in this package. What a persistence layer needs is exposed and deliberately small:
+
+- `cache.snapshot` — a JSON-able deep copy (refs as `{"__ref": key}`), and
+  `Cache(initial: json)` to hydrate it back;
+- `cache.onChange` — a `Stream<Set<String>>` of touched dependency keys after every write,
+  for write-behind persistence (`sqlite`, `hive`, a file — as separate packages).
 
 ## Not in the PoC
 
 - **Expiry / stale-while-revalidate.** Dart has `WeakReference` and `Finalizer`, so stale
   entries can be held weakly and evicted by the GC rather than by timers alone.
-- **Persistence.** `Cache.snapshot` is plain JSON-able data; hydrating `Cache(initial)`
-  is already supported, serialization is left to you.
 - **Cache policies** (`cache-first`, `no-cache`…). Today: cache-first, with `refetch()` as
   the escape hatch.
+- **Type policies** beyond identity (custom merge functions per field, pagination merging
+  à la Apollo `relayStylePagination`).

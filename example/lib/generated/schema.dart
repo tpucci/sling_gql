@@ -7,7 +7,7 @@ class Query extends Accessor {
   Query(super.recorder, super.selection, super.path);
   Query.root(Recorder r) : super(r, r.root, const []);
 
-  Company? get company => object('company', Company.new);
+  Company? get company => object('company', Company.new, keyed: true);
 
   /// Relay-style cursor pagination.
   LaunchConnection? launches({
@@ -41,22 +41,36 @@ class Query extends Accessor {
       'filter': Arg('LaunchFilter', filter?.toJson()),
       'orderBy': Arg('LaunchOrder', orderBy),
     },
+    keyed: true,
   );
-  Launch? launch({required String id}) =>
-      object('launch', Launch.new, args: {'id': Arg('ID!', id)});
-  Launch? get nextLaunch => object('nextLaunch', Launch.new);
-  Launch? get latestLaunch => object('latestLaunch', Launch.new);
-  List<Rocket>? get rockets => list('rockets', Rocket.new);
-  Rocket? rocket({required String id}) =>
-      object('rocket', Rocket.new, args: {'id': Arg('ID!', id)});
-  List<Launchpad>? get launchpads => list('launchpads', Launchpad.new);
+  Launch? launch({required String id}) => object(
+    'launch',
+    Launch.new,
+    args: {'id': Arg('ID!', id)},
+    lookup: 'Launch',
+  );
+  Launch? get nextLaunch => object('nextLaunch', Launch.new, keyed: true);
+  Launch? get latestLaunch => object('latestLaunch', Launch.new, keyed: true);
+  List<Rocket>? get rockets => list('rockets', Rocket.new, keyed: true);
+  Rocket? rocket({required String id}) => object(
+    'rocket',
+    Rocket.new,
+    args: {'id': Arg('ID!', id)},
+    lookup: 'Rocket',
+  );
+  List<Launchpad>? get launchpads =>
+      list('launchpads', Launchpad.new, keyed: true);
   AstronautConnection? astronauts({int? first, String? after}) => object(
     'astronauts',
     AstronautConnection.new,
     args: {'first': Arg('Int', first), 'after': Arg('String', after)},
   );
-  Astronaut? astronaut({required String id}) =>
-      object('astronaut', Astronaut.new, args: {'id': Arg('ID!', id)});
+  Astronaut? astronaut({required String id}) => object(
+    'astronaut',
+    Astronaut.new,
+    args: {'id': Arg('ID!', id)},
+    lookup: 'Astronaut',
+  );
   Stats? get stats => object('stats', Stats.new);
 }
 
@@ -217,7 +231,7 @@ class Astronaut extends Accessor {
   set bio(String? v) => write('bio', v);
   int? get flights => scalar<int>('flights');
   set flights(int? v) => write('flights', v);
-  List<Launch>? get missions => list('missions', Launch.new);
+  List<Launch>? get missions => list('missions', Launch.new, keyed: true);
 }
 
 class Payload extends Accessor {
@@ -267,10 +281,10 @@ class Launch extends Accessor {
   set status(String? v) => write('status', v);
   bool? get upcoming => scalar<bool>('upcoming');
   set upcoming(bool? v) => write('upcoming', v);
-  Rocket? get rocket => object('rocket', Rocket.new);
-  Launchpad? get launchpad => object('launchpad', Launchpad.new);
-  List<Payload>? get payloads => list('payloads', Payload.new);
-  List<Astronaut>? get crew => list('crew', Astronaut.new);
+  Rocket? get rocket => object('rocket', Rocket.new, keyed: true);
+  Launchpad? get launchpad => object('launchpad', Launchpad.new, keyed: true);
+  List<Payload>? get payloads => list('payloads', Payload.new, keyed: true);
+  List<Astronaut>? get crew => list('crew', Astronaut.new, keyed: true);
   Links? get links => object('links', Links.new);
 
   /// Client-side favourite flag, toggled via Mutation.toggleFavorite.
@@ -283,14 +297,14 @@ class LaunchEdge extends Accessor {
 
   String? get cursor => scalar<String>('cursor');
   set cursor(String? v) => write('cursor', v);
-  Launch? get node => object('node', Launch.new);
+  Launch? get node => object('node', Launch.new, keyed: true);
 }
 
 class LaunchConnection extends Accessor {
   LaunchConnection(super.recorder, super.selection, super.path);
 
   List<LaunchEdge>? get edges => list('edges', LaunchEdge.new);
-  List<Launch>? get nodes => list('nodes', Launch.new);
+  List<Launch>? get nodes => list('nodes', Launch.new, keyed: true);
   PageInfo? get pageInfo => object('pageInfo', PageInfo.new);
   int? get totalCount => scalar<int>('totalCount');
   set totalCount(int? v) => write('totalCount', v);
@@ -301,14 +315,14 @@ class AstronautEdge extends Accessor {
 
   String? get cursor => scalar<String>('cursor');
   set cursor(String? v) => write('cursor', v);
-  Astronaut? get node => object('node', Astronaut.new);
+  Astronaut? get node => object('node', Astronaut.new, keyed: true);
 }
 
 class AstronautConnection extends Accessor {
   AstronautConnection(super.recorder, super.selection, super.path);
 
   List<AstronautEdge>? get edges => list('edges', AstronautEdge.new);
-  List<Astronaut>? get nodes => list('nodes', Astronaut.new);
+  List<Astronaut>? get nodes => list('nodes', Astronaut.new, keyed: true);
   PageInfo? get pageInfo => object('pageInfo', PageInfo.new);
   int? get totalCount => scalar<int>('totalCount');
   set totalCount(int? v) => write('totalCount', v);

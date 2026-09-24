@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'accessor.dart';
-import 'cache.dart';
+import 'cache/cache.dart';
 import 'selection.dart';
 
 /// Error returned by the GraphQL endpoint (transport or `errors[]`).
@@ -64,6 +64,13 @@ class QueryScope<Q extends Accessor> implements Recorder {
   @override
   Selection get root => _root;
 
+  Set<String> _deps = {};
+
+  /// Dependency keys read during the last run (and by accessors created in
+  /// it afterwards). A scope rebuilds when a write touches any of them.
+  @override
+  Set<String> get deps => _deps;
+
   bool _hadMiss = false;
   bool _awaiting = false;
   Object? _error;
@@ -89,6 +96,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// are still recorded and fetched in the same batch.
   T run<T>(T Function(Q root) body) {
     _root = Selection.root('query');
+    _deps = {};
     _hadMiss = false;
     final result = body(client.rootFactory(this));
     if (!_hadMiss) {
@@ -219,9 +227,16 @@ class SlingClient<Q extends Accessor> {
     _flushScheduled = false;
 
     if (tree.isLeaf) {
-      // Everything was covered by an in-flight request; those scopes will be
-      // notified when it lands.
-      _inflightScopes.addAll(scopes);
+      if (_inflight != null) {
+        // Everything was covered by an in-flight request; those scopes will
+        // be notified when it lands.
+        _inflightScopes.addAll(scopes);
+      } else {
+        // Nothing to fetch (e.g. refetch on a scope that never ran).
+        for (final s in scopes) {
+          s._settle(null);
+        }
+      }
       return;
     }
 
@@ -283,10 +298,11 @@ class SlingClient<Q extends Accessor> {
   Set<QueryScope<Q>> _inflightScopes = {};
   Object? _lastError;
 
+  /// Rebuilds every scope that read one of the [touched] dependency keys
+  /// (`ROOT_QUERY.launches_x`, `Launch:launch-181.name`, …), plus [always].
   void _notify(Set<String> touched, {Set<QueryScope<Q>> always = const {}}) {
     for (final scope in _scopes.toList()) {
-      if (always.contains(scope) ||
-          scope.root.childAliases.intersection(touched).isNotEmpty) {
+      if (always.contains(scope) || scope.deps.intersection(touched).isNotEmpty) {
         scope.onChanged();
       }
     }

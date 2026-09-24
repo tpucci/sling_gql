@@ -3,7 +3,8 @@
 library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
-export 'src/cache.dart' show Cache, missing;
+export 'src/cache/cache.dart'
+    show Cache, NormalizedCache, Normalization, Ref, missing, depKey;
 export 'src/client.dart' show SlingClient, SlingException, QueryScope, RootFactory;
 export 'src/selection.dart' show Arg, Selection, PrintedOperation;
 export 'src/widgets.dart' show SlingScope, QueryBuilder, QueryState, QueryWidgetBuilder;

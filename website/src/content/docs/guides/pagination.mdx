@@ -105,7 +105,8 @@ final recent = launch.rocket?.launches(first: 5)?.nodes ?? const <Launch>[];
 
 ## What is missing
 
-Because the cache is path-addressed and not normalized, a launch that appears in page 1
-and — after a refetch with new data — in page 2 is stored twice. Toggling a favourite via a
-mutation would update one copy. This is the main motivation for
-[normalization](/sling_gql/guides/caching/#normalization-next) on the roadmap.
+Each page's `nodes` is a list of references to `Launch:<id>` entities, so a launch that
+shows up in two pages is stored once and a future favourite mutation updates every row.
+What is still missing is a *connection merge policy*: the pages are separate cache
+entries stitched together by the widget (`_cursors`), not one growing list in the cache
+(Apollo's `relayStylePagination`). See [Caching](/sling_gql/guides/caching/).

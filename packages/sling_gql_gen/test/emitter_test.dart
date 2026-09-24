@@ -152,6 +152,30 @@ void main() {
     expect(code, contains("User? user({required String id}) => object('user', User.new"));
   });
 
+  test('keyed types: object/list fields carry keyed: true', () {
+    expect(code, contains("User? get me => object('me', User.new, keyed: true);"));
+    expect(
+      code,
+      contains("List<User>? friends({int? limit}) => list('friends', User.new, args: {'limit': Arg('Int', limit)}, keyed: true);"),
+    );
+  });
+
+  test('by-id root field carries lookup: <Type>', () {
+    expect(
+      code,
+      contains("User? user({required String id}) => object('user', User.new, args: {'id': Arg('ID!', id)}, lookup: 'User');"),
+    );
+    // `users(where:)` is a list → no lookup, but keyed.
+    expect(code, contains("list('users', User.new, args: {'where': Arg('UserFilter', where?.toJson())}, keyed: true);"));
+  });
+
+  test('a type without the key field is neither keyed nor a lookup target', () {
+    final schema = IntrospectionSchema.fromJson(_schemaJson);
+    final unkeyed = generate(schema, keyField: 'uuid');
+    expect(unkeyed, isNot(contains('keyed:')));
+    expect(unkeyed, isNot(contains('lookup:')));
+  });
+
   test('getters never null-assert (no bare `!` Dart operator outside string literals)', () {
     for (final line in code.split('\n')) {
       if (!line.contains('=>')) continue;
@@ -175,6 +199,7 @@ void main() {
       code,
       contains("List<User>? friends({int? limit}) => list('friends', User.new, args:"),
     );
+    expect(code, contains("keyed: true);"));
   });
 
   test('enum field is read as nullable String', () {
@@ -213,7 +238,7 @@ void main() {
     expect(
       code,
       contains(
-        "List<User>? users({UserFilter? where}) => list('users', User.new, args: {'where': Arg('UserFilter', where?.toJson())});",
+        "List<User>? users({UserFilter? where}) => list('users', User.new, args: {'where': Arg('UserFilter', where?.toJson())}, keyed: true);",
       ),
     );
   });

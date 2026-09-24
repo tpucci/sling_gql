@@ -39,8 +39,9 @@ query {
 
 Three things to notice:
 
-- **Every object selection carries `__typename`.** It is free, and it is what a future
-  normalized cache will key on.
+- **Every object selection carries `__typename`, and keyed types also carry `id`.** Both
+  are added by the printer; together they form the entity key (`Launch:launch-181`) the
+  [normalized cache](/sling_gql/guides/caching/) stores objects under.
 - **`company?.` is nullable** because the schema says `Company!` *but the cache may not
   have it yet*. `null` here means "not fetched"; a server `null` would also be `null`. Use
   `state.hasMissingData` or `company.isSkeleton` when you need to tell them apart.

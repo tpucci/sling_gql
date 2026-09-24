@@ -16,6 +16,12 @@ Future<void> main(List<String> arguments) async {
       help: 'Override the sling_gql import '
           '(default: package:sling_gql/sling_gql.dart).',
     )
+    ..addOption(
+      'key-field',
+      defaultsTo: 'id',
+      help: 'Field that identifies an object for cache normalization. '
+          'Object types having it are stored once as `__typename:<key>`.',
+    )
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 
   final ArgResults results;
@@ -38,6 +44,7 @@ Future<void> main(List<String> arguments) async {
   final endpoint = results['endpoint'] as String?;
   final outPath = results['out'] as String;
   final importPath = results['part-of-import'] as String? ?? 'package:sling_gql/sling_gql.dart';
+  final keyField = results['key-field'] as String;
 
   if ((schemaPath == null) == (endpoint == null)) {
     stderr.writeln('Pass exactly one of --schema or --endpoint.');
@@ -82,7 +89,7 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln('Introspected $endpoint');
   }
   final schema = IntrospectionSchema.fromJson(json);
-  final code = generate(schema, importPath: importPath);
+  final code = generate(schema, importPath: importPath, keyField: keyField);
 
   final outFile = File(outPath);
   await outFile.parent.create(recursive: true);

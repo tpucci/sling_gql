@@ -79,6 +79,10 @@ void main() {
     expect(detail, contains('launch('));
     expect(detail, contains('payloads {'), reason: 'prepare selected the collapsed section');
     expect(detail, isNot(contains('nodes')), reason: 'list data was served from cache');
+    expect(detail, isNot(contains('date')),
+        reason: 'name/date/status come from the Launch entity the list wrote');
+    expect(detail, isNot(contains('status')));
+    expect(detail, contains('details'), reason: 'only fields the list did not fetch');
     expect(find.text('Rocket'), findsOneWidget);
 
     await tester.tap(find.textContaining('Show payloads'));

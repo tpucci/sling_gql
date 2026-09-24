@@ -30,7 +30,9 @@ on the code.
 | File | Role |
 | --- | --- |
 | `selection.dart` | `Selection` tree (field + args → alias), `Arg`, `PrintedOperation` (tree → document + variables). Alias = `field_<fnv1a(json(args))>`; the alias is **also the cache key**. |
-| `cache.dart` | Path-addressed, non-normalized cache. `read` returns the `missing` sentinel on cache miss (distinct from a server `null`). `writeResponse` deep-merges. |
+| `cache/cache.dart` | `Cache` interface + `NormalizedCache`: flat entity map (`ROOT_QUERY`, `Launch:launch-181`), `Ref` values, `read` follows refs and fills the caller's `deps` with `entity.field` keys, returns the `missing` sentinel on miss (distinct from a server `null`). `writeResponse` normalizes + merges and returns touched keys. `evict`, `gc`, `snapshot`/`initial`, `onChange`. Imports only `selection.dart` — keep it that way. |
+| `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
+| `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
 | `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`). |
 | `widgets.dart` | `SlingScope` (InheritedWidget providing the client), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `frameEndScheduler`. |
@@ -44,6 +46,16 @@ Design decisions worth knowing before changing things:
   yet" are told apart by `Accessor.isSkeleton` / `QueryState.hasMissingData`.
 - **Skeleton lists have exactly one element** so `.map((e) => e.name)` still
   records the element selection during the first build.
+- **Normalization is driven by codegen flags.** `object(..., keyed: true)` /
+  `list(..., keyed: true)` make the printer add `id` next to `__typename`;
+  `object(..., lookup: 'Launch')` lets `launch(id:)` resolve to `Launch:<id>`
+  when the root field is not cached but the entity is (accessor path becomes
+  `[Ref(key)]`). Objects without an id stay inline. Lists of refs are replaced
+  by the incoming list; entities merge per field.
+- **Dependency keys, not root aliases.** Every `cache.read` adds
+  `entity.field` keys to `Recorder.deps`; every write returns the keys it
+  touched; `_notify` rebuilds scopes whose deps intersect. `depKey()` builds
+  them.
 - **Flush timing is per scope.** `QueryBuilder` scopes flush in a post-frame
   callback (`frameEndScheduler`): Flutter's initial build runs in
   `attachRootWidget` *outside* a frame, and slivers build rows during layout,
@@ -56,8 +68,9 @@ Design decisions worth knowing before changing things:
   at an errored path is not a real null) and surfaced as the scope's error.
 - **Errors are sticky per scope** until `refetch()`; otherwise a failing query
   would loop build → miss → fetch → fail → rebuild.
-- **Notification is coarse**: a scope rebuilds if any of its *root-level*
-  aliases were written. Fine-grained invalidation is a known follow-up.
+- **Notification is per entity field** (`Launch:launch-181.name`). Inline
+  objects and lists notify at the granularity of the entity field that
+  contains them.
 
 ## Generator (`packages/sling_gql_gen`)
 
@@ -65,6 +78,11 @@ Input: introspection JSON. Output: one Dart file. Rules are documented in the
 package README; the contract it must satisfy is the hand-written example at the
 top of `packages/sling_gql/test/core_test.dart`. If you change `Accessor`'s
 helper signatures, update the generator **and** that test in the same change.
+
+The generator decides which types are *keyed* (have a scalar `--key-field`,
+default `id`) and which fields are *lookups* (single `id` argument returning a
+keyed type); it emits `keyed: true` / `lookup: 'Type'` on `object()`/`list()`
+calls. Cache behaviour stays in the runtime — the generator emits facts only.
 
 Regenerate:
 
@@ -90,13 +108,15 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 
 ## Known gaps / next steps
 
-1. Normalized cache keyed on `__typename:id` (needed for mutations to update
-   lists).
-2. `maxAge` / stale-while-revalidate, cache persistence.
+1. ~~Normalized cache~~ done. Follow-ups: type policies (custom merge per
+   field, connection merging), automatic `gc()`.
+2. `maxAge` / stale-while-revalidate; persistence adapters as separate
+   packages on top of `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`.
 3. Mutations (`useMutation` equivalent) and subscriptions (the mock API
    already exposes `toggleFavorite`, `scheduleLaunch`, `updateLaunchStatus`
    and two SSE subscriptions).
 4. Unions/interfaces via `$on` (add one to `mock-api/schema.graphql` first;
    the generator currently skips none because there are none).
-5. Finer-grained rebuild (per leaf path instead of per root alias).
+5. ~~Finer-grained rebuild~~ per `entity.field` now; list-index granularity
+   for inline lists remains.
 6. Dev overlay: which widget caused which request.

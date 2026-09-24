@@ -45,13 +45,14 @@ query {
 | Per-frame batching across widgets | ✅ one HTTP request per frame (flush at end of frame) |
 | Arguments → variables, aliased per argument set | ✅ |
 | Skeleton state (`null` scalars, 1-element lists) before data arrives | ✅ |
-| Partial responses merging into one cache tree | ✅ |
+| Normalized cache (`__typename:id` entities, `launch(id:)` served from the list's entity) | ✅ per-field rebuild notifications, `evict`, `gc`, JSON snapshot + `onChange` |
+| Partial responses merging into one cache tree | ✅ per entity |
 | Optimistic writes (`launch.mission_name = 'x'`) | ✅ setters on scalar fields |
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
 | `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ |
 | Cursor pagination (one cache entry per `after`) | ✅ example |
 | Mutations, subscriptions | ❌ not in this PoC |
-| Normalized cache (`__typename:id`), SWR / expiry, persistence | ❌ not in this PoC |
+| SWR / expiry, persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
 | Unions / interfaces (`$on`) | ❌ SpaceX schema has none |
 
 ## Layout
@@ -102,8 +103,9 @@ cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
    sliver rows are included), on a microtask for imperative `resolve()` — as
    one `query { … }` document. Fields with arguments get a deterministic alias
    (`launches_<hash>`) that doubles as their cache key.
-4. **Rebuild.** The response is deep-merged into the cache; scopes whose root
-   fields intersect the written fields are told to `setState`.
+4. **Rebuild.** The response is normalized into entities (`Launch:launch-181`)
+   and merged; scopes that read any of the touched `entity.field` keys are told
+   to `setState`.
 
 ## Lessons from the PoC
 
@@ -114,9 +116,11 @@ cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 - **Frame timing matters.** Flutter's first build runs outside a frame and
   slivers build children during layout; a microtask flush split the first
   screen into two requests. Flushing in a post-frame callback fixed it.
-- **Without normalization, the same entity fetched through two paths is
-  fetched twice** (`launches.nodes[i]` vs `launch(id:)`). Normalizing on
-  `__typename` + `id` is the obvious next step and the mock API is ready for it.
+- **Normalization needs the generator's help.** Dart cannot intercept reads,
+  so knowing which types carry an `id` (and which root fields are by-id
+  lookups) is a codegen fact; the runtime just consumes `keyed`/`lookup`
+  flags. With them, opening a detail screen after the list fetches only the
+  fields the list did not have.
 - **Codegen is a fine `Proxy` replacement**: 414 lines of generated Dart for
   40 types, fully static and tree-shakeable; sound null safety makes the
   "maybe not fetched yet" state explicit instead of lying like TS types do.

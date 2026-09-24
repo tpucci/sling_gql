@@ -9,10 +9,10 @@ import '../widgets/skeleton.dart';
 ///
 /// - `prepare` selects everything the screen will need up front (including
 ///   the collapsed payload section), so opening it later costs no request.
-/// - Note that `name`/`date`/`status` are fetched again even though the list
-///   already had them: the PoC cache is path-based, not normalized, so
-///   `launch(id:)` and `launches.nodes[i]` are different entries. Normalizing
-///   on `__typename` + `id` is the first item on the roadmap (see AGENTS.md).
+/// - `name`/`date`/`status`/`rocket.name` are NOT fetched again: the list
+///   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
+///   is a `lookup` field that resolves straight to the entity. Only the fields
+///   the list never selected go over the wire (open the network log).
 class LaunchScreen extends StatefulWidget {
   const LaunchScreen({super.key, required this.id});
   final String id;

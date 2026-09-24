@@ -91,10 +91,10 @@ everything you'll need up front" rule; see
 >
 > - `prepare` selects everything the screen will need up front (including
 >   the collapsed payload section), so opening it later costs no request.
-> - Note that `name`/`date`/`status` are fetched again even though the list
->   already had them: the PoC cache is path-based, not normalized, so
->   `launch(id:)` and `launches.nodes[i]` are different entries. Normalizing
->   on `__typename` + `id` is the first item on the roadmap (see AGENTS.md).
+> - `name`/`date`/`status`/`rocket.name` are NOT fetched again: the list
+>   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
+>   is a `lookup` field that resolves straight to the entity. Only the fields
+>   the list never selected go over the wire (open the network log).
 
 `prepare` is a static method, passed to `QueryBuilder.prepare`, that reads
 every field the screen might show — including the payload list that starts
@@ -139,13 +139,12 @@ payloads" — toggling `_showPayloads` costs a `setState` and nothing else.
 That's the `0` in the front page's "requests to expand the collapsed payload
 section" stat.
 
-<Aside type="caution" title="Honest caveat: non-normalized cache">
-The comment above is not hedging for style — it's real. `query.launch(id:
-...)` and an entry inside `query.launches(...).nodes` are two unrelated
-cache paths, even when they describe the same launch. Favoriting a launch or
-renaming it from the detail screen would **not** update the row already
-rendered in the list. Fixing this needs a normalized, `__typename`+`id`-keyed
-cache — the first item in [Roadmap](/sling_gql/internals/roadmap/).
+<Aside type="tip" title="One launch, one entity">
+`query.launch(id: ...)` and the row inside `query.launches(...).nodes` resolve to the
+same `Launch:<id>` entity. The detail request only carries the fields the list never
+asked for (`details`, `flightNumber`, the rocket's specs, payloads, crew) — the widget
+test asserts `date`/`status` are absent from it — and renaming a launch from the detail
+screen updates the list row. See [Caching](/sling_gql/guides/caching/).
 </Aside>
 
 ## Network log

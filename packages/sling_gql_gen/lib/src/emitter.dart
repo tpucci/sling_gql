@@ -6,8 +6,20 @@ import 'type_resolver.dart';
 /// Generates the full contents of the `sling_gql`-style accessor file for
 /// [schema]. [importPath] is the import used to bring in `Accessor`/`Arg`/
 /// `Recorder` (defaults to `package:sling_gql/sling_gql.dart`).
-String generate(IntrospectionSchema schema, {String importPath = 'package:sling_gql/sling_gql.dart'}) {
+///
+/// Object types that have a scalar [keyField] are *keyed*: fields returning
+/// them are emitted with `keyed: true` so the runtime always selects the key
+/// and normalizes the object (`__typename:id`). A field whose only argument is
+/// the key field and which returns a keyed object (`launch(id: ID!): Launch`)
+/// is emitted with `lookup: 'Launch'` so it can be served from the entity
+/// cache without a request.
+String generate(
+  IntrospectionSchema schema, {
+  String importPath = 'package:sling_gql/sling_gql.dart',
+  String keyField = 'id',
+}) {
   final typesByName = schema.typesByName;
+  final ctx = _EmitContext(typesByName, keyField);
   final skipRootNames = {
     if (schema.mutationTypeName != null) schema.mutationTypeName!,
     if (schema.subscriptionTypeName != null) schema.subscriptionTypeName!,
@@ -44,12 +56,12 @@ String generate(IntrospectionSchema schema, {String importPath = 'package:sling_
     ..writeln("import '$importPath';")
     ..writeln();
 
-  _emitQueryClass(out, queryType, typesByName);
+  _emitQueryClass(out, queryType, ctx);
 
   for (final t in objectTypes) {
     if (t.name == schema.queryTypeName) continue;
     out.writeln();
-    _emitObjectClass(out, t, typesByName, className: sanitizeTypeName(t.name));
+    _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
 
   for (final t in enumTypes) {
@@ -82,14 +94,40 @@ void _emitDocAndDeprecation(
   }
 }
 
-void _emitQueryClass(StringBuffer out, GqlType queryType, Map<String, GqlType> typesByName) {
+/// Schema-wide facts the field emitter needs.
+class _EmitContext {
+  _EmitContext(this.typesByName, this.keyField);
+
+  final Map<String, GqlType> typesByName;
+  final String keyField;
+
+  /// True when [typeName] is an object type with a scalar [keyField].
+  bool isKeyed(String typeName) {
+    final type = typesByName[typeName];
+    if (type == null || type.kind != 'OBJECT') return false;
+    return type.fields.any(
+      (f) => f.name == keyField && f.args.isEmpty && f.type.named.kind == 'SCALAR',
+    );
+  }
+
+  /// True when [field] is a by-key lookup of a keyed object:
+  /// `launch(id: ID!): Launch`.
+  bool isLookup(GqlField field) {
+    if (field.type.isListType) return false;
+    final leaf = field.type.named;
+    if (leaf.kind != 'OBJECT' || !isKeyed(leaf.name!)) return false;
+    return field.args.length == 1 && field.args.single.name == keyField;
+  }
+}
+
+void _emitQueryClass(StringBuffer out, GqlType queryType, _EmitContext ctx) {
   _emitDocAndDeprecation(out, indent: '', description: queryType.description);
   out.writeln('class Query extends Accessor {');
   out.writeln('  Query(super.recorder, super.selection, super.path);');
   out.writeln('  Query.root(Recorder r) : super(r, r.root, const []);');
   out.writeln();
   for (final field in queryType.fields) {
-    _emitField(out, field, typesByName);
+    _emitField(out, field, ctx);
   }
   out.writeln('}');
 }
@@ -97,7 +135,7 @@ void _emitQueryClass(StringBuffer out, GqlType queryType, Map<String, GqlType> t
 void _emitObjectClass(
   StringBuffer out,
   GqlType type,
-  Map<String, GqlType> typesByName, {
+  _EmitContext ctx, {
   required String className,
 }) {
   _emitDocAndDeprecation(out, indent: '', description: type.description);
@@ -105,16 +143,25 @@ void _emitObjectClass(
   out.writeln('  $className(super.recorder, super.selection, super.path);');
   out.writeln();
   for (final field in type.fields) {
-    _emitField(out, field, typesByName);
+    _emitField(out, field, ctx);
   }
   out.writeln('}');
 }
 
-void _emitField(StringBuffer out, GqlField field, Map<String, GqlType> typesByName) {
+void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
   final dartFieldName = sanitizeIdentifier(field.name);
   final leaf = field.type.named;
   final isList = field.type.isListType;
   final isScalarLeaf = leaf.kind == 'SCALAR' || leaf.kind == 'ENUM';
+
+  // Normalization hints for object fields (see `generate`).
+  final keyed = !isScalarLeaf && ctx.isKeyed(leaf.name!);
+  final lookup = !isScalarLeaf && ctx.isLookup(field) ? sanitizeTypeName(leaf.name!) : null;
+  final objectOpts = lookup != null
+      ? ", lookup: '$lookup'" // implies keyed
+      : keyed
+          ? ', keyed: true'
+          : '';
 
   final String elementDartType;
   if (leaf.kind == 'SCALAR') {
@@ -159,11 +206,11 @@ void _emitField(StringBuffer out, GqlField field, Map<String, GqlType> typesByNa
       );
     } else if (!isList) {
       out.writeln(
-        "  $elementDartType? get $effectiveFieldName => object($key, $elementDartType.new);",
+        "  $elementDartType? get $effectiveFieldName => object($key, $elementDartType.new$objectOpts);",
       );
     } else {
       out.writeln(
-        "  List<$elementDartType>? get $effectiveFieldName => list($key, $elementDartType.new);",
+        "  List<$elementDartType>? get $effectiveFieldName => list($key, $elementDartType.new$objectOpts);",
       );
     }
     return;
@@ -181,11 +228,11 @@ void _emitField(StringBuffer out, GqlField field, Map<String, GqlType> typesByNa
     );
   } else if (!isList) {
     out.writeln(
-      "  $elementDartType? $effectiveFieldName($params) => object($key, $elementDartType.new, args: $argsMap);",
+      "  $elementDartType? $effectiveFieldName($params) => object($key, $elementDartType.new, args: $argsMap$objectOpts);",
     );
   } else {
     out.writeln(
-      "  List<$elementDartType>? $effectiveFieldName($params) => list($key, $elementDartType.new, args: $argsMap);",
+      "  List<$elementDartType>? $effectiveFieldName($params) => list($key, $elementDartType.new, args: $argsMap$objectOpts);",
     );
   }
 }

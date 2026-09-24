@@ -39,6 +39,10 @@ class Selection {
   /// node must be printed with braces even if no sub-field was read yet.
   bool isObject = false;
 
+  /// Set when the object type is normalizable: this field (`id`) is always
+  /// printed alongside `__typename` so the response can be keyed.
+  String? keyField;
+
   Iterable<Selection> get children => _children.values;
   bool get isLeaf => _children.isEmpty;
   bool get isRoot => parent == null;
@@ -59,9 +63,17 @@ class Selection {
     return _children.putIfAbsent(alias, () => Selection._(field, args, this));
   }
 
-  /// Like [child], flagged as an object selection.
-  Selection objectChild(String field, [Map<String, Arg> args = const {}]) =>
-      child(field, args)..isObject = true;
+  /// Like [child], flagged as an object selection. [keyField] marks the
+  /// object as an entity whose key field must always be fetched.
+  Selection objectChild(
+    String field, [
+    Map<String, Arg> args = const {},
+    String? keyField,
+  ]) {
+    final node = child(field, args)..isObject = true;
+    if (keyField != null) node.keyField = keyField;
+    return node;
+  }
 
   Selection? childByAlias(String alias) => _children[alias];
 
@@ -76,7 +88,7 @@ class Selection {
     }
     var cursor = this;
     for (final n in chain) {
-      cursor = cursor.child(n.field, n.args)..isObject |= n.isObject;
+      cursor = cursor.child(n.field, n.args).._adopt(n);
     }
     return cursor;
   }
@@ -84,8 +96,13 @@ class Selection {
   /// Deep-merges [other]'s subtree into this node.
   void mergeFrom(Selection other) {
     for (final c in other.children) {
-      (child(c.field, c.args)..isObject |= c.isObject).mergeFrom(c);
+      (child(c.field, c.args).._adopt(c)).mergeFrom(c);
     }
+  }
+
+  void _adopt(Selection other) {
+    isObject |= other.isObject;
+    keyField ??= other.keyField;
   }
 
   /// True if every leaf of [other] is present in this tree.
@@ -156,7 +173,11 @@ class PrintedOperation {
       if (!node.isLeaf || node.isObject) {
         buf.writeln(' {');
         buf.writeln('$indent  __typename');
+        final keyField = node.keyField;
+        if (keyField != null) buf.writeln('$indent  $keyField');
         for (final c in node.children) {
+          // The key field is already printed above; skip a plain duplicate.
+          if (c.field == keyField && c.args.isEmpty) continue;
           buf.writeln(printNode(c, depth + 1));
         }
         buf.write('$indent}');

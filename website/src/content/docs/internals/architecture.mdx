@@ -10,14 +10,19 @@ import { Aside, FileTree } from '@astrojs/starlight/components';
   - sling_gql.dart  public exports
   - src/
     - selection.dart  Selection tree, Arg, PrintedOperation
-    - cache.dart  path-addressed cache, `missing` sentinel
+    - cache/
+      - cache.dart  `Cache` interface, `NormalizedCache`, `depKey`
+      - normalization.dart  identity rule (`__typename:id`), lookups
+      - ref.dart  `Ref`, `missing` sentinel
     - accessor.dart  Accessor base class, Recorder interface
     - client.dart  SlingClient, QueryScope, FlushScheduler
     - widgets.dart  SlingScope, QueryBuilder, QueryState, frameEndScheduler
 </FileTree>
 
-About 600 lines, one dependency (`package:http`). Generated code depends only on
-`Accessor`, `Recorder`, `Selection` and `Arg`.
+About 900 lines, one dependency (`package:http`). Generated code depends only on
+`Accessor`, `Recorder`, `Selection` and `Arg`. Everything except `widgets.dart` is pure
+Dart; `cache/` imports only `selection.dart`, so it can be lifted into its own package
+without changes when a persistence adapter or a non-Flutter consumer appears.
 
 ## Life of a read
 
@@ -27,11 +32,12 @@ build()                    end of frame              response
   │ query.company?.name        │                        │
   ▼                            ▼                        ▼
 Accessor.scalar('name')   client._doFlush()        cache.writeResponse()
-  ├─ selection.child()      ├─ merge pending trees    ├─ deep-merge data
-  ├─ cache.read(path)       ├─ PrintedOperation.from  ├─ prune errored paths
-  │    └─ missing?          ├─ POST {query, vars}     └─ notify scopes whose
-  └─ recorder.onMiss(sel)   └─ mark scopes loading         root aliases changed
-       └─ scope.scheduler(flush)                              └─ setState()
+  ├─ selection.child()      ├─ merge pending trees    ├─ normalize + merge entities
+  ├─ cache.read(path, deps) ├─ PrintedOperation.from  ├─ prune errored paths
+  │    ├─ follow Refs       ├─ POST {query, vars}     └─ notify scopes whose deps
+  │    └─ missing?          └─ mark scopes loading         intersect touched keys
+  └─ recorder.onMiss(sel)                                     └─ setState()
+       └─ scope.scheduler(flush)
 ```
 
 ### 1. `Selection` — the tree
@@ -42,16 +48,20 @@ used both as the GraphQL alias in the printed document and as the key in the cac
 response can be merged without a lookup table.
 
 `PrintedOperation.from(root)` walks the tree, emits `alias: field(arg: $v0)` lines, adds
-`__typename` to every object node, and collects arguments into variables with their
+`__typename` to every object node (and `id` to keyed ones), and collects arguments into variables with their
 declared GraphQL type (`Arg('LaunchFilter', filter.toJson())`). Object nodes without
 children — a list that was read but whose rows were not built — still print `{ __typename }`
 so the document is valid.
 
-### 2. `Cache` — nested maps, keyed by alias
+### 2. `Cache` — entities, keyed by `__typename:id`
 
-`read(operation, path)` walks `Map`/`List` nodes and returns the `missing` sentinel when a
-key is absent, distinct from a stored `null`. `writeResponse` deep-merges; `write` sets a
-single path for optimistic updates. No normalization yet — see
+A flat `Map<entityKey, fields>` where the operation roots (`ROOT_QUERY`) are entities too.
+`read(operation, path, deps:)` walks `Map`/`List` nodes, derefs `Ref`s transparently,
+records every `entity.field` dependency it crosses into `deps`, and returns the `missing`
+sentinel when a key is absent — distinct from a stored `null`. `writeResponse` normalizes
+identifiable objects into entities and merges the rest inline; `write` sets a single path
+for optimistic updates. Both return the dependency keys they touched. `Cache` is an
+interface with one implementation, `NormalizedCache`. Details in
 [Caching](/sling_gql/guides/caching/).
 
 ### 3. `Accessor` — what generated classes extend
@@ -63,18 +73,19 @@ generated getter needs:
 | --- | --- | --- |
 | `scalar<T>(field)` | leaf | `null` + `onMiss` |
 | `scalarList<T>(field)` | leaf | `[null]` + `onMiss` |
-| `object(field, ctor)` | object node | skeleton accessor + `onMiss` |
-| `list(field, ctor)` | object node | `[skeleton]` + `onMiss` |
+| `object(field, ctor, keyed:, lookup:)` | object node (+ `id`) | entity via `lookup`, else skeleton accessor + `onMiss` |
+| `list(field, ctor, keyed:)` | object node (+ `id`) | `[skeleton]` + `onMiss` |
 | `write(field, value)` | — | writes cache, `onWrite` |
 
 `Recorder` is the interface an accessor talks to: the current operation, its selection
-root, the cache, `onMiss`, `onWrite`. `QueryScope` implements it.
+root, the cache, the `deps` set reads fill, `onMiss`, `onWrite`. `QueryScope` implements it.
 
 ### 4. `SlingClient` and `QueryScope`
 
 A **scope** is one widget's view: it runs the builder inside `run()` with a fresh selection
-root, tracks whether the run missed anything, whether a fetch is in flight, and the last
-error. `refetch()` re-enqueues the whole last tree.
+root and a fresh dependency set, tracks whether the run missed anything, whether a fetch is
+in flight, and the last error. `refetch()` re-enqueues the whole last tree. After a write,
+`_notify` rebuilds the scopes whose `deps` intersect the touched keys.
 
 The **client** owns the cache, the HTTP client and the batch: `_pending` (the merged tree
 waiting to be sent), `_inflight` (the tree currently on the wire, used to avoid re-requesting
