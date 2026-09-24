@@ -1,29 +1,33 @@
 ---
 title: Example app
-description: A two-screen iOS app against the mock API — what each screen demonstrates, the in-app network log, and the request-counting test.
+description: A two-tab iOS app against the mock API — Launches list with a Favourites filter, a Me profile screen, in-app network log, and request-counting tests.
 ---
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
 
 `example/` is a small **iOS-only** Cupertino app (`flutter create
 --platforms=ios`; don't add other platforms) built against the mock API. Two
-screens, a launch list and a launch detail, plus an in-app log of every
-GraphQL document sent. Its purpose isn't to be a real app — it's to be
-something you can point at the network log and a widget test and see
-sling_gql's batching claims proven, not asserted.
+tabs — Launches and Me — plus an in-app log of every GraphQL document sent.
+Its purpose isn't to be a real app — it's to be something you can point at
+the network log and a widget test and see sling_gql's batching claims proven,
+not asserted.
 
 <FileTree>
 - example/
   - lib/
+    - app.dart             `SlingApp`: dark theme + two-tab scaffold
     - main.dart            client + `SlingScope` setup
     - network_log.dart     records every `PrintedOperation`
+    - theme.dart           dark palette constants + `slingTheme()`
     - screens/
-      - launches_screen.dart
-      - launch_screen.dart
+      - launches_screen.dart   paginated list + Favourites segment
+      - launch_screen.dart     detail + `toggleFavorite` mutation
+      - me_screen.dart         viewer profile + favourites list
     - widgets/
+      - launch_row.dart    shared row used by both tabs
       - skeleton.dart      loading placeholders
     - generated/schema.dart  committed, generated — see Code generation
-  - test/app_test.dart     the request-counting end-to-end test
+  - test/app_test.dart     the request-counting end-to-end tests
 </FileTree>
 
 ## Wiring
@@ -41,11 +45,7 @@ void main() {
     client: client,
     child: NetworkLogScope(
       log: log,
-      child: const CupertinoApp(
-        title: 'sling_gql',
-        theme: CupertinoThemeData(brightness: Brightness.light),
-        home: LaunchesScreen(),
-      ),
+      child: const SlingApp(),
     ),
   ));
 }
@@ -54,7 +54,22 @@ void main() {
 `onOperation: log.add` is the only hook the app needs to capture every
 request — `SlingClient` calls it once per flushed operation, batched or not.
 
-## Launches screen
+## Tab structure
+
+`SlingApp` (in `app.dart`) is a `CupertinoTabScaffold` with two tabs:
+
+| Index | Icon | Screen |
+| --- | --- | --- |
+| 0 | 🚀 | `LaunchesScreen` |
+| 1 | 👤 | `MeScreen` |
+
+The scaffold uses `CupertinoTabScaffold`'s lazy-build mechanism
+(`shouldBuildTab`), so the Me tab's `QueryBuilder` is not created — and no
+`me { … }` request is sent — until the user first switches to that tab. This
+is the same principle as skeleton-driven queries: reads that never happen cost
+nothing.
+
+## Launches tab
 
 The doc comment at the top of `launches_screen.dart` states exactly what to
 look at:
@@ -68,20 +83,38 @@ look at:
 >   argument set, hence a distinct alias and cache entry. "Load more" adds a
 >   cursor and only the new page is fetched; pull-to-refresh refetches all
 >   pages in one request.
+> - "Favourites" mode passes `filter: LaunchFilter(favorite: true)` — a
+>   different argument set → different alias → different cache entry. Switching
+>   back to "All" is instant because the All pages are still cached.
 
-Concretely: `_Header` is its own `QueryBuilder<Query>` reading `query.company`
-and `query.stats`; the list body is a second, separate `QueryBuilder<Query>`
-reading `query.launches(...)` once per loaded cursor. They're unrelated
-widgets with unrelated builders, but because both build in the same frame,
-their selections merge into a single request before either build's data
-exists. "Load more" appends a cursor to `_cursors` and calls `setState` —
-that rebuilds only the list body, so only the new page's arguments are new
-to the selection tree, and only that page gets fetched.
+### Favourites segment
 
-Every field the row needs — `status`, `date`, `rocket?.name` — is read
-unconditionally at the top of `_LaunchRow.build`, matching the "read
-everything you'll need up front" rule; see
-[Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/).
+A `CupertinoSlidingSegmentedControl` at the top of the list switches between
+"All" and "Favourites". Switching to Favourites queries:
+
+```dart
+query.launches(first: pageSize, filter: const LaunchFilter(favorite: true))
+```
+
+This is a **different argument set** from the All query, so the selection
+tree gives it a different alias (`launches_<hash-of-args>`) and a different
+cache entry. That means:
+
+1. The first switch to Favourites sends one new request.
+2. Switching back to All instantly serves the previously cached pages — **zero
+   requests**.
+3. The two filters' caches are completely independent; adding a new page to
+   All never evicts the Favourites page.
+
+Switching the segment also resets `_cursors` to `[null]` so the first page
+is re-read from cache (or fetched fresh if absent).
+
+**Known limitation:** after `toggleFavorite` on the detail screen, the
+`launches(filter: {favorite: true})` list does not automatically update its
+membership (the entity's `favorite` field updates everywhere, but adding or
+removing an entry from a paginated list requires a write policy). See the
+[roadmap](/sling_gql/internals/roadmap/) for details. Pull-to-refresh always
+reflects the current server state.
 
 ## Launch detail screen
 
@@ -163,6 +196,26 @@ the response confirms it, and when you go back the list row shows the heart too 
 reads `launch.favorite`, so it depends on the same entity field. Kill the mock server and tap
 again to see the rollback. See [Mutations](/sling_gql/guides/mutations/).
 
+## Me tab
+
+`me_screen.dart` reads `query.me` (a `Viewer` object) to show:
+
+- A circular avatar with initials on the gradient background.
+- Name, agency, and favourite count.
+- The full `favorites` list, each row rendered by the shared `LaunchRow`
+  widget (same heart, same entity dependency, same cache).
+
+`LaunchRow` is extracted into `widgets/launch_row.dart` and used by both
+tabs. Because both tabs read `launch.favorite` from the same `Launch:<id>`
+entity, toggling a favourite on the detail screen updates the heart in the Me
+tab's list immediately — no additional request, just a cache read.
+
+**Known limitation:** the `me.favorites` list membership does not update after
+a `toggleFavorite` mutation. The entity's `favorite` field updates (the heart
+toggles), but inserting or removing the launch from the paginated list would
+require a write policy. Pull-to-refresh (`state.refetch`) always shows the
+current server state. See the [roadmap](/sling_gql/internals/roadmap/).
+
 ## Network log
 
 `network_log.dart`'s `NetworkLog` is a `ChangeNotifier` that keeps every
@@ -195,19 +248,22 @@ says the whole point:
 /// nothing else to wire.
 ```
 
-`SkeletonBox` is a grey rounded rectangle; `SkeletonText` renders the real
-text if it's non-null, or a `SkeletonBox` sized to `width`/font size if it's
-`null`. There's no separate loading branch in `launches_screen.dart` or
-`launch_screen.dart` — every place that shows a string calls `SkeletonText`
-and lets the accessor's `null`-while-fetching semantics do the rest.
+`SkeletonBox` is a surface-coloured rounded rectangle; `SkeletonText` renders
+the real text if it's non-null, or a `SkeletonBox` sized to `width`/font size
+if it's `null`. There's no separate loading branch in any screen — every place
+that shows a string calls `SkeletonText` and lets the accessor's
+`null`-while-fetching semantics do the rest.
 
-## The end-to-end test
+## The end-to-end tests
 
 `test/app_test.dart` runs against the **real** mock API (`cd mock-api && npm
 start` first — `flutter test` blocks HTTP by default, so the test opts back
-in with `HttpOverrides.global = null`). It pumps the real `LaunchesScreen`,
-taps through to the detail screen, and asserts exact `log.entries` counts at
-each step:
+in with `HttpOverrides.global = null`). It pumps the real `SlingApp` widget.
+
+### Test 1 — Launches tab, pagination, detail, mutation
+
+Taps through the full Launches → Detail → mutation flow and asserts exact
+`log.entries` counts:
 
 - **1 request for the first frame.** Header (`company`, `stats`) and the
   list body (`launches(first: 20)`) are separate widgets, separate
@@ -215,28 +271,23 @@ each step:
   batching merges them into one document.
 - **1 more request for "Load more".** Tapping the button appends a cursor
   and rebuilds only the list body; only `launches(first: 20, after: <new
-  cursor>)` is new, so only that page is fetched. The test also checks the
-  `after` cursor arrived as a GraphQL variable (`v1`), not inlined into the
-  document string.
+  cursor>)` is new, so only that page is fetched.
 - **1 more request for the detail screen.** Opening a launch triggers
-  `prepare`, which selects everything the screen needs, including the
-  collapsed payloads section, in one shot. The test asserts the outgoing
-  document contains `payloads {` (prepare reached it) and does **not**
-  contain `nodes` (nothing from the list query leaked in) — i.e. this really
-  is one fresh, minimal request, not a byproduct of cache state.
-- **0 requests to expand payloads.** Tapping "Show payloads" only flips
-  local state; `log.entries` stays at 3, proving `prepare` really did pay for
-  that data up front.
+  `prepare`, which selects everything the screen needs in one shot.
+- **0 requests to expand payloads.** `prepare` paid for them up front.
 
-This is arguably the single most valuable test in the repo: it's the only
-one that fails the moment someone introduces a waterfall — a field read
-inside an `if` on fetched data, a build split across frames, a missing
-`prepare` call — and it fails immediately, on the exact assertion
-`log.entries.length`. Every other test checks *correctness*; this one checks
-a performance property that's otherwise invisible until a screen is slow.
+### Test 2 — Me tab, Favourites segment
+
+- **1 request for the Me tab** (on first switch). Contains both `me {` and
+  `favorites {` — batched in one document.
+- **1 more for the Favourites segment** (on first switch to Favourites).
+  `LaunchFilter(favorite: true)` is a distinct argument set → new alias →
+  new cache entry.
+- **0 requests switching back to All.** All pages are still in cache.
+- Every row in Favourites mode shows `CupertinoIcons.heart_fill`.
 
 <Aside type="note">
-`settle()` in the test polls with a 100ms delay up to 50 times rather than
-`pumpAndSettle()`, because this test hits a real HTTP server with real
+`settle()` in the tests polls with a 100ms delay up to 50 times rather than
+`pumpAndSettle()`, because the tests hit a real HTTP server with real
 `LATENCY_MS` latency — there's no fixed number of frames to pump.
 </Aside>

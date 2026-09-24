@@ -78,9 +78,12 @@ flutter test                                   # widget tests against the runnin
 flutter run -d <ios-simulator>
 ```
 
-The example prints every GraphQL document it sends to the console and shows
-them in-app (antenna icon, top right). Server latency is `LATENCY_MS` (default
-400 ms) so skeletons are visible.
+The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
+with cursor pagination and a Favourites segment filter, and a **Me** tab
+showing the viewer profile and their favourite launches. It prints every
+GraphQL document it sends to the console and shows them in-app (antenna icon,
+top right). Server latency is `LATENCY_MS` (default 400 ms) so skeletons are
+visible.
 
 Regenerate the example's schema classes after editing `mock-api/schema.graphql`:
 

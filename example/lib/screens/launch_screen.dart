@@ -3,6 +3,7 @@ import 'package:sling_gql/sling_gql.dart';
 
 import '../generated/schema.dart';
 import '../network_log.dart';
+import '../theme.dart';
 import '../widgets/skeleton.dart';
 
 /// Launch detail.
@@ -175,7 +176,7 @@ class _FavoriteButton extends StatelessWidget {
                 ),
         child: Icon(
           favorite ?? false ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
-          color: state.error != null ? CupertinoColors.systemGrey : CupertinoColors.systemPink,
+          color: state.error != null ? kColorTextSecondary : kColorCoral,
           size: 28,
         ),
       ),

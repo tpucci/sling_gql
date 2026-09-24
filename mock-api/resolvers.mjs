@@ -62,6 +62,7 @@ function applyLaunchFilter(list, filter) {
     if (filter.rocketId != null && l.rocketId !== filter.rocketId) return false;
     if (filter.year != null && l.date.getUTCFullYear() !== filter.year) return false;
     if (filter.upcoming != null && l.upcoming !== filter.upcoming) return false;
+    if (filter.favorite != null && l.favorite !== filter.favorite) return false;
     if (filter.search) {
       const needle = filter.search.toLowerCase();
       const inName = l.name.toLowerCase().includes(needle);
@@ -188,6 +189,13 @@ export const resolvers = {
       paginateCursor(astronauts, { first, after, defaultFirst: 20 }),
     astronaut: (_root, { id }) => findAstronaut(id) ?? null,
 
+    me: () => ({
+      id: 'viewer-1',
+      name: 'Mira Vance',
+      agency: 'Sling Space',
+      avatarInitials: 'MV',
+    }),
+
     stats: () => {
       const total = launches.length;
       const past = launches.filter((l) => !l.upcoming);
@@ -266,6 +274,14 @@ export const resolvers = {
   Astronaut: {
     missions: (astronaut) =>
       launches.filter((l) => l.crewIds.includes(astronaut.id)),
+  },
+
+  Viewer: {
+    favorites: () =>
+      [...launches]
+        .filter((l) => l.favorite === true)
+        .sort((a, b) => b.date.getTime() - a.date.getTime()),
+    favoriteCount: () => launches.filter((l) => l.favorite === true).length,
   },
 
   Launch: {

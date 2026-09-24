@@ -1,5 +1,7 @@
 import 'package:flutter/cupertino.dart';
 
+import '../theme.dart';
+
 /// Grey box placeholder, used while the accessor returns `null` for a field
 /// that has not been fetched yet.
 class SkeletonBox extends StatelessWidget {
@@ -12,7 +14,7 @@ class SkeletonBox extends StatelessWidget {
         width: width,
         height: height,
         decoration: BoxDecoration(
-          color: CupertinoColors.systemGrey4.resolveFrom(context),
+          color: kColorSurface,
           borderRadius: BorderRadius.circular(4),
         ),
       );

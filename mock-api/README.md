@@ -31,6 +31,39 @@ Each operation is logged to stdout as it completes, e.g.:
 [14:03:21] query launches, stats  (401ms)
 ```
 
+## Schema highlights
+
+### `Viewer` and `me`
+
+`me: Viewer!` returns a static signed-in user (id `viewer-1`, name `Mira Vance`,
+agency `Sling Space`). Its field resolvers compute `favorites` and
+`favoriteCount` lazily from the live launches array, so they reflect
+`toggleFavorite` mutations within the same process:
+
+```graphql
+{
+  me {
+    id name agency avatarInitials favoriteCount
+    favorites { id name date status }
+  }
+}
+```
+
+### `LaunchFilter.favorite`
+
+`filter: { favorite: true }` on `launches` / `launchesPage` keeps only launches
+whose `favorite` flag equals that value (server-side, i.e. `l.favorite ===
+filter.favorite`):
+
+```graphql
+{
+  launches(first: 20, filter: { favorite: true }) {
+    totalCount
+    nodes { id name favorite }
+  }
+}
+```
+
 ## Example queries
 
 Cursor-paginated launches, newest first, with the next page:

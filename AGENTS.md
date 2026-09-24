@@ -129,7 +129,10 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
    packages on top of `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`.
 3. ~~Mutations~~ done. Subscriptions next (the mock API exposes two SSE
    subscriptions). Follow-ups for mutations: write policies for create/delete
-   (prepend a ref to a list), `refetchQueries` sugar.
+   (prepend a ref to a list), `refetchQueries` sugar, and **list membership
+   after a mutation** (add/remove a `Ref` in a cached list so `me.favorites`
+   and `launches(filter: {favorite: true})` reflect `toggleFavorite` without
+   a full refetch).
 4. Unions/interfaces via `$on` (add one to `mock-api/schema.graphql` first;
    the generator currently skips none because there are none).
 5. ~~Finer-grained rebuild~~ per `entity.field` now; list-index granularity

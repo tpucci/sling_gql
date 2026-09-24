@@ -3,8 +3,9 @@ import 'package:sling_gql/sling_gql.dart';
 
 import '../generated/schema.dart';
 import '../network_log.dart';
+import '../theme.dart';
+import '../widgets/launch_row.dart';
 import '../widgets/skeleton.dart';
-import 'launch_screen.dart';
 
 /// Cursor-paginated launch list.
 ///
@@ -15,6 +16,9 @@ import 'launch_screen.dart';
 ///   argument set, hence a distinct alias and cache entry. "Load more" adds a
 ///   cursor and only the new page is fetched; pull-to-refresh refetches all
 ///   pages in one request.
+/// - "Favourites" mode passes `filter: LaunchFilter(favorite: true)` — a
+///   different argument set → different alias → different cache entry. Switching
+///   back to "All" is instant because the All pages are still cached.
 class LaunchesScreen extends StatefulWidget {
   const LaunchesScreen({super.key});
 
@@ -25,11 +29,25 @@ class LaunchesScreen extends StatefulWidget {
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
 
+  /// 0 = All, 1 = Favourites.
+  int _segment = 0;
+
   /// One entry per loaded page; `null` is the first page.
-  final List<String?> _cursors = [null];
+  List<String?> _cursors = [null];
+
+  void _onSegmentChanged(int? val) {
+    if (val == null || val == _segment) return;
+    setState(() {
+      _segment = val;
+      _cursors = [null]; // reset pagination when the filter changes
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final favoritesOnly = _segment == 1;
+    final filter = favoritesOnly ? const LaunchFilter(favorite: true) : null;
+
     return CupertinoPageScaffold(
       navigationBar: const CupertinoNavigationBar(
         middle: Text('Launches'),
@@ -39,16 +57,34 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
         child: Column(
           children: [
             const _Header(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: CupertinoSlidingSegmentedControl<int>(
+                groupValue: _segment,
+                onValueChanged: _onSegmentChanged,
+                children: const {
+                  0: Text('All'),
+                  1: Text('Favourites'),
+                },
+              ),
+            ),
             Expanded(
               child: QueryBuilder<Query>(
                 builder: (context, query, state) {
                   if (state.error != null) {
-                    return _ErrorView(error: state.error!, onRetry: state.refetch);
+                    return _ErrorView(
+                      error: state.error!,
+                      onRetry: state.refetch,
+                    );
                   }
 
                   final pages = [
                     for (final cursor in _cursors)
-                      query.launches(first: pageSize, after: cursor),
+                      query.launches(
+                        first: pageSize,
+                        after: cursor,
+                        filter: filter,
+                      ),
                   ];
                   final launches = [
                     for (final page in pages) ...?page?.nodes,
@@ -62,18 +98,21 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
                   final endCursor = last?.pageInfo?.endCursor;
 
                   return CustomScrollView(
+                    key: const ValueKey('launches-scroll'),
                     slivers: [
                       CupertinoSliverRefreshControl(onRefresh: state.refetch),
                       SliverList.builder(
                         itemCount: launches.length,
-                        itemBuilder: (context, i) => _LaunchRow(launches[i]),
+                        itemBuilder: (context, i) => LaunchRow(launches[i]),
                       ),
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: hasMore
                               ? CupertinoButton.filled(
-                                  onPressed: () => setState(() => _cursors.add(endCursor)),
+                                  onPressed: () => setState(
+                                    () => _cursors.add(endCursor),
+                                  ),
                                   child: Text(
                                     'Load more (${launches.length} / $total)',
                                   ),
@@ -81,7 +120,12 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
                               : Center(
                                   child: state.isLoading
                                       ? const CupertinoActivityIndicator()
-                                      : Text('${launches.length} launches'),
+                                      : Text(
+                                          '${launches.length} launches',
+                                          style: const TextStyle(
+                                            color: kColorTextSecondary,
+                                          ),
+                                        ),
                                 ),
                         ),
                       ),
@@ -112,7 +156,7 @@ class _Header extends StatelessWidget {
         final ceo = company?.ceo;
         return Container(
           padding: const EdgeInsets.all(16),
-          color: CupertinoColors.systemGrey6.resolveFrom(context),
+          color: kColorSurface,
           child: Row(
             children: [
               Expanded(
@@ -122,13 +166,22 @@ class _Header extends StatelessWidget {
                     SkeletonText(
                       company?.name,
                       width: 120,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: kColorTextPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     SkeletonText(
-                      total == null ? null : '$total launches · $rate % success · CEO $ceo',
+                      total == null
+                          ? null
+                          : '$total launches · $rate % success · CEO $ceo',
                       width: 240,
-                      style: const TextStyle(fontSize: 13),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: kColorTextSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -141,64 +194,6 @@ class _Header extends StatelessWidget {
     );
   }
 }
-
-class _LaunchRow extends StatelessWidget {
-  const _LaunchRow(this.launch);
-  final Launch launch;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = launch.status;
-    final date = launch.date;
-    final rocketName = launch.rocket?.name;
-    // Read here so the row depends on `Launch:<id>.favorite` and rebuilds when
-    // the detail screen's mutation updates the entity.
-    final favorite = launch.favorite ?? false;
-    return CupertinoListTile(
-      leading: launch.isSkeleton
-          ? const SkeletonBox(width: 28, height: 28)
-          : Icon(_statusIcon(status), color: _statusColor(status)),
-      title: SkeletonText(launch.name, width: 160),
-      subtitle: SkeletonText(
-        date == null ? null : '${date.substring(0, 10)} · $rocketName',
-        width: 200,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (favorite)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Icon(CupertinoIcons.heart_fill, color: CupertinoColors.systemPink, size: 18),
-            ),
-          const CupertinoListTileChevron(),
-        ],
-      ),
-      onTap: launch.id == null
-          ? null
-          : () => Navigator.of(context).push(
-                CupertinoPageRoute<void>(builder: (_) => LaunchScreen(id: launch.id!)),
-              ),
-    );
-  }
-}
-
-IconData _statusIcon(String? status) => switch (status) {
-      LaunchStatus.SUCCESS => CupertinoIcons.checkmark_circle_fill,
-      LaunchStatus.FAILURE => CupertinoIcons.xmark_circle_fill,
-      LaunchStatus.PARTIAL_FAILURE => CupertinoIcons.exclamationmark_circle_fill,
-      LaunchStatus.SCRUBBED => CupertinoIcons.pause_circle_fill,
-      LaunchStatus.SCHEDULED => CupertinoIcons.clock_fill,
-      _ => CupertinoIcons.question_circle,
-    };
-
-Color _statusColor(String? status) => switch (status) {
-      LaunchStatus.SUCCESS => CupertinoColors.systemGreen,
-      LaunchStatus.FAILURE => CupertinoColors.systemRed,
-      LaunchStatus.PARTIAL_FAILURE => CupertinoColors.systemOrange,
-      LaunchStatus.SCHEDULED => CupertinoColors.systemBlue,
-      _ => CupertinoColors.systemGrey,
-    };
 
 class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.error, required this.onRetry});
@@ -218,10 +213,16 @@ class _ErrorView extends StatelessWidget {
               const SizedBox(height: 8),
               const Text(
                 'Is the mock API running? `cd mock-api && npm start`',
-                style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
+                style: TextStyle(
+                  color: CupertinoColors.systemGrey,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 16),
-              CupertinoButton.filled(onPressed: onRetry, child: const Text('Retry')),
+              CupertinoButton.filled(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),

@@ -121,8 +121,29 @@ type Query {
   astronauts(first: Int = 20, after: String): AstronautConnection!
   astronaut(id: ID!): Astronaut
   stats: Stats!
+  "The signed-in user (static in the mock)."
+  me: Viewer!
 }
 ```
+
+### `Viewer` and `me`
+
+`me` returns a static viewer object (id `viewer-1`, name `Mira Vance`, agency
+`Sling Space`, avatarInitials `MV`). Its field resolvers compute `favorites`
+and `favoriteCount` lazily from the live in-memory launches array, so they
+reflect `toggleFavorite` mutations within the same server process:
+
+```graphql
+{
+  me {
+    id name agency avatarInitials favoriteCount
+    favorites { id name date status favorite }
+  }
+}
+```
+
+`favoriteCount` and `favorites` are computed at request time, not cached, so
+calling `toggleFavorite` and then re-fetching `me` will show the updated list.
 
 `nextLaunch` and `latestLaunch` are computed relative to real time, not
 stored: `nextLaunch` is the soonest launch with `upcoming: true`,
@@ -140,8 +161,16 @@ input LaunchFilter {
   upcoming: Boolean
   "Case-insensitive substring match on name and details."
   search: String
+  "Only launches whose favourite flag equals this value."
+  favorite: Boolean
 }
 ```
+
+`filter: { favorite: true }` returns only launches where `l.favorite ===
+true` (server-side comparison). The example app's Favourites segment uses
+this. Because the argument set differs from the plain `launches(first: N)`
+query, the sling_gql cache stores them as separate entries — switching back
+to All is served from cache (zero requests).
 
 Filtering, ordering and pagination run in plain JavaScript over the
 in-memory array (`resolvers.mjs`). Page sizes are clamped to `[1, 100]`

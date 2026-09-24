@@ -43,6 +43,9 @@ class Query extends Accessor {
     },
     keyed: true,
   );
+
+  /// The signed-in user (static in the mock).
+  Viewer? get me => object('me', Viewer.new, keyed: true);
   Launch? launch({required String id}) => object(
     'launch',
     Launch.new,
@@ -381,6 +384,24 @@ class Stats extends Accessor {
       list('launchesPerYear', YearCount.new);
 }
 
+class Viewer extends Accessor {
+  Viewer(super.recorder, super.selection, super.path);
+
+  String? get id => scalar<String>('id');
+  set id(String? v) => write('id', v);
+  String? get name => scalar<String>('name');
+  set name(String? v) => write('name', v);
+  String? get agency => scalar<String>('agency');
+  set agency(String? v) => write('agency', v);
+  String? get avatarInitials => scalar<String>('avatarInitials');
+  set avatarInitials(String? v) => write('avatarInitials', v);
+  int? get favoriteCount => scalar<int>('favoriteCount');
+  set favoriteCount(int? v) => write('favoriteCount', v);
+
+  /// Favourite launches, most recent first.
+  List<Launch>? get favorites => list('favorites', Launch.new, keyed: true);
+}
+
 abstract final class LaunchStatus {
   static const SCHEDULED = 'SCHEDULED';
   static const SUCCESS = 'SUCCESS';
@@ -410,6 +431,7 @@ class LaunchFilter {
     this.year,
     this.upcoming,
     this.search,
+    this.favorite,
   });
 
   final String? status;
@@ -420,12 +442,16 @@ class LaunchFilter {
   /// Case-insensitive substring match on name and details.
   final String? search;
 
+  /// Only launches whose favourite flag equals this value.
+  final bool? favorite;
+
   Map<String, Object?> toJson() => {
     if (status != null) 'status': status,
     if (rocketId != null) 'rocketId': rocketId,
     if (year != null) 'year': year,
     if (upcoming != null) 'upcoming': upcoming,
     if (search != null) 'search': search,
+    if (favorite != null) 'favorite': favorite,
   };
 }
 
