@@ -20,8 +20,9 @@ String generate(
 }) {
   final typesByName = schema.typesByName;
   final ctx = _EmitContext(typesByName, keyField);
+  // Subscriptions are not supported yet; the Mutation root is emitted like
+  // Query, with a `.root` constructor and a `client.mutate` extension.
   final skipRootNames = {
-    if (schema.mutationTypeName != null) schema.mutationTypeName!,
     if (schema.subscriptionTypeName != null) schema.subscriptionTypeName!,
   };
 
@@ -56,10 +57,20 @@ String generate(
     ..writeln("import '$importPath';")
     ..writeln();
 
-  _emitQueryClass(out, queryType, ctx);
+  _emitRootClass(out, queryType, ctx, className: 'Query');
+
+  final mutationType = schema.mutationTypeName == null
+      ? null
+      : typesByName[schema.mutationTypeName!];
+  if (mutationType != null && mutationType.fields.isNotEmpty) {
+    out.writeln();
+    _emitRootClass(out, mutationType, ctx, className: 'Mutation');
+    out.writeln();
+    _emitMutateExtension(out);
+  }
 
   for (final t in objectTypes) {
-    if (t.name == schema.queryTypeName) continue;
+    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName) continue;
     out.writeln();
     _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
@@ -120,16 +131,37 @@ class _EmitContext {
   }
 }
 
-void _emitQueryClass(StringBuffer out, GqlType queryType, _EmitContext ctx) {
-  _emitDocAndDeprecation(out, indent: '', description: queryType.description);
-  out.writeln('class Query extends Accessor {');
-  out.writeln('  Query(super.recorder, super.selection, super.path);');
-  out.writeln('  Query.root(Recorder r) : super(r, r.root, const []);');
+/// Operation root types (`Query`, `Mutation`) get a `.root` constructor that
+/// binds them to a [Recorder]'s selection root.
+void _emitRootClass(
+  StringBuffer out,
+  GqlType type,
+  _EmitContext ctx, {
+  required String className,
+}) {
+  _emitDocAndDeprecation(out, indent: '', description: type.description);
+  out.writeln('class $className extends Accessor {');
+  out.writeln('  $className(super.recorder, super.selection, super.path);');
+  out.writeln('  $className.root(Recorder r) : super(r, r.root, const []);');
   out.writeln();
-  for (final field in queryType.fields) {
+  for (final field in type.fields) {
     _emitField(out, field, ctx);
   }
   out.writeln('}');
+}
+
+/// `client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)` without
+/// the caller having to pass `Mutation.root`.
+void _emitMutateExtension(StringBuffer out) {
+  out
+    ..writeln('/// Typed mutations for this schema. See `SlingClient.mutateWith`.')
+    ..writeln('extension SlingMutations on SlingClient<Query> {')
+    ..writeln('  Future<T> mutate<T>(')
+    ..writeln('    T Function(Mutation mutation) body, {')
+    ..writeln('    void Function()? optimistic,')
+    ..writeln('  }) =>')
+    ..writeln('      mutateWith(Mutation.root, body, optimistic: optimistic);')
+    ..writeln('}');
 }
 
 void _emitObjectClass(

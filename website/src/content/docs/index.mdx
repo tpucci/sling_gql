@@ -150,7 +150,8 @@ export const gqlSnippet = `query {
   | Optimistic writes | <span class="pill pill-ok">done</span> |
   | Code generator (objects, enums, inputs, custom scalars) | <span class="pill pill-ok">done</span> |
   | Normalized cache (`__typename` + `id`), entity lookups, per-field rebuilds | <span class="pill pill-ok">done</span> |
-  | Mutations & subscriptions (mock API already exposes them) | <span class="pill pill-next">next</span> |
+  | Mutations (`client.mutate`, `MutationBuilder`, optimistic + rollback) | <span class="pill pill-ok">done</span> |
+  | Subscriptions (mock API already exposes them over SSE) | <span class="pill pill-next">next</span> |
   | Unions / interfaces (`$on`) | <span class="pill pill-no">not started</span> |
   | Cache expiry, SWR, persistence | <span class="pill pill-no">not started</span> |
 

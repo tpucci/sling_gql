@@ -74,6 +74,39 @@ class Query extends Accessor {
   Stats? get stats => object('stats', Stats.new);
 }
 
+class Mutation extends Accessor {
+  Mutation(super.recorder, super.selection, super.path);
+  Mutation.root(Recorder r) : super(r, r.root, const []);
+
+  Launch? toggleFavorite({required String launchId}) => object(
+    'toggleFavorite',
+    Launch.new,
+    args: {'launchId': Arg('ID!', launchId)},
+    keyed: true,
+  );
+  Launch? scheduleLaunch({required ScheduleLaunchInput input}) => object(
+    'scheduleLaunch',
+    Launch.new,
+    args: {'input': Arg('ScheduleLaunchInput!', input.toJson())},
+    keyed: true,
+  );
+  Launch? updateLaunchStatus({required String id, required String status}) =>
+      object(
+        'updateLaunchStatus',
+        Launch.new,
+        args: {'id': Arg('ID!', id), 'status': Arg('LaunchStatus!', status)},
+        keyed: true,
+      );
+}
+
+/// Typed mutations for this schema. See `SlingClient.mutateWith`.
+extension SlingMutations on SlingClient<Query> {
+  Future<T> mutate<T>(
+    T Function(Mutation mutation) body, {
+    void Function()? optimistic,
+  }) => mutateWith(Mutation.root, body, optimistic: optimistic);
+}
+
 class PageInfo extends Accessor {
   PageInfo(super.recorder, super.selection, super.path);
 

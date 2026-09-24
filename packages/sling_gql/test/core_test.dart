@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
@@ -8,8 +9,9 @@ import 'package:sling_gql/sling_gql.dart';
 
 // --- Hand-written "generated" code for a tiny schema -------------------------
 //
-// type Query { me: User!  user(id: ID!): User }
-// type User  { id: ID!  name: String!  age: Int  friends(limit: Int): [User!]! }
+// type Query    { me: User!  user(id: ID!): User }
+// type User     { id: ID!  name: String!  age: Int  friends(limit: Int): [User!]! }
+// type Mutation { rename(id: ID!, name: String!): User!  deleteUser(id: ID!): Boolean! }
 
 class Query extends Accessor {
   Query(super.recorder, super.selection, super.path);
@@ -27,8 +29,29 @@ class User extends Accessor {
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   int? get age => scalar<int>('age');
+  set age(int? v) => write('age', v);
   List<User> friends({int? limit}) =>
       list('friends', User.new, args: {'limit': Arg('Int', limit)}, keyed: true)!;
+}
+
+class Mutation extends Accessor {
+  Mutation(super.recorder, super.selection, super.path);
+  Mutation.root(Recorder r) : super(r, r.root, const []);
+
+  User? rename({required String id, required String name}) => object(
+        'rename',
+        User.new,
+        args: {'id': Arg('ID!', id), 'name': Arg('String!', name)},
+        keyed: true,
+      );
+  bool? deleteUser({required String id}) =>
+      scalar<bool>('deleteUser', args: {'id': Arg('ID!', id)});
+}
+
+/// What the generator emits so `client.mutate` needs no wiring.
+extension on SlingClient<Query> {
+  Future<T> mutate<T>(T Function(Mutation m) body, {void Function()? optimistic}) =>
+      mutateWith(Mutation.root, body, optimistic: optimistic);
 }
 
 // --- Test harness -------------------------------------------------------------
@@ -54,6 +77,7 @@ class Harness {
 void main() {
   _childWidgetTests();
   _normalizationTests();
+  _mutationTests();
 
   test('reading fields records a selection and prints a document', () async {
     final h = Harness((q, v) => {
@@ -355,6 +379,180 @@ void _childWidgetTests() {
   });
 }
 
+// --- Mutations ------------------------------------------------------------------
+
+void _mutationTests() {
+  Map<String, Object?> meWithFriends() => {
+        'me': {
+          '__typename': 'User',
+          'id': '1',
+          'friends': [
+            {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
+          ],
+        },
+      };
+
+  /// Mock server: queries return [meWithFriends]; `rename` echoes its args.
+  Harness harness({bool failMutation = false}) => Harness((q, v) {
+        if (!q.startsWith('mutation')) return meWithFriends();
+        if (failMutation) throw StateError('mutation refused');
+        final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
+        return {
+          alias: {'__typename': 'User', 'id': v['v0'], 'name': v['v1']},
+        };
+      });
+
+  test('mutate records the selection, sends it alone, returns the value', () async {
+    final h = harness();
+    await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
+
+    final name = await h.client.mutate((m) => m.rename(id: 'a', name: 'Robert')?.name);
+
+    expect(name, 'Robert');
+    expect(h.sent, hasLength(2));
+    final op = h.sent.last;
+    expect(op.document, contains('mutation (\$v0: ID!, \$v1: String!) {'));
+    expect(op.document, contains(': rename(id: \$v0, name: \$v1) {\n    __typename\n    id\n    name\n  }'));
+    expect(op.variables, {'v0': 'a', 'v1': 'Robert'});
+  });
+
+  test('the response updates the entity everywhere and notifies readers', () async {
+    final h = harness();
+    var rebuilds = 0;
+    final list = h.client.createScope(onChanged: () => rebuilds++);
+    list.run((q) => q.me.friends().map((f) => f.name).toList());
+    await list.whenSettled;
+    list.run((q) => q.me.friends().map((f) => f.name).toList()); // the rebuild
+    rebuilds = 0;
+
+    await h.client.mutate((m) => m.rename(id: 'a', name: 'Robert')?.name);
+
+    expect(rebuilds, 1);
+    expect(list.run((q) => q.me.friends()[0].name), 'Robert');
+    expect(h.client.cache.entity('ROOT_MUTATION'), anyOf(isNull, isEmpty),
+        reason: 'payload root fields are dropped once the result is read');
+  });
+
+  test('optimistic write is visible immediately and confirmed by the response',
+      () async {
+    final h = harness();
+    final scope = h.client.createScope(onChanged: () {});
+    final bob = await h.client.resolve((q) => q.me.friends()[0]);
+
+    final future = h.client.mutate(
+      (m) => m.rename(id: 'a', name: 'Robert')?.name,
+      optimistic: () => bob.name = 'Robert',
+    );
+    expect(scope.run((q) => q.me.friends()[0].name), 'Robert', reason: 'before the response');
+    await future;
+    expect(scope.run((q) => q.me.friends()[0].name), 'Robert');
+  });
+
+  test('a failed mutation rolls the optimistic writes back and throws', () async {
+    final h = harness(failMutation: true);
+    var rebuilds = 0;
+    final scope = h.client.createScope(onChanged: () => rebuilds++);
+    final bob = await h.client.resolve((q) => q.me.friends()[0]);
+    scope.run((q) => (q.me.friends()[0].name, q.me.friends()[0].age));
+    rebuilds = 0;
+
+    await expectLater(
+      h.client.mutate(
+        (m) => m.rename(id: 'a', name: 'Robert')?.name,
+        optimistic: () {
+          bob.name = 'Robert';
+          bob.age = 30; // was never fetched: must go back to missing, not null
+        },
+      ),
+      throwsStateError,
+    );
+
+    expect(scope.run((q) => q.me.friends()[0].name), 'Bob');
+    expect(h.client.cache.read('query', [const Ref('User:a'), 'age']), missing);
+    expect(rebuilds, 2, reason: 'once for the optimistic write, once for the rollback');
+  });
+
+  test('scalar mutation results are returned too', () async {
+    final h = Harness((q, v) => q.startsWith('mutation')
+        ? {'deleteUser_${_deleteAlias(v)}': true}
+        : meWithFriends());
+    expect(await h.client.mutate((m) => m.deleteUser(id: 'a')), isTrue);
+  });
+
+  testWidgets('MutationBuilder: loading state, then every copy rebuilds', (tester) async {
+    // Hold the mutation response until we have looked at the optimistic state.
+    final release = Completer<void>();
+    final sent = <PrintedOperation>[];
+    final client = SlingClient<Query>(
+      endpoint: Uri.parse('http://test/graphql'),
+      rootFactory: Query.root,
+      onOperation: sent.add,
+      httpClient: MockClient((req) async {
+        final body = jsonDecode(req.body) as Map;
+        final q = body['query'] as String;
+        if (!q.startsWith('mutation')) {
+          return http.Response(jsonEncode({'data': meWithFriends()}), 200);
+        }
+        await release.future;
+        final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
+        final v = body['variables'] as Map;
+        return http.Response(
+          jsonEncode({'data': {alias: {'__typename': 'User', 'id': v['v0'], 'name': v['v1']}}}),
+          200,
+        );
+      }),
+    );
+    await tester.pumpWidget(SlingScope<Query>(
+      client: client,
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: Column(children: [
+          QueryBuilder<Query>(
+            builder: (_, q, s) => Text('list: ${q.me.friends()[0].name ?? '\u2026'}'),
+          ),
+          QueryBuilder<Query>(
+            builder: (_, q, s) {
+              final bob = q.user(id: 'a');
+              final name = bob?.name;
+              return MutationBuilder<Mutation>(
+                root: Mutation.root,
+                builder: (_, mutate, m) => GestureDetector(
+                  onTap: () => mutate(
+                    (mu) => mu.rename(id: 'a', name: 'Robert')?.name,
+                    optimistic: () => bob?.name = 'Robert!',
+                  ),
+                  child: Text('detail: $name ${m.isLoading ? '(saving)' : ''}'),
+                ),
+              );
+            },
+          ),
+        ]),
+      ),
+    ));
+    await tester.pump();
+    expect(find.text('list: Bob'), findsOneWidget);
+    expect(find.text('detail: Bob '), findsOneWidget, reason: 'served via lookup, no 2nd request');
+    expect(sent, hasLength(1));
+
+    await tester.tap(find.textContaining('detail:'));
+    await tester.pump();
+    expect(find.text('list: Robert!'), findsOneWidget, reason: 'optimistic, both copies');
+    expect(find.text('detail: Robert! (saving)'), findsOneWidget);
+
+    release.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('list: Robert'), findsOneWidget);
+    expect(find.text('detail: Robert '), findsOneWidget);
+    expect(sent, hasLength(2));
+    expect(sent.last.document, startsWith('mutation'));
+  });
+}
+
+String _deleteAlias(Map vars) => Selection.root('mutation')
+    .child('deleteUser', {'id': Arg('ID!', vars['v0'])})
+    .alias
+    .substring('deleteUser_'.length);
+
 // --- Normalization --------------------------------------------------------------
 
 void _normalizationTests() {
@@ -432,7 +630,7 @@ void _normalizationTests() {
     final touched = h.client.cache.write('query', [const Ref('User:a'), 'name'], 'Robert');
     expect(touched, {'User:a.name'});
     // Notify manually: cache writes outside a scope do not notify by themselves.
-    list.onWrite(touched);
+    list.onWrite(CacheWrite('query', [const Ref('User:a'), 'name'], 'Bob', touched));
 
     expect(listRebuilds, 1);
     expect(headerRebuilds, 0);

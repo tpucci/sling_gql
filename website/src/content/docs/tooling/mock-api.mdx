@@ -150,10 +150,11 @@ regardless of what a client asks for. Cursors are base64-encoded offsets
 
 ## Mutations and subscriptions
 
-Wired up in the schema and resolvers, not yet consumed by the runtime or the
-example app — sling_gql is queries-only for now (see
-[Roadmap](/sling_gql/internals/roadmap/)). They exist so that phase has
-something real to build against:
+`toggleFavorite` is what the example's detail-screen heart calls (see
+[Mutations](/sling_gql/guides/mutations/)); favourites live in the server's memory, so they
+persist across app restarts until the server restarts. Subscriptions are wired up in the
+schema and resolvers but not yet consumed by the runtime (see
+[Roadmap](/sling_gql/internals/roadmap/)):
 
 ```graphql
 mutation {

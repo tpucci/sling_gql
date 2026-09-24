@@ -4,7 +4,17 @@ library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
 export 'src/cache/cache.dart'
-    show Cache, NormalizedCache, Normalization, Ref, missing, depKey;
-export 'src/client.dart' show SlingClient, SlingException, QueryScope, RootFactory;
+    show Cache, CacheWrite, NormalizedCache, Normalization, Ref, missing, depKey;
+export 'src/client.dart'
+    show SlingClient, SlingException, QueryScope, MutationScope, RootFactory;
 export 'src/selection.dart' show Arg, Selection, PrintedOperation;
-export 'src/widgets.dart' show SlingScope, QueryBuilder, QueryState, QueryWidgetBuilder;
+export 'src/widgets.dart'
+    show
+        SlingScope,
+        QueryBuilder,
+        QueryState,
+        QueryWidgetBuilder,
+        MutationBuilder,
+        MutationState,
+        MutationWidgetBuilder,
+        Mutate;

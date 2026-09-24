@@ -1,0 +1,126 @@
+---
+title: Mutations
+description: client.mutate and MutationBuilder — record the selection by reading it, send, let the normalized cache update every widget; optimistic writes with automatic rollback.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## The same idea as queries
+
+A mutation in sling_gql is a function that **reads** the fields it wants back:
+
+```dart
+final favorite = await client.mutate(
+  (m) => m.toggleFavorite(launchId: id)?.favorite,
+);
+```
+
+`client.mutate` is an extension the generator emits for your schema (it binds the
+`Mutation` root type); the runtime primitive is `client.mutateWith(Mutation.root, body)`.
+
+The body runs **twice**:
+
+<Steps>
+
+1. **Record.** The body is run against an empty recorder. Every field it touches is added to
+   the selection; nothing is fetched on a miss. `toggleFavorite(launchId:)` with
+   `?.favorite` records:
+
+   ```graphql
+   mutation ($v0: ID!) {
+     toggleFavorite_1u2xg8k: toggleFavorite(launchId: $v0) {
+       __typename
+       id
+       favorite
+     }
+   }
+   ```
+
+   `id` is added because `Launch` is a keyed type — see [Caching](/sling_gql/guides/caching/).
+
+2. **Send.** One request, immediately — mutations are never batched with queries.
+
+3. **Write.** The response is normalized exactly like a query response: the payload's
+   `Launch` merges into `Launch:launch-181`. Every scope that read `Launch:launch-181.favorite`
+   — the list row, the detail screen, anything — is notified and rebuilds. No refetch, no
+   manual cache update, no "which queries do I invalidate".
+
+4. **Return.** The body runs again, this time against the cache, and its return value
+   (`true`) is what `mutate` resolves to. The payload's root field is then dropped from
+   `ROOT_MUTATION` so it does not pin entities in memory.
+
+</Steps>
+
+<Aside type="tip" title="Select what you need back">
+Whatever the body reads is what comes back and what gets merged. If the server changes more
+fields than you read, the extra changes stay unknown to the cache until a refetch. Read
+them in the body (`launch..status..upcoming`) if the UI shows them.
+</Aside>
+
+## `MutationBuilder` — the `useMutation` equivalent
+
+```dart
+MutationBuilder<Mutation>(
+  root: Mutation.root,
+  builder: (context, mutate, state) => CupertinoButton(
+    onPressed: state.isLoading
+        ? null
+        : () => mutate(
+              (m) => m.toggleFavorite(launchId: id)?.favorite,
+              optimistic: () => launch.favorite = !favorite,
+            ),
+    child: Icon(favorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart),
+  ),
+)
+```
+
+`mutate` returns `Future<T?>`: the body's value on success, `null` on failure with the error
+on `state.error`. `state.isLoading` is true while the request is in flight. The widget does
+**not** rebuild on data changes — it has nothing to do with data; the `QueryBuilder` around it
+does that, because the accessor `launch` it reads is bound to the query scope.
+
+## Optimistic writes and rollback
+
+`optimistic` runs synchronously before the request. Inside it you use the generated
+**setters** on any accessor you already hold:
+
+```dart
+optimistic: () => launch.favorite = !favorite,
+```
+
+That is a normal cache write: it lands on the `Launch:launch-181` entity, so every copy
+updates in the same frame, before the network answers. The client journals each write with
+the previous value (`CacheWrite`). If the mutation fails — transport error, or `errors[]` in
+the response — the journal is undone in reverse order and the affected scopes rebuild. A
+field that was never fetched goes back to *missing* (not `null`), so it is re-fetched rather
+than shown as empty.
+
+When the mutation succeeds, the response simply overwrites the optimistic value with the
+server's.
+
+## Errors
+
+- **Transport / HTTP errors** and **GraphQL errors** both reject the `mutate` future with a
+  `SlingException` (transport errors with the underlying exception). With `MutationBuilder`,
+  they surface on `state.error` instead.
+- **Partial GraphQL errors** (data *and* errors) still write the fields that resolved, prune
+  the `null`s at errored paths, then reject.
+- Mutations have no sticky-error behaviour — every call is a fresh request.
+
+## Updating lists
+
+Because the cache is normalized, a mutation returning an existing entity updates every list
+it appears in for free. Two cases still need a hand:
+
+- **Creating** (`scheduleLaunch`): the new `Launch:<id>` entity exists after the mutation but
+  no list references it. Either `refetch()` the list scope or, once the write policy layer
+  exists, prepend the ref. Today: refetch.
+- **Deleting**: `client.cache.evict('Launch:<id>')` drops the entity from every list that
+  referenced it and blanks fields pointing at it.
+
+## What is in the example
+
+The detail screen's heart is a `MutationBuilder`; the list row reads `launch.favorite` so it
+depends on `Launch:<id>.favorite`. `example/test/app_test.dart` asserts, against the real
+mock server: one request for the mutation, the optimistic state before the response, the
+confirmed state after, and the list row updated on the way back with **no** extra request.

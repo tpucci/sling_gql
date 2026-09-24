@@ -70,7 +70,17 @@ final Map<String, Object?> _schemaJson = {
       {
         'kind': 'OBJECT',
         'name': 'Mutation',
-        'fields': [_field('noop', _type('SCALAR', 'Boolean'))],
+        'fields': [
+          _field('noop', _type('SCALAR', 'Boolean')),
+          _field(
+            'rename',
+            _nonNull(_type('OBJECT', 'User')),
+            args: [
+              _arg('id', _nonNull(_type('SCALAR', 'ID'))),
+              _arg('name', _nonNull(_type('SCALAR', 'String'))),
+            ],
+          ),
+        ],
         'description': null,
         'inputFields': null,
         'enumValues': null,
@@ -141,11 +151,34 @@ void main() {
     expect(code, contains("import 'package:sling_gql/sling_gql.dart';"));
   });
 
-  test('emits Query with root constructors, skips Mutation', () {
+  test('emits Query with root constructors', () {
     expect(code, contains('class Query extends Accessor {'));
     expect(code, contains('Query(super.recorder, super.selection, super.path);'));
     expect(code, contains('Query.root(Recorder r) : super(r, r.root, const []);'));
-    expect(code, isNot(contains('class Mutation')));
+  });
+
+  test('emits Mutation root and the typed mutate extension', () {
+    expect(code, contains('class Mutation extends Accessor {'));
+    expect(code, contains('Mutation.root(Recorder r) : super(r, r.root, const []);'));
+    expect(code, contains("bool? get noop => scalar<bool>('noop');"));
+    expect(
+      code,
+      contains(
+        "User? rename({required String id, required String name}) => object('rename', User.new, args: {'id': Arg('ID!', id), 'name': Arg('String!', name)}, keyed: true);",
+      ),
+    );
+    expect(code, contains('extension SlingMutations on SlingClient<Query> {'));
+    expect(code, contains('mutateWith(Mutation.root, body, optimistic: optimistic);'));
+    // Mutation is not emitted twice (once as root, once as plain object).
+    expect(RegExp('class Mutation extends Accessor').allMatches(code), hasLength(1));
+  });
+
+  test('no Mutation class when the schema has no mutation type', () {
+    final json = Map<String, Object?>.from(_schemaJson);
+    final schema = Map<String, Object?>.from(json['__schema'] as Map<String, Object?>)
+      ..['mutationType'] = null;
+    final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
+    expect(code, isNot(contains('extension SlingMutations')));
   });
 
   test('non-null required arg without default -> required T', () {

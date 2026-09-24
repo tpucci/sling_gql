@@ -13,6 +13,10 @@ import '../widgets/skeleton.dart';
 ///   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
 ///   is a `lookup` field that resolves straight to the entity. Only the fields
 ///   the list never selected go over the wire (open the network log).
+/// - The heart runs `toggleFavorite` through a [MutationBuilder]. The write
+///   is optimistic (`launch.favorite = !favorite`), the response is normalized
+///   into the same `Launch:<id>` entity, so the star on the list row behind
+///   this screen updates too — nobody tells the list; it just reads the entity.
 class LaunchScreen extends StatefulWidget {
   const LaunchScreen({super.key, required this.id});
   final String id;
@@ -31,7 +35,8 @@ class _LaunchScreenState extends State<LaunchScreen> {
       ..date
       ..status
       ..details
-      ..flightNumber;
+      ..flightNumber
+      ..favorite;
     launch.rocket
       ?..name
       ..description
@@ -74,14 +79,22 @@ class _LaunchScreenState extends State<LaunchScreen> {
             if (launch == null) return const Center(child: Text('Not found'));
             final rocket = launch.rocket;
             final crew = launch.crew ?? const <Astronaut>[];
+            final favorite = launch.favorite;
 
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                SkeletonText(
-                  launch.name,
-                  width: 220,
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SkeletonText(
+                        launch.name,
+                        width: 220,
+                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    _FavoriteButton(launch: launch, favorite: favorite),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 SkeletonText(
@@ -133,6 +146,37 @@ class _LaunchScreenState extends State<LaunchScreen> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// `useMutation` in widget form. `mutate` records the fields read in its
+/// body (`favorite`), sends `mutation { toggleFavorite(launchId:) { id favorite } }`
+/// and merges the response into `Launch:<id>` — the list row's star follows.
+class _FavoriteButton extends StatelessWidget {
+  const _FavoriteButton({required this.launch, required this.favorite});
+  final Launch launch;
+  final bool? favorite;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = launch.id;
+    return MutationBuilder<Mutation>(
+      root: Mutation.root,
+      builder: (context, mutate, state) => CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: id == null || favorite == null || state.isLoading
+            ? null
+            : () => mutate(
+                  (m) => m.toggleFavorite(launchId: id)?.favorite,
+                  optimistic: () => launch.favorite = !favorite!,
+                ),
+        child: Icon(
+          favorite ?? false ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+          color: state.error != null ? CupertinoColors.systemGrey : CupertinoColors.systemPink,
+          size: 28,
         ),
       ),
     );

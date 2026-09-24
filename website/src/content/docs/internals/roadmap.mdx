@@ -18,12 +18,13 @@ phases 2 and 3.
    See [Caching](/sling_gql/guides/caching/). Left for later: type policies (custom merge
    per field, connection merging) and automatic `gc()`.
 
-2. **Mutations**
+2. **Mutations** — done
 
-   `MutationBuilder<Mutation>` / `client.mutate((m) => m.toggleFavorite(launchId: id)..favorite)`.
-   Selection recording works unchanged on a `mutation` root; the response merges into the
-   normalized cache. Optimistic writes already exist. Add `onComplete`/`onError` with
-   refetch hooks.
+   `client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)` and
+   `MutationBuilder<Mutation>`, with journaled optimistic writes rolled back on failure. See
+   [Mutations](/sling_gql/guides/mutations/). Left for later: write policies for
+   create/delete (prepend a ref to a list, `evict` helpers on the accessor), `refetchQueries`
+   sugar.
 
 3. **Subscriptions**
 

@@ -12,6 +12,24 @@ export 'ref.dart';
 /// scopes what changed (`ROOT_QUERY.launches_1qouruf`, `Launch:launch-181.name`).
 String depKey(String entity, String field) => '$entity.$field';
 
+/// Description of one manual write (`launch.favorite = true`), enough to undo
+/// it: the [previous] value is [missing] when the path did not exist.
+class CacheWrite {
+  const CacheWrite(this.operation, this.path, this.previous, this.touched);
+
+  final String operation;
+  final List<Object> path;
+  final Object? previous;
+
+  /// Dependency keys the write touched.
+  final Set<String> touched;
+
+  /// Restores [previous] in [cache]. Returns the keys touched by the undo.
+  Set<String> undo(Cache cache) => previous == missing
+      ? cache.remove(operation, path)
+      : cache.write(operation, path, previous);
+}
+
 /// The client-side store every accessor reads from.
 ///
 /// Reads are synchronous (they happen inside widget builds), so the store is
@@ -37,6 +55,10 @@ abstract class Cache {
   /// Writes an optimistic/manual value at a path, creating containers as
   /// needed. Returns the dependency keys touched.
   Set<String> write(String operation, List<Object> path, Object? value);
+
+  /// Removes the value at [path] (a map field or a list element) so it reads
+  /// as [missing] again. Returns the dependency keys touched.
+  Set<String> remove(String operation, List<Object> path);
 
   /// Merges a GraphQL response `data` object. Objects the [Normalization]
   /// identifies are stored once as entities and referenced; the rest is
@@ -192,6 +214,61 @@ class NormalizedCache implements Cache {
         list.add(null);
       }
       list[index] = _normalize(list[index], value, touched);
+    }
+    if (topField != null) touched.add(depKey(entityKey, topField));
+    _emit(touched);
+    return touched;
+  }
+
+  @override
+  Set<String> remove(String operation, List<Object> path) {
+    final touched = <String>{};
+    if (path.isEmpty) return touched;
+
+    var start = 0;
+    String entityKey;
+    if (path.first is Ref) {
+      entityKey = (path.first as Ref).key;
+      start = 1;
+    } else {
+      entityKey = rootKey(operation);
+    }
+    if (start >= path.length) return touched;
+
+    Object? container = _entities[entityKey];
+    String? topField;
+    for (var i = start; i < path.length - 1; i++) {
+      final key = path[i];
+      if (container is Ref) {
+        entityKey = container.key;
+        container = _entities[entityKey];
+        topField = null;
+      }
+      if (key is String) {
+        if (container is! Map) return touched;
+        topField ??= key;
+        container = container[key];
+      } else {
+        final index = key as int;
+        if (container is! List || index >= container.length) return touched;
+        container = container[index];
+      }
+    }
+    if (container is Ref) {
+      entityKey = container.key;
+      container = _entities[entityKey];
+      topField = null;
+    }
+
+    final last = path.last;
+    if (last is String) {
+      if (container is! Map || !container.containsKey(last)) return touched;
+      container.remove(last);
+      topField ??= last;
+    } else {
+      final index = last as int;
+      if (container is! List || index >= container.length) return touched;
+      container.removeAt(index);
     }
     if (topField != null) touched.add(depKey(entityKey, topField));
     _emit(touched);

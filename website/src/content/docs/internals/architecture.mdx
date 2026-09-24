@@ -75,7 +75,7 @@ generated getter needs:
 | `scalarList<T>(field)` | leaf | `[null]` + `onMiss` |
 | `object(field, ctor, keyed:, lookup:)` | object node (+ `id`) | entity via `lookup`, else skeleton accessor + `onMiss` |
 | `list(field, ctor, keyed:)` | object node (+ `id`) | `[skeleton]` + `onMiss` |
-| `write(field, value)` | — | writes cache, `onWrite` |
+| `write(field, value)` | — | writes cache, `onWrite(CacheWrite)` (journaled during a mutation's optimistic phase) |
 
 `Recorder` is the interface an accessor talks to: the current operation, its selection
 root, the cache, the `deps` set reads fill, `onMiss`, `onWrite`. `QueryScope` implements it.
@@ -112,10 +112,18 @@ The first scheduler of a batch wins; everything recorded before it fires goes in
 
 ### 6. Widgets
 
-`SlingScope<Q>` is an `InheritedWidget` carrying the client. `QueryBuilder<Q>` is a
+`SlingScope<Q>` provides the client (an untyped `SlingScope.clientOf` exists so
+`MutationBuilder` does not need to know the query root type). `QueryBuilder<Q>` is a
 `StatefulWidget` that creates a scope on first dependency resolution, runs
 `prepare` and `builder` inside `scope.run`, and calls `setState` when the scope's
 `onChanged` fires. `QueryState` is a read-only façade over the scope.
+
+`MutationBuilder<M>` hands its builder a `mutate` function and a `MutationState`
+(`isLoading`, `error`). `mutate` calls `client.mutateWith(root, body, optimistic:)`, which
+runs `body` once against a `MutationScope` to record the selection, POSTs it alone, writes
+the response through the same `writeResponse` as queries, and runs `body` again to compute
+the return value. Optimistic writes made through generated setters are journaled as
+`CacheWrite`s (path + previous value) while `optimistic` runs and undone on failure.
 
 ## Generated code contract
 

@@ -151,6 +151,9 @@ class _LaunchRow extends StatelessWidget {
     final status = launch.status;
     final date = launch.date;
     final rocketName = launch.rocket?.name;
+    // Read here so the row depends on `Launch:<id>.favorite` and rebuilds when
+    // the detail screen's mutation updates the entity.
+    final favorite = launch.favorite ?? false;
     return CupertinoListTile(
       leading: launch.isSkeleton
           ? const SkeletonBox(width: 28, height: 28)
@@ -160,7 +163,17 @@ class _LaunchRow extends StatelessWidget {
         date == null ? null : '${date.substring(0, 10)} · $rocketName',
         width: 200,
       ),
-      trailing: const CupertinoListTileChevron(),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (favorite)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(CupertinoIcons.heart_fill, color: CupertinoColors.systemPink, size: 18),
+            ),
+          const CupertinoListTileChevron(),
+        ],
+      ),
       onTap: launch.id == null
           ? null
           : () => Navigator.of(context).push(

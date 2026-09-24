@@ -35,13 +35,14 @@ void main() {
   }
 
   Future<void> settle(WidgetTester tester) async {
-    // Real network: poll until no scope is loading anymore.
+    // Real network: poll until no scope is loading anymore. Pumping with a
+    // duration also advances the fake clock so page transitions complete.
     for (var i = 0; i < 50; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-      await tester.pump();
-      if (find.byType(CupertinoActivityIndicator).evaluate().isEmpty) break;
+      await tester.pump(const Duration(milliseconds: 100));
+      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty) break;
     }
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
   }
 
   testWidgets('first frame → one request; load more → one more; detail → one more',
@@ -71,7 +72,11 @@ void main() {
     );
     expect(find.textContaining('Load more (40 / 181)'), findsOneWidget);
 
-    await tester.tap(find.byType(CupertinoListTile).hitTestable().first);
+    final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
+    final tappedName = tester
+        .widget<Text>(find.descendant(of: tappedRow, matching: find.byType(Text)).first)
+        .data!;
+    await tester.tap(tappedRow);
     await settle(tester);
 
     expect(log.entries, hasLength(3), reason: 'detail screen: exactly one request');
@@ -88,5 +93,46 @@ void main() {
     await tester.tap(find.textContaining('Show payloads'));
     await tester.pump();
     expect(log.entries, hasLength(3), reason: 'no request when expanding: prepare paid for it');
+
+    // --- Mutation: toggle favourite from the detail screen -------------------
+    // The mock server keeps favourites in memory across runs, so assert on the
+    // transition rather than on an absolute state.
+    final wasFavorite = find.byIcon(CupertinoIcons.heart_fill).evaluate().isNotEmpty;
+    await tester.tap(
+      find.byIcon(wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart),
+    );
+    await tester.pump();
+    expect(
+      find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
+      findsOneWidget,
+      reason: 'optimistic write shows before the response',
+    );
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 800)));
+    await tester.pump();
+
+    expect(log.entries, hasLength(4), reason: 'one mutation request');
+    final mutation = log.entries.first.document;
+    expect(mutation, startsWith('mutation'));
+    expect(mutation, contains('toggleFavorite(launchId: \$v0) {\n    __typename\n    id\n    favorite\n  }'));
+    expect(
+      find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
+      findsOneWidget,
+      reason: 'confirmed by the response',
+    );
+
+    // Back to the list: the row reads the same Launch entity → star updated,
+    // and no request was needed for it.
+    await tester.tap(find.byType(CupertinoNavigationBarBackButton));
+    await tester.pump(const Duration(milliseconds: 600)); // page transition
+    final row = find.ancestor(of: find.text(tappedName), matching: find.byType(CupertinoListTile));
+    expect(
+      find.descendant(of: row, matching: find.byIcon(CupertinoIcons.heart_fill)),
+      wasFavorite ? findsNothing : findsOneWidget,
+    );
+    expect(log.entries, hasLength(4));
+
+    // Close keep-alive connections: their 15 s idle timer would otherwise be
+    // reported as pending by the test binding.
+    client.dispose();
   });
 }

@@ -47,11 +47,12 @@ query {
 | Skeleton state (`null` scalars, 1-element lists) before data arrives | ✅ |
 | Normalized cache (`__typename:id` entities, `launch(id:)` served from the list's entity) | ✅ per-field rebuild notifications, `evict`, `gc`, JSON snapshot + `onChange` |
 | Partial responses merging into one cache tree | ✅ per entity |
-| Optimistic writes (`launch.mission_name = 'x'`) | ✅ setters on scalar fields |
+| Optimistic writes (`launch.favorite = true`) | ✅ setters on scalar fields; journaled + rolled back when a mutation fails |
+| Mutations (`client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)`, `MutationBuilder`) | ✅ response normalized into the same entities → every widget showing the launch rebuilds |
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
 | `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ |
 | Cursor pagination (one cache entry per `after`) | ✅ example |
-| Mutations, subscriptions | ❌ not in this PoC |
+| Subscriptions | ❌ not in this PoC |
 | SWR / expiry, persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
 | Unions / interfaces (`$on`) | ❌ SpaceX schema has none |
 

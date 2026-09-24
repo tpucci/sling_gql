@@ -25,8 +25,10 @@ abstract class Recorder {
   /// skeleton accessors are read).
   void onMiss(Selection leaf);
 
-  /// Called on optimistic writes so dependants can be re-rendered.
-  void onWrite(Set<String> touched);
+  /// Called on manual writes (generated setters) so dependants can be
+  /// re-rendered and, during a mutation's optimistic phase, so the write can
+  /// be undone if the mutation fails.
+  void onWrite(CacheWrite write);
 }
 
 /// Base class for all generated schema types.
@@ -157,9 +159,11 @@ abstract class Accessor {
   // ---------------------------------------------------------------------------
 
   void write(String field, Object? value) {
-    final touched =
-        recorder.cache.write(recorder.operation, [...path, field], value);
-    recorder.onWrite(touched);
+    final target = [...path, field];
+    final cache = recorder.cache;
+    final previous = cache.read(recorder.operation, target);
+    final touched = cache.write(recorder.operation, target, value);
+    recorder.onWrite(CacheWrite(recorder.operation, target, previous, touched));
   }
 
   static T? _coerce<T>(Object? value) {

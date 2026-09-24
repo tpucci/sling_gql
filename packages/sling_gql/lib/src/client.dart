@@ -127,7 +127,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   }
 
   @override
-  void onWrite(Set<String> touched) => client._notify(touched);
+  void onWrite(CacheWrite write) => client._onWrite(write);
 
   void dispose() => client._scopes.remove(this);
 
@@ -137,6 +137,32 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _settled?.complete();
     _settled = null;
   }
+}
+
+/// Recorder for one `mutate` call. Misses are expected (nothing is cached
+/// before the mutation runs) and never trigger a fetch.
+class MutationScope implements Recorder {
+  MutationScope(this.client);
+
+  final SlingClient<Accessor> client;
+
+  @override
+  String get operation => 'mutation';
+
+  @override
+  final Selection root = Selection.root('mutation');
+
+  @override
+  Cache get cache => client.cache;
+
+  @override
+  final Set<String> deps = {};
+
+  @override
+  void onMiss(Selection leaf) {}
+
+  @override
+  void onWrite(CacheWrite write) => client._onWrite(write);
 }
 
 /// Batches selections into a single GraphQL document per microtask, fetches
@@ -194,6 +220,83 @@ class SlingClient<Q extends Accessor> {
     } finally {
       scope.dispose();
     }
+  }
+
+  /// Runs a mutation. [body] is executed twice: once to *record* the
+  /// selection (every field read becomes part of the document, nothing is
+  /// fetched), and once the response has been written to the cache, to
+  /// compute the return value from it.
+  ///
+  /// ```dart
+  /// final favorite = await client.mutateWith(
+  ///   Mutation.root,
+  ///   (m) => m.toggleFavorite(launchId: id)?.favorite,
+  ///   optimistic: () => launch.favorite = !launch.favorite!,
+  /// );
+  /// ```
+  ///
+  /// The response is normalized like any query response, so every widget
+  /// showing the returned entities rebuilds. [optimistic] runs synchronously
+  /// before the request; the writes it makes through generated setters are
+  /// journaled and undone if the mutation fails. Generated code exposes this
+  /// as `client.mutate(...)` with the schema's `Mutation` type bound.
+  Future<T> mutateWith<M extends Accessor, T>(
+    RootFactory<M> root,
+    T Function(M mutation) body, {
+    void Function()? optimistic,
+  }) async {
+    final journal = <CacheWrite>[];
+    if (optimistic != null) {
+      _journal = journal;
+      try {
+        optimistic();
+      } finally {
+        _journal = null;
+      }
+    }
+
+    final scope = MutationScope(this);
+    body(root(scope));
+    final op = PrintedOperation.from(scope.root);
+    onOperation?.call(op);
+
+    Set<String> touched;
+    SlingException? error;
+    try {
+      (touched, error) = await _send('mutation', scope.root, op);
+    } catch (e) {
+      _rollback(journal);
+      rethrow;
+    }
+    if (error != null) {
+      _notify(touched.union(_rollback(journal)));
+      throw error;
+    }
+    _notify(touched);
+
+    final result = body(root(scope));
+    // The payload lives on in the entities it referenced; the root fields
+    // would only pin them in memory.
+    for (final alias in scope.root.childAliases) {
+      cache.remove('mutation', [alias]);
+    }
+    return result;
+  }
+
+  List<CacheWrite>? _journal;
+
+  void _onWrite(CacheWrite write) {
+    _journal?.add(write);
+    _notify(write.touched);
+  }
+
+  Set<String> _rollback(List<CacheWrite> journal) {
+    final touched = <String>{};
+    for (final write in journal.reversed) {
+      touched.addAll(write.undo(cache));
+    }
+    journal.clear();
+    return touched;
   }
 
   void _enqueueLeaf(Selection leaf) {
@@ -257,23 +360,13 @@ class SlingClient<Q extends Accessor> {
     Object? error;
     Set<String> touched = {};
     try {
-      final (data, errors) = await _post(op);
-      if (errors.isNotEmpty) {
-        // Partial failure: keep the fields that resolved, but do not cache the
-        // `null`s the server put at errored paths — they are not real nulls.
-        for (final e in errors) {
-          _prune(data, e['path']);
-        }
-        error = SlingException(
-          errors.map((e) => e['message']).join('\n'),
-          graphqlErrors: errors,
-        );
+      (touched, error) = await _send('query', tree, op);
+      if (error != null) {
         _failedDocument = op.document;
         _lastError = error;
       } else {
         _failedDocument = null;
       }
-      touched = cache.writeResponse('query', tree, data);
     } catch (e) {
       error = e;
       _failedDocument = op.document;
@@ -306,6 +399,29 @@ class SlingClient<Q extends Accessor> {
         scope.onChanged();
       }
     }
+  }
+
+  /// POSTs [op] and writes `data` under [operation]'s root. On partial
+  /// failure the fields that resolved are kept, the `null`s the server put at
+  /// errored paths are pruned (they are not real nulls), and the error is
+  /// returned alongside the touched keys.
+  Future<(Set<String>, SlingException?)> _send(
+    String operation,
+    Selection tree,
+    PrintedOperation op,
+  ) async {
+    final (data, errors) = await _post(op);
+    SlingException? error;
+    if (errors.isNotEmpty) {
+      for (final e in errors) {
+        _prune(data, e['path']);
+      }
+      error = SlingException(
+        errors.map((e) => e['message']).join('\n'),
+        graphqlErrors: errors,
+      );
+    }
+    return (cache.writeResponse(operation, tree, data), error);
   }
 
   /// Removes the value at a GraphQL error `path` (aliases and list indices)

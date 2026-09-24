@@ -143,9 +143,25 @@ section" stat.
 `query.launch(id: ...)` and the row inside `query.launches(...).nodes` resolve to the
 same `Launch:<id>` entity. The detail request only carries the fields the list never
 asked for (`details`, `flightNumber`, the rocket's specs, payloads, crew) — the widget
-test asserts `date`/`status` are absent from it — and renaming a launch from the detail
-screen updates the list row. See [Caching](/sling_gql/guides/caching/).
+test asserts `date`/`status` are absent from it. See [Caching](/sling_gql/guides/caching/).
 </Aside>
+
+## The favourite heart (mutation)
+
+The heart next to the launch name is a `MutationBuilder<Mutation>`:
+
+```dart
+mutate(
+  (m) => m.toggleFavorite(launchId: id)?.favorite,
+  optimistic: () => launch.favorite = !favorite,
+)
+```
+
+Tap it and watch the network log: one `mutation { toggleFavorite(launchId:) { __typename id
+favorite } }`. The heart flips immediately (optimistic write on the `Launch:<id>` entity),
+the response confirms it, and when you go back the list row shows the heart too — the row
+reads `launch.favorite`, so it depends on the same entity field. Kill the mock server and tap
+again to see the rollback. See [Mutations](/sling_gql/guides/mutations/).
 
 ## Network log
 

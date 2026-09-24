@@ -34,8 +34,8 @@ on the code.
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
-| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`). |
-| `widgets.dart` | `SlingScope` (InheritedWidget providing the client), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `frameEndScheduler`. |
+| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch). |
+| `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `frameEndScheduler`. |
 
 Design decisions worth knowing before changing things:
 
@@ -52,6 +52,17 @@ Design decisions worth knowing before changing things:
   when the root field is not cached but the entity is (accessor path becomes
   `[Ref(key)]`). Objects without an id stay inline. Lists of refs are replaced
   by the incoming list; entities merge per field.
+- **Mutations run the body twice**: once on a `MutationScope` to record the
+  selection (every read counts, nothing is fetched), once after the response
+  landed to compute the return value from the cache. The response goes through
+  the same `writeResponse` → normalized entities → per-field notify, which is
+  how the list row updates when the detail screen toggles a favourite. Root
+  fields under `ROOT_MUTATION` are removed afterwards (they would pin entities).
+  Mutations are sent immediately and alone, never batched with queries.
+- **Optimistic writes are journaled.** `Accessor.write` reports a `CacheWrite`
+  (path, previous value, touched keys) via `Recorder.onWrite`; while a
+  mutation's `optimistic` callback runs, the client collects them and undoes
+  them in reverse on failure (`previous == missing` → `cache.remove`).
 - **Dependency keys, not root aliases.** Every `cache.read` adds
   `entity.field` keys to `Recorder.deps`; every write returns the keys it
   touched; `_notify` rebuilds scopes whose deps intersect. `depKey()` builds
@@ -78,6 +89,10 @@ Input: introspection JSON. Output: one Dart file. Rules are documented in the
 package README; the contract it must satisfy is the hand-written example at the
 top of `packages/sling_gql/test/core_test.dart`. If you change `Accessor`'s
 helper signatures, update the generator **and** that test in the same change.
+
+The generator emits the `Mutation` root (with `.root`) and an
+`extension SlingMutations on SlingClient<Query>` providing `client.mutate(...)`,
+so no wiring is needed in app code. Subscription roots are still skipped.
 
 The generator decides which types are *keyed* (have a scalar `--key-field`,
 default `id`) and which fields are *lookups* (single `id` argument returning a
@@ -112,9 +127,9 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
    field, connection merging), automatic `gc()`.
 2. `maxAge` / stale-while-revalidate; persistence adapters as separate
    packages on top of `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`.
-3. Mutations (`useMutation` equivalent) and subscriptions (the mock API
-   already exposes `toggleFavorite`, `scheduleLaunch`, `updateLaunchStatus`
-   and two SSE subscriptions).
+3. ~~Mutations~~ done. Subscriptions next (the mock API exposes two SSE
+   subscriptions). Follow-ups for mutations: write policies for create/delete
+   (prepend a ref to a list), `refetchQueries` sugar.
 4. Unions/interfaces via `$on` (add one to `mock-api/schema.graphql` first;
    the generator currently skips none because there are none).
 5. ~~Finer-grained rebuild~~ per `entity.field` now; list-index granularity
