@@ -1,0 +1,53 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Starts the graphql-yoga mock API on :4000 and keeps it running in a
+      // terminal. Used as preLaunchTask by the example app configurations.
+      // Set LATENCY_MS in `options.env` to make skeletons visible longer.
+      "label": "mock-api",
+      "type": "shell",
+      "command": "npm start",
+      "options": {
+        "cwd": "${workspaceFolder}/mock-api",
+        "env": { "LATENCY_MS": "600" }
+      },
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "reveal": "silent", "group": "sling" },
+      "problemMatcher": {
+        "owner": "mock-api",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^> .*node server\\.mjs",
+          "endsPattern": "Mock GraphQL API ready at"
+        }
+      }
+    },
+    {
+      // Boots an iPhone simulator so `flutter run` has an iOS target, then
+      // opens the UI for it: Device Hub (Xcode 27+) or Simulator.app (older).
+      // Boots the first available iPhone if none is booted yet.
+      "label": "boot-simulator",
+      "type": "shell",
+      "command": "xcrun simctl list devices booted | grep -q '(Booted)' || xcrun simctl boot \"$(xcrun simctl list devices available | grep -m1 -o 'iPhone[^(]*([A-F0-9-]*)' | grep -o '[A-F0-9-]\\{36\\}')\"; open -b com.apple.dt.Devices 2>/dev/null || open -a Simulator",
+      "presentation": { "reveal": "never", "close": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "mock-api + simulator",
+      "dependsOn": ["boot-simulator", "mock-api"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      // Regenerate example/lib/generated/schema.dart from the committed
+      // introspection snapshot.
+      "label": "regenerate schema",
+      "type": "shell",
+      "command": "dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart --schema graphql/schema.json --out lib/generated/schema.dart",
+      "options": { "cwd": "${workspaceFolder}/example" },
+      "problemMatcher": []
+    }
+  ]
+}

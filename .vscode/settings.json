@@ -1,0 +1,9 @@
+{
+  "dart.runPubGetOnPubspecChanges": "prompt",
+  "dart.lineLength": 100,
+  "files.exclude": {
+    "**/.dart_tool": true,
+    "**/.pixel": true,
+    "example/ios/Pods": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // F5 target: boots the simulator, starts the mock API, runs the example.
+      // If several iOS devices are available, pick one in the status bar or set
+      // "deviceId" to the UDID from `xcrun simctl list devices booted`.
+      "name": "example (iOS simulator)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart",
+      "deviceId": "iPhone",
+      "preLaunchTask": "mock-api + simulator"
+    },
+    {
+      // Same, without touching the mock API / simulator (already running).
+      "name": "example (attach to running mock-api)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart",
+      "deviceId": "iPhone"
+    },
+    {
+      "name": "example (profile)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "lib/main.dart",
+      "deviceId": "iPhone",
+      "flutterMode": "profile",
+      "preLaunchTask": "mock-api + simulator"
+    },
+    {
+      // Widget tests against the real mock API (asserts request counts).
+      "name": "example widget tests",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/example",
+      "program": "test/app_test.dart",
+      "preLaunchTask": "mock-api"
+    },
+    {
+      "name": "sling_gql runtime tests",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/sling_gql",
+      "program": "test/"
+    },
+    {
+      "name": "sling_gql_gen tests",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/sling_gql_gen",
+      "program": "test/"
+    }
+  ]
+}
