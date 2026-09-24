@@ -158,7 +158,7 @@ void main() {
     client.dispose();
   });
 
-  testWidgets('Me tab → one request with me+favorites; Favourites segment → one more request; All → no request',
+  testWidgets('Me tab → one request with me+favorites; Success segment → one more request; All → no request',
       (tester) async {
     await pumpApp(tester);
     await settle(tester);
@@ -195,29 +195,29 @@ void main() {
     await tester.pump(); // tab switch frame
     await settle(tester);
 
-    // Tap the "Favourites" segment.
-    await tester.tap(find.text('Favourites'));
+    // Tap the "Success" status segment.
+    await tester.tap(find.text('Success'));
     await settle(tester);
 
     // Exactly one more request compared to before.
     expect(log.entries, hasLength(3),
-        reason: 'Favourites filter is a new cache entry → one request');
-    final favDoc = log.entries.first;
-    // The variables map should contain a LaunchFilter with favorite: true.
-    expect(favDoc.variables.values.any((v) {
-      if (v is Map) return v['favorite'] == true;
-      return false;
-    }), isTrue, reason: 'LaunchFilter(favorite: true) sent as variable');
+        reason: 'a status filter is a new argument set → new cache entry → one request');
+    final statusDoc = log.entries.first;
+    expect(statusDoc.document, contains('filter: \$v1'));
+    expect(
+      statusDoc.variables.values.any((v) => v is Map && v['status'] == 'SUCCESS'),
+      isTrue,
+      reason: 'LaunchFilter(status: SUCCESS) sent as a variable',
+    );
 
-    // All visible LaunchRows should show heart_fill (they are all favourites).
+    // Every visible row is a successful launch (the row's leading icon).
     final visibleRows = find.byType(LaunchRow).evaluate().length;
-    if (visibleRows > 0) {
-      expect(
-        find.byIcon(CupertinoIcons.heart_fill).evaluate().length,
-        equals(visibleRows),
-        reason: 'every visible row in Favourites mode shows heart_fill',
-      );
-    }
+    expect(visibleRows, greaterThan(0));
+    expect(
+      find.byIcon(CupertinoIcons.checkmark_circle_fill).evaluate().length,
+      equals(visibleRows),
+      reason: 'every visible row in the Success segment shows the success icon',
+    );
 
     // Switch back to All — no new request.
     final requestsBeforeAll = log.entries.length;

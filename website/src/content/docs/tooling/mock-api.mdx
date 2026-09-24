@@ -167,10 +167,12 @@ input LaunchFilter {
 ```
 
 `filter: { favorite: true }` returns only launches where `l.favorite ===
-true` (server-side comparison). The example app's Favourites segment uses
-this. Because the argument set differs from the plain `launches(first: N)`
-query, the sling_gql cache stores them as separate entries — switching back
-to All is served from cache (zero requests).
+true` (server-side comparison); the example app's Me tab uses `me.favorites`
+instead, but the filter is there for experiments. The example's Launches tab
+filters on `status` (`filter: { status: SUCCESS }`). Because each argument
+set differs from the plain `launches(first: N)` query, the sling_gql cache
+stores them as separate entries — coming back to a segment you already
+visited is served from cache (zero requests).
 
 Filtering, ordering and pagination run in plain JavaScript over the
 in-memory array (`resolvers.mjs`). Page sizes are clamped to `[1, 100]`

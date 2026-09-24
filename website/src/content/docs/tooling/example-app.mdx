@@ -1,6 +1,6 @@
 ---
 title: Example app
-description: A two-tab iOS app against the mock API — Launches list with a Favourites filter, a Me profile screen, in-app network log, and request-counting tests.
+description: A two-tab iOS app against the mock API — Launches list with a status filter, a Me profile screen with favourites, in-app network log, and request-counting tests.
 ---
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
@@ -20,7 +20,7 @@ not asserted.
     - network_log.dart     records every `PrintedOperation`
     - theme.dart           dark palette constants + `slingTheme()`
     - screens/
-      - launches_screen.dart   paginated list + Favourites segment
+      - launches_screen.dart   paginated list + status segments
       - launch_screen.dart     detail + `toggleFavorite` mutation
       - me_screen.dart         viewer profile + favourites list
     - widgets/
@@ -83,38 +83,39 @@ look at:
 >   argument set, hence a distinct alias and cache entry. "Load more" adds a
 >   cursor and only the new page is fetched; pull-to-refresh refetches all
 >   pages in one request.
-> - "Favourites" mode passes `filter: LaunchFilter(favorite: true)` — a
->   different argument set → different alias → different cache entry. Switching
->   back to "All" is instant because the All pages are still cached.
+> - the status segments pass `filter: LaunchFilter(status: ...)` — a
+>   different argument set → different alias → different cache entry. Coming
+>   back to a segment you already visited is instant: its pages are cached.
+>   The rows themselves are the same `Launch:<id>` entities in every segment.
 
-### Favourites segment
+### Status segments
 
 A `CupertinoSlidingSegmentedControl` at the top of the list switches between
-"All" and "Favourites". Switching to Favourites queries:
+"All", "Scheduled", "Success" and "Failure". A status segment queries:
 
 ```dart
-query.launches(first: pageSize, filter: const LaunchFilter(favorite: true))
+query.launches(first: pageSize, filter: LaunchFilter(status: LaunchStatus.SUCCESS))
 ```
 
 This is a **different argument set** from the All query, so the selection
 tree gives it a different alias (`launches_<hash-of-args>`) and a different
 cache entry. That means:
 
-1. The first switch to Favourites sends one new request.
-2. Switching back to All instantly serves the previously cached pages — **zero
+1. The first switch to a segment sends one new request.
+2. Coming back to a segment you already visited serves its cached pages — **zero
    requests**.
-3. The two filters' caches are completely independent; adding a new page to
-   All never evicts the Favourites page.
+3. The lists are independent, but the *rows* are not: every segment's `nodes` are
+   references to the same `Launch:<id>` entities, so a heart toggled on the
+   detail screen shows in every segment.
 
 Switching the segment also resets `_cursors` to `[null]` so the first page
 is re-read from cache (or fetched fresh if absent).
 
-**Known limitation:** after `toggleFavorite` on the detail screen, the
-`launches(filter: {favorite: true})` list does not automatically update its
-membership (the entity's `favorite` field updates everywhere, but adding or
-removing an entry from a paginated list requires a write policy). See the
-[roadmap](/sling_gql/internals/roadmap/) for details. Pull-to-refresh always
-reflects the current server state.
+**Known limitation:** the *membership* of a filtered list is fixed at fetch
+time. After `updateLaunchStatus` or `toggleFavorite`, the entity's fields
+update everywhere, but adding or removing an entry from a paginated list
+requires a write policy — see the [roadmap](/sling_gql/internals/roadmap/).
+Pull-to-refresh always reflects the current server state.
 
 ## Launch detail screen
 
@@ -276,15 +277,15 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
   `prepare`, which selects everything the screen needs in one shot.
 - **0 requests to expand payloads.** `prepare` paid for them up front.
 
-### Test 2 — Me tab, Favourites segment
+### Test 2 — Me tab, Success segment
 
 - **1 request for the Me tab** (on first switch). Contains both `me {` and
   `favorites {` — batched in one document.
-- **1 more for the Favourites segment** (on first switch to Favourites).
-  `LaunchFilter(favorite: true)` is a distinct argument set → new alias →
-  new cache entry.
+- **1 more for the Success segment** (on first switch).
+  `LaunchFilter(status: SUCCESS)` is a distinct argument set → new alias →
+  new cache entry; the variable carries `{status: SUCCESS}`.
 - **0 requests switching back to All.** All pages are still in cache.
-- Every row in Favourites mode shows `CupertinoIcons.heart_fill`.
+- Every row in the Success segment shows the success icon.
 
 <Aside type="note">
 `settle()` in the tests polls with a 100ms delay up to 50 times rather than

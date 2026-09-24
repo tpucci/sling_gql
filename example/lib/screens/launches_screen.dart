@@ -16,9 +16,10 @@ import '../widgets/skeleton.dart';
 ///   argument set, hence a distinct alias and cache entry. "Load more" adds a
 ///   cursor and only the new page is fetched; pull-to-refresh refetches all
 ///   pages in one request.
-/// - "Favourites" mode passes `filter: LaunchFilter(favorite: true)` — a
-///   different argument set → different alias → different cache entry. Switching
-///   back to "All" is instant because the All pages are still cached.
+/// - the status segments pass `filter: LaunchFilter(status: ...)` — a
+///   different argument set → different alias → different cache entry. Coming
+///   back to a segment you already visited is instant: its pages are cached.
+///   The rows themselves are the same `Launch:<id>` entities in every segment.
 class LaunchesScreen extends StatefulWidget {
   const LaunchesScreen({super.key});
 
@@ -26,27 +27,37 @@ class LaunchesScreen extends StatefulWidget {
   State<LaunchesScreen> createState() => _LaunchesScreenState();
 }
 
+const _allSentinel = '__all__';
+
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
 
-  /// 0 = All, 1 = Favourites.
-  int _segment = 0;
+  /// Segment values: `null` = All, otherwise a `LaunchStatus` constant.
+  static const _segments = <String?, String>{
+    null: 'All',
+    LaunchStatus.SCHEDULED: 'Scheduled',
+    LaunchStatus.SUCCESS: 'Success',
+    LaunchStatus.FAILURE: 'Failure',
+  };
+
+  /// Selected status, `null` for all launches.
+  String? _status;
 
   /// One entry per loaded page; `null` is the first page.
   List<String?> _cursors = [null];
 
-  void _onSegmentChanged(int? val) {
-    if (val == null || val == _segment) return;
+  void _onSegmentChanged(String? status) {
+    if (status == _status) return;
     setState(() {
-      _segment = val;
+      _status = status;
       _cursors = [null]; // reset pagination when the filter changes
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final favoritesOnly = _segment == 1;
-    final filter = favoritesOnly ? const LaunchFilter(favorite: true) : null;
+    final status = _status;
+    final filter = status == null ? null : LaunchFilter(status: status);
 
     return CupertinoPageScaffold(
       navigationBar: const CupertinoNavigationBar(
@@ -59,12 +70,14 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
             const _Header(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: CupertinoSlidingSegmentedControl<int>(
-                groupValue: _segment,
-                onValueChanged: _onSegmentChanged,
-                children: const {
-                  0: Text('All'),
-                  1: Text('Favourites'),
+              // CupertinoSlidingSegmentedControl needs non-null keys; the
+              // sentinel stands for "All".
+              child: CupertinoSlidingSegmentedControl<String>(
+                groupValue: _status ?? _allSentinel,
+                onValueChanged: (v) => _onSegmentChanged(v == _allSentinel ? null : v),
+                children: {
+                  for (final e in _segments.entries)
+                    e.key ?? _allSentinel: Text(e.value, style: const TextStyle(fontSize: 13)),
                 },
               ),
             ),
