@@ -148,6 +148,22 @@ never `if (list.isEmpty) return EmptyState();` on its own. See
 the full skeleton-shape table.
 </Aside>
 
+## Rules of the road
+
+Four habits cover almost every mistake sling_gql's request-counting tests catch:
+
+1. **Read every field the widget might need at the top of `build()`**, into locals —
+   never only inside an `if` on fetched data or a callback. See
+   [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/#waterfalls-the-one-habit-to-build).
+2. **Use `prepare` for reads that are legitimately conditional** (a collapsed section, a
+   hidden tab) so they are still fetched with the first request. See
+   [`prepare`: fetching for the future](/sling_gql/guides/batching-and-waterfalls/#prepare-fetching-for-the-future).
+3. **Never branch on list length while `state.hasMissingData`** — a skeleton list always
+   has one element. See the Aside above and
+   [Loading states & errors](/sling_gql/guides/loading-and-errors/#skeletons-not-spinners).
+4. **Errors are sticky until `refetch()`** — a failing query never retries on its own. See
+   [Loading states & errors](/sling_gql/guides/loading-and-errors/#errors).
+
 ## Where to go next
 
 - [Querying data](/sling_gql/guides/querying/) — arguments, lists, nesting, and what each
