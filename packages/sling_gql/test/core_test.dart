@@ -590,7 +590,8 @@ void _mutationTests() {
 
     expect(scope.run((q) => q.me.friends()[0].name), 'Bob');
     expect(h.client.cache.read('query', [const Ref('User:a'), 'age']), missing);
-    expect(rebuilds, 2, reason: 'once for the optimistic write, once for the rollback');
+    expect(rebuilds, 3,
+        reason: 'once per optimistic write (name, age), once for the rollback');
   });
 
   test('scalar mutation results are returned too', () async {

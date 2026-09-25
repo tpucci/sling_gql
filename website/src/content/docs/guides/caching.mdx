@@ -157,11 +157,30 @@ partial object the next fetch has to merge into. Check `isSkeleton` (or use an e
 which returns `null` instead) before writing.
 </Aside>
 
-## Eviction
+## List membership and eviction
 
-`cache.evict('Launch:launch-181')` removes the entity, drops it from every list that
-referenced it, and blanks object fields that pointed at it so they read as `missing` and
-get re-fetched on the next build. That is the primitive a `deleteLaunch` mutation will use.
+A response replaces a list wholesale, but a mutation's response rarely contains the list it
+changed. `cacheScope.list(selector)` addresses one cached list field — by reading it, so the
+arguments hash to the same alias as in the widget — and edits its refs:
+
+```dart
+final cache = client.cacheScope;
+final favorites = cache.list((q) => q.me?.favorites); // CacheList<Launch>
+favorites.prepend(cache.launch('launch-181')!);         // also: append, remove, contains
+cache.evict(cache.launch('launch-180')!);                // gone from every list
+```
+
+Edits write the whole new list back (`Viewer:viewer-1.favorites` is the touched key, exactly as
+if a response had replaced it), are journaled like any `CacheWrite` inside a mutation's
+`optimistic` callback, and are set-like no-ops on a list that is not cached. Each argument
+set is its own entry: `launches(first: 20)` and its next page are separate lists, and the edit
+applies to the one you name. See [Updating lists after a
+mutation](/sling_gql/guides/mutations/#updating-lists-after-a-mutation) for the full rules.
+
+`cache.evict(entity)` (or the untyped `client.cache.evict('Launch:launch-181')`) removes the
+entity, drops it from every list that referenced it, and blanks object fields that pointed at
+it so they read as `missing` and get re-fetched on the next build. The typed form also
+notifies every scope that read one of those fields.
 
 ## Notification: per entity field
 

@@ -159,6 +159,97 @@ void main() {
     client.dispose();
   });
 
+  testWidgets('toggleFavorite → Me tab gains/loses the launch with no refetch',
+      (tester) async {
+    await pumpApp(tester);
+    await settle(tester);
+
+    // Load the Me tab first so `me.favorites` is cached.
+    await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
+    await tester.pump();
+    await settle(tester);
+    expect(log.entries, hasLength(2), reason: 'Launches tab + Me tab');
+    final favoritesBefore = find.byType(LaunchRow).evaluate().length;
+
+    int shownCount() {
+      final text = find
+          .textContaining('favourite')
+          .evaluate()
+          .map((e) => (e.widget as Text).data!)
+          .firstWhere((s) => RegExp(r'^\d+').hasMatch(s));
+      return int.parse(RegExp(r'^\d+').firstMatch(text)!.group(0)!);
+    }
+
+    expect(shownCount(), favoritesBefore);
+
+    // Open the first launch of the list.
+    await tester.tap(find.byIcon(CupertinoIcons.rocket));
+    await tester.pump();
+    await settle(tester);
+    final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
+    final tappedName = tester
+        .widget<Text>(find.descendant(of: tappedRow, matching: find.byType(Text)).first)
+        .data!;
+    await tester.tap(tappedRow);
+    await settle(tester);
+    expect(log.entries, hasLength(3), reason: 'detail screen: one request');
+
+    // Taps the detail screen's heart and waits for the mutation to land: the
+    // button is disabled while it is in flight.
+    Future<bool> toggle() async {
+      final wasFavorite = find.byIcon(CupertinoIcons.heart_fill).evaluate().isNotEmpty;
+      final heart = find.byIcon(wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart);
+      await tester.tap(heart);
+      await tester.pump();
+      final button = find.ancestor(
+        of: find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
+        matching: find.byType(CupertinoButton),
+      );
+      for (var i = 0; i < 50; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+        if (tester.widget<CupertinoButton>(button.first).onPressed != null) break;
+      }
+      return wasFavorite;
+    }
+
+    Future<void> showMeTab() async {
+      await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    final meRowNamed = find.descendant(
+      of: find.byType(LaunchRow),
+      matching: find.text(tappedName),
+    );
+
+    // Toggle once: the Me tab's list and count follow, no request.
+    final wasFavorite = await toggle();
+    expect(log.entries, hasLength(4), reason: 'the mutation only');
+    expect(log.entries.first.document, startsWith('mutation'));
+    await showMeTab();
+    final delta = wasFavorite ? -1 : 1;
+    expect(find.byType(LaunchRow).evaluate().length, favoritesBefore + delta);
+    expect(shownCount(), favoritesBefore + delta);
+    expect(meRowNamed, wasFavorite ? findsNothing : findsOneWidget);
+    expect(log.entries, hasLength(4), reason: 'no refetch of me.favorites');
+
+    // Toggle back (restores the shared mock server's state).
+    await tester.tap(find.byIcon(CupertinoIcons.rocket));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await toggle();
+    expect(log.entries, hasLength(5), reason: 'the second mutation only');
+    await showMeTab();
+    expect(find.byType(LaunchRow).evaluate().length, favoritesBefore);
+    expect(shownCount(), favoritesBefore);
+    expect(meRowNamed, wasFavorite ? findsOneWidget : findsNothing);
+    expect(log.entries, hasLength(5));
+
+    client.dispose();
+  });
+
   testWidgets('Me tab → one request with me+favorites; Success segment → one more request; All → no request',
       (tester) async {
     await pumpApp(tester);

@@ -31,6 +31,14 @@ abstract class Recorder {
   void onWrite(CacheWrite write);
 }
 
+/// Implemented by recorders that need to know *where* each object list read
+/// through them lives in the cache (`CacheScope.list` uses it to edit the
+/// list its selector returned). [Accessor.list] reports every read: the
+/// list's cache [path] and the [value] it returned to the caller.
+abstract interface class ListLocator {
+  void locateList(List<Object> path, List<Accessor>? value);
+}
+
 /// Base class for all generated schema types.
 ///
 /// A generated type is a thin, allocation-cheap view over a location in the
@@ -183,16 +191,23 @@ abstract class Accessor {
   }) {
     final sel = _selectObject(field, args, keyed);
     final value = _read(sel);
+    final List<R>? result;
     if (value == missing) {
       recorder.onMiss(sel);
-      return [ctor(recorder, sel, [...path, sel.alias, 0])];
+      result = [ctor(recorder, sel, [...path, sel.alias, 0])];
+    } else if (value == null) {
+      result = null;
+    } else {
+      final items = value as List;
+      result = List.generate(
+        items.length,
+        (i) => ctor(recorder, sel, [...path, sel.alias, i]),
+      );
     }
-    if (value == null) return null;
-    final items = value as List;
-    return List.generate(
-      items.length,
-      (i) => ctor(recorder, sel, [...path, sel.alias, i]),
-    );
+    if (recorder case final ListLocator locator) {
+      locator.locateList([...path, sel.alias], result);
+    }
+    return result;
   }
 
   // ---------------------------------------------------------------------------

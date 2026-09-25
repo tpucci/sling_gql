@@ -160,6 +160,11 @@ class _LaunchScreenState extends State<LaunchScreen> {
 /// `useMutation` in widget form. `mutate` records the fields read in its
 /// body (`favorite`), sends `mutation { toggleFavorite(launchId:) { id favorite } }`
 /// and merges the response into `Launch:<id>` — the list row's star follows.
+///
+/// The response cannot tell the cache that `me.favorites` gained or lost a
+/// row, so the optimistic callback edits that list (and `favoriteCount`)
+/// through `cacheScope`: the Me tab updates with no refetch, and the edit is
+/// rolled back with the flag if the mutation fails.
 class _FavoriteButton extends StatelessWidget {
   const _FavoriteButton({required this.launch, required this.favorite});
   final Launch launch;
@@ -168,6 +173,7 @@ class _FavoriteButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final id = launch.id;
+    final client = SlingScope.of<Query>(context);
     return MutationBuilder<Mutation>(
       builder: (context, mutate, state) => CupertinoButton(
         padding: EdgeInsets.zero,
@@ -175,7 +181,22 @@ class _FavoriteButton extends StatelessWidget {
             ? null
             : () => mutate(
                   (m) => m.toggleFavorite(launchId: id)?.favorite,
-                  optimistic: () => launch.favorite = !favorite!,
+                  optimistic: () {
+                    final wasFavorite = favorite!;
+                    launch.favorite = !wasFavorite;
+                    final cache = client.cacheScope;
+                    final me = cache.query.me;
+                    // cacheScope reads never fetch. Me tab not loaded yet:
+                    // it will fetch the fresh list itself.
+                    if (me == null || me.isSkeleton) return;
+                    final favorites = cache.list((q) => q.me?.favorites);
+                    final changed =
+                        wasFavorite ? favorites.remove(launch) : favorites.prepend(launch);
+                    final count = me.favoriteCount;
+                    if (changed && count != null) {
+                      me.favoriteCount = count + (wasFavorite ? -1 : 1);
+                    }
+                  },
                 ),
         child: Icon(
           favorite ?? false ? CupertinoIcons.heart_fill : CupertinoIcons.heart,

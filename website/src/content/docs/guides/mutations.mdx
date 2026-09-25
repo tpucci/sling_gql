@@ -121,30 +121,75 @@ server's.
   the `null`s at errored paths, then reject.
 - Mutations have no sticky-error behaviour — every call is a fresh request.
 
-## Updating lists
+## Updating lists after a mutation
 
 Because the cache is normalized, a mutation returning an existing entity updates every list
-it appears in for free. Two cases still need a hand:
+it appears in for free. What the response cannot say is that a list **gained or lost a row**:
+after `toggleFavorite`, `Launch:launch-181.favorite` is right everywhere, but `me.favorites`
+still holds the same refs. Edit the list yourself, through the typed
+[`client.cacheScope`](/sling_gql/guides/caching/#typed-cache-access-clientcachescope):
 
-- **Creating** (`scheduleLaunch`): the new `Launch:<id>` entity exists after the mutation but
-  no list references it. Either `refetch()` the list scope or, once the write policy layer
-  exists, prepend the ref. Today: refetch.
-- **Deleting**: `client.cache.evict('Launch:<id>')` drops the entity from every list that
-  referenced it and blanks fields pointing at it.
+```dart title="example/lib/screens/launch_screen.dart"
+mutate(
+  (m) => m.toggleFavorite(launchId: id)?.favorite,
+  optimistic: () {
+    launch.favorite = !wasFavorite;
+    final cache = client.cacheScope;
+    final me = cache.query.me;
+    if (me == null || me.isSkeleton) return; // Me tab not loaded: it will fetch fresh
+    final favorites = cache.list((q) => q.me?.favorites);
+    wasFavorite ? favorites.remove(launch) : favorites.prepend(launch);
+  },
+);
+```
+
+`cache.list(selector)` returns a `CacheList` for the list field the selector reads — written
+exactly as in a widget, arguments included (`(q) => q.launches(first: 20).nodes`), through
+objects, entities or lookups (`(q) => q.launch(id: x)?.crew`). It has `append`, `prepend`,
+`remove` and `contains`, each taking a generated accessor for a cached entity:
+
+- **Same semantics as a response.** An edit writes the new list of refs back through the
+  normal write path, so it touches the same dependency key a response replacing that list
+  would (`Viewer:viewer-1.favorites`): the Me tab rebuilds, a widget reading only `me.name`
+  does not.
+- **Journaled.** Inside `optimistic`, list edits are rolled back with the rest of the
+  callback's writes if the mutation fails. Edits after `await mutate(...)` (e.g. prepending
+  the entity a `scheduleLaunch` created, `cache.launch(newId)!`) are simply permanent.
+- **Set-like.** Adding an entity already in the list, or removing one that is not, is a
+  no-op that returns `false` and notifies nobody.
+- **Only cached lists.** A list that was never fetched (or is `null`) is left alone —
+  adding to it would make a one-element list look complete — so edits return `false` and the
+  next build fetches the real thing.
+
+**Deleting**: `cache.evict(launch)` drops `Launch:<id>` from the cache and from every list
+that referenced it, blanks object fields pointing at it (they are re-fetched), and rebuilds
+every scope that read any of those fields. Evictions are **not** journaled — evict after the
+mutation succeeded, not in `optimistic`.
+
+<Aside type="caution" title="Paginated and filtered lists">
+Each argument set is its own cache entry. `launches(first: 20)` and
+`launches(first: 20, after: "…")` are two pages, and `launches(filter: {favorite: true})` is
+yet another list — an edit applies to exactly the one you name, and a sibling `totalCount` is
+not adjusted. For paginated or filtered lists (where the row's *position* or the filter's
+membership is the server's call), [`refetchQueries`](#refetchqueries) remains the right tool.
+</Aside>
 
 ## What is in the example
 
 The detail screen's heart is a `MutationBuilder`; the list row reads `launch.favorite` so it
-depends on `Launch:<id>.favorite`. `example/test/app_test.dart` asserts, against the real
-mock server: one request for the mutation, the optimistic state before the response, the
-confirmed state after, and the list row updated on the way back with **no** extra request.
+depends on `Launch:<id>.favorite`. Its `optimistic` callback also prepends/removes the launch
+in `me.favorites` and adjusts `me.favoriteCount`, so the Me tab follows without a refetch.
+`example/test/app_test.dart` asserts, against the real mock server: one request for the
+mutation, the optimistic state before the response, the confirmed state after, the list row
+updated on the way back, and the Me tab gaining (then losing) the row — all with **no** extra
+request.
 
 ## `refetchQueries`
 
-The [Updating lists](#updating-lists) section above covers the two cases a normalized cache
-cannot fix by itself — a new entity nothing references yet, or one that should disappear from
-every list. `refetchQueries` is the simple, always-available way to handle both without a
-write policy:
+[Updating lists after a mutation](#updating-lists-after-a-mutation) covers what a normalized
+cache cannot fix by itself — a row a list should gain, or one it should lose — by editing the
+list. `refetchQueries` is the simple, always-available alternative that asks the server
+instead, and the right one for paginated or filtered lists:
 
 ```dart
 await client.mutateWith(

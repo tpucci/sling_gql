@@ -297,14 +297,14 @@ class MutationScope implements Recorder {
 /// this scope:
 /// - **reads never fetch** — a field that is not cached reads as `null`
 ///   (objects as skeletons, see [Accessor.isSkeleton]) and nothing is sent;
-/// - **writes** (generated setters) go through the normal write path:
-///   dependent scopes rebuild, and inside a mutation's `optimistic` callback
-///   they are journaled and undone on failure.
+/// - **writes** (generated setters, [CacheList] edits) go through the
+///   normal write path: dependent scopes rebuild, and inside a mutation's
+///   `optimistic` callback they are journaled and undone on failure.
 ///
 /// A scope records nothing that outlives it: [deps] is always empty (it
 /// never rebuilds) and misses are ignored. Scopes are cheap; take a fresh
 /// one per use.
-class CacheScope<Q extends Accessor> implements Recorder {
+class CacheScope<Q extends Accessor> implements Recorder, ListLocator {
   CacheScope(this.client);
 
   final SlingClient<Q> client;
@@ -329,6 +329,13 @@ class CacheScope<Q extends Accessor> implements Recorder {
   @override
   void onWrite(CacheWrite write) => client._onWrite(write);
 
+  /// Lists located by the selector [list] is currently running, if any.
+  List<(List<Object>, List<Accessor>?)>? _located;
+
+  @override
+  void locateList(List<Object> path, List<Accessor>? value) =>
+      _located?.add((path, value));
+
   /// The typed query root, reading from the cache only: `cacheScope.query.me`.
   /// Root fields that were never fetched read as skeletons — check
   /// [Accessor.isSkeleton] before writing through one, or the write creates
@@ -350,6 +357,157 @@ class CacheScope<Q extends Accessor> implements Recorder {
     });
     if (key == null || !cache.hasEntity(key)) return null;
     return ctor(this, root, [Ref(key)]);
+  }
+
+  /// The cached list [select] returns, for membership edits:
+  ///
+  /// ```dart
+  /// client.cacheScope.list((q) => q.me?.favorites).prepend(launch);
+  /// ```
+  ///
+  /// [select] must return a generated list getter/method as-is (not a
+  /// `.where(...)`/`.toList()` copy); arguments address the cache entry
+  /// exactly as in a widget (`q.launches(first: 20).nodes` is the first
+  /// page only). The path to it may go through lookups and entities
+  /// (`(q) => q.launch(id: x)?.crew`).
+  CacheList<R> list<R extends Accessor>(List<R>? Function(Q query) select) {
+    final located = _located = [];
+    final List<R>? value;
+    try {
+      value = select(query);
+    } finally {
+      _located = null;
+    }
+    for (final (path, listValue) in located.reversed) {
+      if (value == null ? listValue == null : identical(listValue, value)) {
+        return CacheList<R>._(this, path);
+      }
+    }
+    // `q.launch(id: x)?.crew` with no cached launch: nothing to edit.
+    if (value == null) return CacheList<R>._(this, null);
+    throw ArgumentError(
+      'CacheScope.list: the selector must return a generated list field as-is, '
+      'e.g. (q) => q.me?.favorites',
+    );
+  }
+
+  /// Removes [entity] from the cache everywhere: its entity is dropped, every
+  /// list that referenced it loses the element, and object fields pointing at
+  /// it read as missing again (re-fetched on the next build). Dependent
+  /// scopes rebuild. Returns `false` when it was not cached.
+  ///
+  /// Not journaled: an eviction inside a mutation's `optimistic` callback is
+  /// **not** undone on failure — evict after the mutation succeeded.
+  bool evict(Accessor entity) {
+    final key = _entityKey(entity);
+    if (key == null) return false;
+    final touched = cache.evict(key);
+    client._notify(touched);
+    return touched.isNotEmpty;
+  }
+
+  /// Entity key of the object [entity] points at, or `null` when it is not
+  /// cached or not a normalized entity.
+  String? _entityKey(Accessor entity) {
+    final path = entity.path;
+    if (path.length == 1 && path.first is Ref) {
+      final key = (path.first as Ref).key;
+      return cache.hasEntity(key) ? key : null;
+    }
+    final value = cache.read(entity.recorder.operation, path);
+    if (value is! Map<String, Object?>) return null;
+    return cache.normalization.identify(value);
+  }
+}
+
+/// One cached list of keyed entities, addressed by [CacheScope.list] for
+/// membership edits: `append` / `prepend` / `remove` a [Ref] to an entity.
+///
+/// Edits write the whole new list back through the normal write path, so
+/// they notify exactly like a response replacing the list (the dependency
+/// key of the field holding it) and are journaled like any `CacheWrite` — an
+/// optimistic `prepend` is rolled back when the mutation fails.
+///
+/// Membership is set-like: adding an entity already in the list, or removing
+/// one that is not, changes nothing and returns `false`. A list that is not
+/// cached (never fetched, or a server `null`) is left alone — adding to it
+/// would make a partial list look complete — and every edit returns `false`.
+///
+/// Each cached argument set is its own list: a paginated connection's pages
+/// (`launches(first:, after:)`) and every filter are separate entries, and an
+/// edit applies to the one entry you named. A filtered or paginated list is
+/// usually better served by `refetchQueries`; `totalCount`-style siblings are
+/// not adjusted either.
+class CacheList<R extends Accessor> {
+  CacheList._(this._scope, this.path);
+
+  final CacheScope<Accessor> _scope;
+
+  /// Where the list lives in the cache (see [Accessor.path]); `null` when the
+  /// selector returned `null` before reaching a list field (its parent object
+  /// is `null`), in which case every edit is a no-op.
+  final List<Object>? path;
+
+  Cache get _cache => _scope.cache;
+
+  /// The cached elements, or `null` when the list is not cached.
+  List<Object?>? get _items {
+    final path = this.path;
+    if (path == null) return null;
+    final value = _cache.read(_scope.operation, path);
+    return value is List ? value.cast<Object?>() : null;
+  }
+
+  /// True when the list itself is cached (a membership edit can apply).
+  bool get isCached => _items != null;
+
+  /// True when [entity] is an element of the cached list.
+  bool contains(R entity) {
+    final key = _scope._entityKey(entity);
+    return key != null && (_items?.contains(Ref(key)) ?? false);
+  }
+
+  /// Adds [entity] at the end. See [CacheList] for when this is a no-op.
+  bool append(R entity) => _insert(entity, atStart: false);
+
+  /// Adds [entity] at the start. See [CacheList] for when this is a no-op.
+  bool prepend(R entity) => _insert(entity, atStart: true);
+
+  /// Removes every occurrence of [entity]. Returns `false` when it was not
+  /// in the list (or the list is not cached).
+  bool remove(R entity) {
+    final items = _items;
+    final key = _scope._entityKey(entity);
+    if (items == null || key == null) return false;
+    final ref = Ref(key);
+    if (!items.contains(ref)) return false;
+    _replace(items, [for (final e in items) if (e != ref) e]);
+    return true;
+  }
+
+  bool _insert(R entity, {required bool atStart}) {
+    final items = _items;
+    final key = _scope._entityKey(entity);
+    if (items == null) return false;
+    if (key == null) {
+      throw ArgumentError.value(
+        entity,
+        'entity',
+        'is not a cached, normalized entity (it needs __typename and '
+            '${_cache.normalization.keyField} in the cache)',
+      );
+    }
+    final ref = Ref(key);
+    if (items.contains(ref)) return false;
+    _replace(items, atStart ? [ref, ...items] : [...items, ref]);
+    return true;
+  }
+
+  void _replace(List<Object?> previous, List<Object?> next) {
+    final path = this.path!; // non-null: `_items` was
+    final operation = _scope.operation;
+    final touched = _cache.write(operation, path, next);
+    _scope.onWrite(CacheWrite(operation, path, List<Object?>.of(previous), touched));
   }
 }
 
@@ -471,13 +629,14 @@ class SlingClient<Q extends Accessor> {
   }
 
   /// Typed, non-fetching access to the cache (see [CacheScope]): read or
-  /// write entities and root fields outside a widget build. Each access
-  /// returns a fresh scope.
+  /// write entities and root fields outside a widget build, and edit list
+  /// membership after a mutation. Each access returns a fresh scope.
   ///
   /// ```dart
   /// final cache = client.cacheScope;
   /// cache.launch('launch-181')?.favorite = true; // generated per keyed type
   /// final name = cache.query.me?.name; // root fields, from the cache only
+  /// cache.list((q) => q.me?.favorites).prepend(cache.launch('launch-181')!);
   /// ```
   CacheScope<Q> get cacheScope => CacheScope<Q>(this);
 
@@ -536,6 +695,11 @@ class SlingClient<Q extends Accessor> {
       _journal = journal;
       try {
         optimistic();
+      } catch (_) {
+        _journal = null;
+        // Nothing is sent: undo the writes made before the throw.
+        _notify(_rollback(journal));
+        rethrow;
       } finally {
         _journal = null;
       }
@@ -551,7 +715,7 @@ class SlingClient<Q extends Accessor> {
     try {
       (touched, error) = await _send('mutation', scope.root, op);
     } catch (e) {
-      _rollback(journal);
+      _notify(_rollback(journal));
       rethrow;
     }
     if (error != null) {
