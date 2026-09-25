@@ -1,80 +1,47 @@
 # TODO — sling_gql
 
 Single backlog for the PoC, ordered roughly by value. Items are numbered so
-they can be picked one at a time ("do #3"). Sources: the DX/performance review
-of the example app (2026-09), smaller issues noticed while building the
-normalized cache and mutations, and the roadmap (website
-`internals/roadmap.mdx`, folded in below as items 46+ where not already
-covered). Numbers stay stable; strike items when done.
+they can be picked one at a time ("do #23"). Numbers stay stable; done items
+move to the **Done** section at the bottom (one line each). Sources: the
+DX/performance review of the example app (2026-09), smaller issues noticed
+while building the normalized cache and mutations, and the roadmap (website
+`internals/roadmap.mdx`, folded in as items 46+).
 
-Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
-fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
-#31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
-
-Status (2026-09-25): P0 all done; P1 #7–#11, #13, #15 done; #12 #14 #16 open. Doc follow-ups noted under #1, #5, #8, #15.
+Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
+~~transport hook~~ · fine-grained rebuilds mostly done (#19, #20) ·
+subscriptions #30 · unions #31 · expiry/SWR #23 · dev experience #46, #47 ·
+`gql_link` #48.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
 
-## P0 — biggest multipliers
+## In progress (2026-09-25)
 
-1. ~~**DX — Dev-mode waterfall warning.**~~ done: `SlingClient(warnOnWaterfall:,
-   onWaterfall:)` (on when asserts are enabled, prints by default),
-   `WaterfallWarning(scope, fields)`, `QueryBuilder.debugLabel` (falls back
-   to the key, then `QueryScope#n`). Only rebuilds the *client* triggered
-   count; `refetch()` and `setState` rebuilds never warn. Follow-up: mention
-   it in the batching-and-waterfalls guide; in-app overlay is #46.
-2. ~~**Gen — Real Dart `enum`s**~~ done: lowerCamel constants + `unknown`,
-   `.graphqlName`, `fromGraphQL`/`toGraphQL` (throws on `unknown` as an
-   argument); `Accessor.enumValue`/`enumList`.
-3. ~~**Gen — No setter on the key field**~~ done: no setter on the key field,
-   on `PageInfo` fields, or on `pageInfo`/`totalCount` of connection types.
-   Explicit `write(...)` call deliberately not adopted (setters stay).
-4. ~~**Perf — `_notify` iterates the large set.**~~ done:
-   `touched.any(scope.deps.contains)`.
-5. ~~**DX — Pagination helper.**~~ done: `PaginationController`,
-   `ConnectionPage<Node>`, `PaginatedQueryBuilder<Q, Node>` /
-   `PaginatedState` in `pagination.dart`; example launches screen uses it.
-   Follow-up: `guides/batching-and-waterfalls.mdx` still shows the manual
-   `_cursors.add` snippet.
-6. ~~**Runtime — Single `transport` hook**~~ done: `typedef Transport =
-   Future<http.Response> Function(http.Request)`, `SlingClient(transport:)`;
-   `headers` applied before the hook; queries and mutations both go through
-   it; recipes (timeout, retry, token refresh, logging) in `guides/transport`.
+- **#12 + #14** — cache lane (typed cache access, list membership, `evict`).
+- **#34 #35 #36 #41 #42** and the follow-ups below — example/docs sweep lane.
+
+## Open follow-ups from done items
+
+- (#1) Mention `SlingClient.onWaterfall` / `QueryBuilder.debugLabel` in
+  `guides/batching-and-waterfalls.mdx`.
+- (#5) `guides/batching-and-waterfalls.mdx` still shows the manual
+  `_cursors.add` snippet; rewrite around `PaginatedQueryBuilder`.
+- (#8) Example screens use `&& !state.isLoading` to hide the ghost skeleton
+  row; switch to `state.isSkeleton`.
+- (#15) `refetchQueries` is not used in the example app (may become moot once
+  #14 lands).
 
 ## P1 — DX rough edges seen in the example
 
-7. ~~**DX — Three meanings of `null`.**~~ done: blessed pattern is `state.hasMissingData ? Skeleton : …`;
-   `Accessor.isFetched(field, {args})` for per-field checks (no dep/miss
-   recorded); errored paths stay `null` + `state.error`. Story is on the
-   getting-started page, linked from loading-and-errors.
-8. ~~**DX — Skeleton lists have one element.**~~ done: `QueryState.isSkeleton` (first paint before data) plus the
-   "never branch on list length while `hasMissingData`" rule in the docs.
-   Example still uses `&& !state.isLoading`; switch it to `isSkeleton` when
-   touching the screens next.
-9. ~~**DX — Asymmetric mutation API.**~~ done: `SlingScope(schema: slingSchema)` (generated
-   constant) or `mutationRoot:`; `MutationBuilder<Mutation>(builder: …)` needs
-   no `root:` (explicit `root:` still wins).
-10. ~~**DX — Sticky errors are undocumented at the call site.**~~ done: doc comments on `QueryState.error`/`isLoading`/`refetch` and
-   `QueryScope.error`; `SlingClient(retryFailedAfter: Duration?)` auto-clears a
-   failed document after that delay (default `null` = sticky).
-11. ~~**DX — `$` renames without explanation.**~~ done: generated file header lists every `$` rule.
 12. **DX — Cache is opaque to users.** `cache.read('query', ['launches_1qouruf',
     …])` uses hashed aliases nobody can type. Add typed entity access
     (`client.cache.entity<Launch>('1')`-style, generated) and a way to edit
     list membership (see #14).
-13. ~~**Gen — Custom scalar mapping.**~~ done: `--scalar Name=DartType[:converter]` (repeatable; `DateTime`
-   built in); example regenerated with `--scalar DateTime=DateTime`
-   (`example/lib/date_format.dart`).
 14. **Runtime — List membership after a mutation (write policies).**
     `me.favorites` / `launches(filter: …)` do not gain or lose a row after
     `toggleFavorite`; only refetch fixes it. Add/remove a `Ref` in a cached list
     (typed API from #12), plus create/delete helpers (`evict` from an accessor).
-15. ~~**Runtime — `refetchQueries` sugar**~~ done: `mutateWith(..., refetchQueries: ['me', 'launches'])` refetches
-   every scope whose root selection reads those fields (matched on field name,
-   any args); forwarded by the generated `client.mutate`. Not yet used in the
-   example app.
 16. **Test — `sling_gql_test` helpers.** `pumpUntilSettled(tester, client)`,
     a schema-aware in-memory server/`MockClient` builder, and the folklore
     (`HttpOverrides.global = null`, `pump(Duration)` for transitions,
@@ -193,6 +160,24 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     Subscription root.
 54. **Perf — List-index granularity for inline lists** (today: the whole
     entity field). Remaining half of "fine-grained rebuilds".
+
+## Done
+
+Kept for number stability; see git history for details.
+
+1. DX — Dev-mode waterfall warning: `SlingClient(warnOnWaterfall:, onWaterfall:)`, `WaterfallWarning`, `QueryBuilder.debugLabel`.
+2. Gen — Real Dart enums (lowerCamel + `unknown`, `.graphqlName`, `fromGraphQL`/`toGraphQL`; `Accessor.enumValue`/`enumList`).
+3. Gen — No setter on the key field, `PageInfo` fields, or `pageInfo`/`totalCount` of connections.
+4. Perf — `_notify` probes the small `touched` set.
+5. DX — Pagination helper: `PaginationController`, `ConnectionPage`, `PaginatedQueryBuilder`/`PaginatedState`.
+6. Runtime — `Transport` hook (`SlingClient(transport:)`), recipes in `guides/transport`.
+7. DX — Three meanings of `null`: `state.hasMissingData` pattern + `Accessor.isFetched`; story on getting-started.
+8. DX — `QueryState.isSkeleton` + "never branch on list length while `hasMissingData`" rule.
+9. DX — `SlingScope(schema: slingSchema)` / `mutationRoot:`; `MutationBuilder` needs no `root:`.
+10. DX — Sticky-error docs + `SlingClient(retryFailedAfter:)`.
+11. DX — Generated-file header explains the `$` rename scheme.
+13. Gen — `--scalar Name=DartType[:converter]` (`DateTime` built in); example uses it.
+15. Runtime — `mutateWith(..., refetchQueries: [...])`, forwarded by generated `client.mutate`.
 
 ## Explicitly not planned
 
