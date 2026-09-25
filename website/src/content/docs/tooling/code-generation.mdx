@@ -7,7 +7,7 @@ import { Steps, Aside, FileTree } from '@astrojs/starlight/components';
 
 `sling_gql_gen` is a pure-Dart CLI. Point it at a GraphQL introspection JSON
 file and it writes one Dart file: a typed `Accessor` subclass per object
-type, a constant holder per enum, and a class per input object. That file is
+type, a Dart `enum` per GraphQL enum, and a class per input object. That file is
 the entire "schema binding" — there is no runtime reflection.
 
 ## Why generation, not a `Proxy`
@@ -59,7 +59,7 @@ generated code is reproducible without a server — see [Mock API](/sling_gql/to
   - class Query extends Accessor  — the query root, one getter/method per field
   - class Launch extends Accessor — one class per other OBJECT type
   - class Rocket extends Accessor
-  - abstract final class LaunchStatus  — one holder per ENUM
+  - enum LaunchStatus                  — one Dart enum per ENUM
   - class LaunchFilter                — one class per INPUT_OBJECT
 </FileTree>
 
@@ -94,7 +94,7 @@ LaunchConnection? launches({
   int? first,
   String? after,
   LaunchFilter? filter,
-  String? orderBy,
+  LaunchOrder? orderBy,
 }) => object(
   'launches',
   LaunchConnection.new,
@@ -102,23 +102,57 @@ LaunchConnection? launches({
     'first': Arg('Int', first),
     'after': Arg('String', after),
     'filter': Arg('LaunchFilter', filter?.toJson()),
-    'orderBy': Arg('LaunchOrder', orderBy),
+    'orderBy': Arg('LaunchOrder', orderBy?.toGraphQL()),
   },
 );
 ```
 
-Enums are read and written as plain `String`, held in a constant class so you
-still get autocomplete and a compile error on typos:
+Each GraphQL enum becomes a real Dart `enum`, so a `switch` over it is
+exhaustive and a typo is a compile error. Constants are the lowerCamelCase of
+the wire name and carry it as `graphqlName`; a trailing `unknown` value keeps
+old clients working when the server adds a value later:
 
 ```dart title="example/lib/generated/schema.dart"
-abstract final class LaunchStatus {
-  static const SCHEDULED = 'SCHEDULED';
-  static const SUCCESS = 'SUCCESS';
-  static const FAILURE = 'FAILURE';
-  static const PARTIAL_FAILURE = 'PARTIAL_FAILURE';
-  static const SCRUBBED = 'SCRUBBED';
+enum LaunchStatus {
+  scheduled('SCHEDULED'),
+  success('SUCCESS'),
+  failure('FAILURE'),
+  partialFailure('PARTIAL_FAILURE'),
+  scrubbed('SCRUBBED'),
+
+  /// A wire value this client does not know (forward compatibility).
+  unknown('');
+
+  const LaunchStatus(this.graphqlName);
+
+  /// The value as spelled in the GraphQL schema.
+  final String graphqlName;
+
+  /// Maps a wire value to its constant, [unknown] when unmatched.
+  static LaunchStatus fromGraphQL(String value) =>
+      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);
+
+  /// The wire value to send as an argument; [unknown] has none.
+  String toGraphQL() { ... }
 }
 ```
+
+The cache still holds the wire `String`; an enum field's getter maps it on
+read through `Accessor.enumValue` (lists: `enumList`), which shares the
+scalar path so misses, skeletons and dependency tracking behave exactly like
+a `String` field. The setter writes `graphqlName` back. Enum-typed arguments
+and input fields are typed with the enum and serialized with `toGraphQL()`,
+which throws an `ArgumentError` for `unknown` — an empty wire value is never
+valid:
+
+```dart title="example/lib/generated/schema.dart"
+LaunchStatus? get status => enumValue('status', LaunchStatus.fromGraphQL);
+set status(LaunchStatus? v) => write('status', v?.graphqlName);
+```
+
+A constant that would clash with a Dart keyword or with something the enum
+already has (`unknown`, `values`, `index`, `name`, …) gets the usual
+trailing `$`: `UNKNOWN` → `unknown$`, `default` → `default$`.
 
 Input objects become plain immutable Dart classes with a `toJson()` used to
 build the `Arg` value — nothing sling_gql-specific about them:
@@ -127,14 +161,14 @@ build the `Arg` value — nothing sling_gql-specific about them:
 class LaunchFilter {
   const LaunchFilter({this.status, this.rocketId, this.year, this.upcoming, this.search});
 
-  final String? status;
+  final LaunchStatus? status;
   final String? rocketId;
   final int? year;
   final bool? upcoming;
   final String? search;
 
   Map<String, Object?> toJson() => {
-    if (status != null) 'status': status,
+    if (status != null) 'status': status?.toGraphQL(),
     if (rocketId != null) 'rocketId': rocketId,
     if (year != null) 'year': year,
     if (upcoming != null) 'upcoming': upcoming,
@@ -180,6 +214,11 @@ as the string literal used for cache keys, `Arg` map keys and `toJson` keys
 - **Dart keywords and `Accessor` member names** get a trailing `$`:
   `type` → `type$`, `class` → `class$`. This also covers accidental
   collisions with `Accessor` itself (`selection`, `write`, `isSkeleton`, …).
+- **Enum constants** are lowerCamelCased (`PARTIAL_FAILURE` →
+  `partialFailure`, `created_at` → `createdAt`) and get the same trailing
+  `$` on a clash with a keyword or an enum member (`unknown`, `values`,
+  `index`, `name`, …), or when two wire names camel-case to the same
+  identifier.
 - **A leading underscore** (Hasura-style `_eq`, `_and`) is replaced with `$`
   so the identifier stays public in Dart: `_eq` → `$eq`.
 - **Type names** go through the same leading-underscore rule, plus a check

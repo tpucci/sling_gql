@@ -5,7 +5,7 @@ import 'type_ref.dart';
 /// Recursively resolves a [TypeRef] (as used for arguments and input-object
 /// fields) to a Dart type expression, honoring `NON_NULL` at every nesting
 /// level: `[users_select_column!]` -> `List<String>` (non-null elements),
-/// `LaunchFind` -> `LaunchFind`.
+/// `LaunchFind` -> `LaunchFind`, `LaunchStatus` (enum) -> `LaunchStatus`.
 ///
 /// The outermost `NON_NULL` wrapper is reported via [ResolvedDartType.nonNull]
 /// rather than baked into the type string, so callers can choose between
@@ -24,8 +24,6 @@ ResolvedDartType resolveArgDartType(TypeRef ref) {
     case 'SCALAR':
       return ResolvedDartType(scalarDartType(ref.name!), false);
     case 'ENUM':
-      // PoC simplification: enums are read/written as their string value.
-      return ResolvedDartType('String', false);
     case 'INPUT_OBJECT':
     case 'OBJECT':
     case 'INTERFACE':
@@ -38,8 +36,8 @@ ResolvedDartType resolveArgDartType(TypeRef ref) {
 
 /// Builds the Dart expression that serializes [dartExpr] (a value of the
 /// resolved Dart type for [ref]) for use as an `Arg` value / `toJson` entry:
-/// input objects call `.toJson()` (recursively for lists), everything else
-/// passes through unchanged.
+/// input objects call `.toJson()`, enums call `.toGraphQL()` (both
+/// recursively for lists), everything else passes through unchanged.
 ///
 /// [nonNull] must match the `nonNull` used to decide whether [dartExpr]
 /// itself can be null (i.e. whether `?.` is needed to reach `.toJson()`).
@@ -47,19 +45,23 @@ String argValueExpression(String dartExpr, TypeRef ref, {required bool nonNull})
   final unwrapped = ref.withoutTopNonNull;
   if (unwrapped.kind == 'LIST') {
     final elementRef = unwrapped.ofType!;
-    final elementNamed = elementRef.named;
-    if (elementNamed.kind == 'INPUT_OBJECT') {
-      final listAccessor = nonNull ? '.' : '?.';
-      final elementAccessor = elementRef.isNonNull ? '.' : '?.';
-      return '$dartExpr$listAccessor'
-          'map((e) => e${elementAccessor}toJson()).toList()';
-    }
-    return dartExpr;
+    final serializer = _serializerCall(elementRef.named.kind);
+    if (serializer == null) return dartExpr;
+    final listAccessor = nonNull ? '.' : '?.';
+    final elementAccessor = elementRef.isNonNull ? '.' : '?.';
+    return '$dartExpr$listAccessor'
+        'map((e) => e$elementAccessor$serializer).toList()';
   }
-  final named = unwrapped.named;
-  if (named.kind == 'INPUT_OBJECT') {
-    final accessor = nonNull ? '.' : '?.';
-    return '$dartExpr${accessor}toJson()';
-  }
-  return dartExpr;
+  final serializer = _serializerCall(unwrapped.named.kind);
+  if (serializer == null) return dartExpr;
+  final accessor = nonNull ? '.' : '?.';
+  return '$dartExpr$accessor$serializer';
 }
+
+/// The method that turns a value of the given named [kind] into its JSON
+/// form, or `null` when the value passes through unchanged.
+String? _serializerCall(String kind) => switch (kind) {
+      'INPUT_OBJECT' => 'toJson()',
+      'ENUM' => 'toGraphQL()',
+      _ => null,
+    };

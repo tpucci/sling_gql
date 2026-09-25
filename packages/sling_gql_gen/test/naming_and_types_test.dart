@@ -76,14 +76,19 @@ void main() {
       expect(resolved.nonNull, isFalse);
     });
 
-    test('list of non-null enum -> List<String> with non-null elements, nullable list', () {
+    test('list of non-null enum -> List<Enum> with non-null elements, nullable list', () {
       final ref = TypeRef(
         kind: 'LIST',
         ofType: TypeRef(kind: 'NON_NULL', ofType: named('ENUM', 'users_select_column')),
       );
       final resolved = resolveArgDartType(ref);
-      expect(resolved.dartType, 'List<String>');
+      expect(resolved.dartType, 'List<users_select_column>');
       expect(resolved.nonNull, isFalse);
+    });
+
+    test('enum resolves to its (sanitized) Dart enum name', () {
+      expect(resolveArgDartType(named('ENUM', 'LaunchStatus')).dartType, 'LaunchStatus');
+      expect(resolveArgDartType(named('ENUM', '_Order')).dartType, r'$Order');
     });
 
     test('list of nullable input object -> List<T?>', () {
@@ -136,6 +141,57 @@ void main() {
         argValueExpression('order', ref, nonNull: false),
         'order?.map((e) => e.toJson()).toList()',
       );
+    });
+
+    test('enum calls toGraphQL(), honoring nullability', () {
+      expect(
+        argValueExpression('status', named('ENUM', 'LaunchStatus'), nonNull: false),
+        'status?.toGraphQL()',
+      );
+      expect(
+        argValueExpression('status', named('ENUM', 'LaunchStatus'), nonNull: true),
+        'status.toGraphQL()',
+      );
+    });
+
+    test('required list of nullable enums maps toGraphQL with ?.', () {
+      final ref = TypeRef(
+        kind: 'NON_NULL',
+        ofType: TypeRef(kind: 'LIST', ofType: named('ENUM', 'LaunchStatus')),
+      );
+      expect(
+        argValueExpression('statuses', ref, nonNull: true),
+        'statuses.map((e) => e?.toGraphQL()).toList()',
+      );
+    });
+  });
+
+  group('sanitizeEnumConstantName', () {
+    test('lowerCamelCases SCREAMING_SNAKE wire names', () {
+      expect(sanitizeEnumConstantName('SCHEDULED'), 'scheduled');
+      expect(sanitizeEnumConstantName('PARTIAL_FAILURE'), 'partialFailure');
+      expect(sanitizeEnumConstantName('DATE_ASC'), 'dateAsc');
+    });
+
+    test('lowerCamelCases snake_case and keeps mixed case', () {
+      expect(sanitizeEnumConstantName('created_at'), 'createdAt');
+      expect(sanitizeEnumConstantName('dateAsc'), 'dateAsc');
+      expect(sanitizeEnumConstantName('Scheduled'), 'scheduled');
+      expect(sanitizeEnumConstantName('id'), 'id');
+    });
+
+    test('leading underscore becomes a leading \$', () {
+      expect(sanitizeEnumConstantName('_internal'), r'$internal');
+      expect(sanitizeEnumConstantName('_1'), r'$1');
+    });
+
+    test('keywords and enum member names get a trailing \$', () {
+      expect(sanitizeEnumConstantName('default'), 'default\$');
+      expect(sanitizeEnumConstantName('IN'), 'in\$');
+      expect(sanitizeEnumConstantName('UNKNOWN'), 'unknown\$');
+      expect(sanitizeEnumConstantName('VALUES'), 'values\$');
+      expect(sanitizeEnumConstantName('index'), 'index\$');
+      expect(sanitizeEnumConstantName('name'), 'name\$');
     });
   });
 

@@ -10,8 +10,11 @@ import 'package:sling_gql/sling_gql.dart';
 // --- Hand-written "generated" code for a tiny schema -------------------------
 //
 // type Query    { me: User!  user(id: ID!): User }
-// type User     { id: ID!  name: String!  age: Int  friends(limit: Int): [User!]! }
-// type Mutation { rename(id: ID!, name: String!): User!  deleteUser(id: ID!): Boolean! }
+// type User     { id: ID!  name: String!  age: Int  status: UserStatus
+//                 friends(limit: Int): [User!]! }
+// enum UserStatus { ACTIVE  INACTIVE }
+// type Mutation { rename(id: ID!, name: String!): User!  deleteUser(id: ID!): Boolean!
+//                 setStatus(id: ID!, status: UserStatus!): User! }
 
 class Query extends Accessor {
   Query(super.recorder, super.selection, super.path);
@@ -30,6 +33,8 @@ class User extends Accessor {
   set name(String? v) => write('name', v);
   int? get age => scalar<int>('age');
   set age(int? v) => write('age', v);
+  UserStatus? get status => enumValue('status', UserStatus.fromGraphQL);
+  set status(UserStatus? v) => write('status', v?.graphqlName);
   List<User> friends({int? limit}) =>
       list('friends', User.new, args: {'limit': Arg('Int', limit)}, keyed: true)!;
 }
@@ -46,6 +51,36 @@ class Mutation extends Accessor {
       );
   bool? deleteUser({required String id}) =>
       scalar<bool>('deleteUser', args: {'id': Arg('ID!', id)});
+  User? setStatus({required String id, required UserStatus status}) => object(
+        'setStatus',
+        User.new,
+        args: {'id': Arg('ID!', id), 'status': Arg('UserStatus!', status.toGraphQL())},
+        keyed: true,
+      );
+}
+
+enum UserStatus {
+  active('ACTIVE'),
+  inactive('INACTIVE'),
+  /// A wire value this client does not know (forward compatibility).
+  unknown('');
+
+  const UserStatus(this.graphqlName);
+
+  /// The value as spelled in the GraphQL schema.
+  final String graphqlName;
+
+  /// Maps a wire value to its constant, [unknown] when unmatched.
+  static UserStatus fromGraphQL(String value) =>
+      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);
+
+  /// The wire value to send as an argument; [unknown] has none.
+  String toGraphQL() {
+    if (this == unknown) {
+      throw ArgumentError.value(this, 'UserStatus', 'unknown cannot be sent as an argument');
+    }
+    return graphqlName;
+  }
 }
 
 /// What the generator emits so `client.mutate` needs no wiring.
@@ -136,6 +171,47 @@ query {
     final alias = RegExp(r'(friends_\w+): friends').firstMatch(op.document)!.group(1);
     expect(alias, 'friends_1n0h7gq');
     expect(names, ['Bob', 'Cy']);
+  });
+
+  test('enum fields: wire string mapped on read, unknown for new values, miss when absent',
+      () async {
+    final h = Harness((q, v) => {
+          'me': {'__typename': 'User', 'id': '1', 'status': 'ACTIVE'},
+        });
+    final scope = h.client.createScope(onChanged: () {});
+
+    expect(scope.run((q) => q.me.status), isNull);
+    expect(scope.hasMissingData, isTrue, reason: 'enum read records a miss like a scalar');
+    await scope.whenSettled;
+
+    expect(scope.run((q) => q.me.status), UserStatus.active);
+    expect(scope.hasMissingData, isFalse);
+    expect(h.sent.single.document, contains('status'));
+
+    h.client.cache.write('query', ['me', 'status'], 'ARCHIVED');
+    expect(scope.run((q) => q.me.status), UserStatus.unknown);
+
+    scope.run((q) => q.me.status = UserStatus.inactive);
+    expect(h.client.cache.read('query', ['me', 'status']), 'INACTIVE');
+  });
+
+  test('enum arguments are sent as their wire name; unknown throws', () async {
+    final h = Harness((q, v) {
+      final alias = RegExp(r'(setStatus_\w+):').firstMatch(q)!.group(1)!;
+      return {
+        alias: {'__typename': 'User', 'id': '1', 'status': 'INACTIVE'},
+      };
+    });
+    final status = await h.client.mutate(
+      (m) => m.setStatus(id: '1', status: UserStatus.inactive)?.status,
+    );
+    expect(status, UserStatus.inactive);
+    expect(h.sent.single.variables, {'v0': '1', 'v1': 'INACTIVE'});
+
+    expect(
+      () => h.client.mutate((m) => m.setStatus(id: '1', status: UserStatus.unknown)),
+      throwsArgumentError,
+    );
   });
 
   test('null object from server is null, not a skeleton', () async {

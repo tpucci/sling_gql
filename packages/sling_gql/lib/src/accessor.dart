@@ -101,6 +101,20 @@ abstract class Accessor {
     return (value as List).map(_coerce<T>).toList();
   }
 
+  /// Reads an enum field: the cached wire `String` mapped through [parse]
+  /// (the generated `fromGraphQL`). Same miss/skeleton semantics as [scalar].
+  T? enumValue<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) {
+    final raw = scalar<String>(field, args: args);
+    return raw == null ? null : parse(raw);
+  }
+
+  /// Reads a list of enums, mapping each wire `String` through [parse].
+  /// Same miss/skeleton semantics as [scalarList].
+  List<T?>? enumList<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) {
+    final raw = scalarList<String>(field, args: args);
+    return raw?.map((e) => e == null ? null : parse(e)).toList();
+  }
+
   /// Reads an object field. Returns a skeleton accessor when not cached,
   /// `null` only when the server explicitly returned `null`.
   ///

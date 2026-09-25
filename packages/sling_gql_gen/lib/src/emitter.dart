@@ -77,7 +77,7 @@ String generate(
 
   for (final t in enumTypes) {
     out.writeln();
-    _emitEnumHolder(out, t);
+    _emitEnum(out, t);
   }
 
   for (final t in inputTypes) {
@@ -195,14 +195,8 @@ void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
           ? ', keyed: true'
           : '';
 
-  final String elementDartType;
-  if (leaf.kind == 'SCALAR') {
-    elementDartType = scalarDartType(leaf.name!);
-  } else if (leaf.kind == 'ENUM') {
-    elementDartType = 'String';
-  } else {
-    elementDartType = sanitizeTypeName(leaf.name!);
-  }
+  final elementDartType =
+      leaf.kind == 'SCALAR' ? scalarDartType(leaf.name!) : sanitizeTypeName(leaf.name!);
 
   // A field whose sanitized Dart name is spelled exactly like the Dart
   // class it returns (common with Hasura's lowercase table types, e.g. a
@@ -226,16 +220,23 @@ void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
   final hasArgs = field.args.isNotEmpty;
   final key = dartStringLiteral(field.name);
 
+  // Enums are cached as their wire `String` and mapped on read; the setter
+  // writes the wire value back.
+  final isEnum = leaf.kind == 'ENUM';
+  final scalarRead = isEnum
+      ? 'enumValue($key, $elementDartType.fromGraphQL'
+      : 'scalar<$elementDartType>($key';
+  final scalarListRead = isEnum
+      ? 'enumList($key, $elementDartType.fromGraphQL'
+      : 'scalarList<$elementDartType>($key';
+  final writeValue = isEnum ? 'v?.graphqlName' : 'v';
+
   if (!hasArgs) {
     if (!isList && isScalarLeaf) {
-      out.writeln(
-        "  $elementDartType? get $effectiveFieldName => scalar<$elementDartType>($key);",
-      );
-      out.writeln("  set $effectiveFieldName($elementDartType? v) => write($key, v);");
+      out.writeln("  $elementDartType? get $effectiveFieldName => $scalarRead);");
+      out.writeln("  set $effectiveFieldName($elementDartType? v) => write($key, $writeValue);");
     } else if (isList && isScalarLeaf) {
-      out.writeln(
-        "  List<$elementDartType?>? get $effectiveFieldName => scalarList<$elementDartType>($key);",
-      );
+      out.writeln("  List<$elementDartType?>? get $effectiveFieldName => $scalarListRead);");
     } else if (!isList) {
       out.writeln(
         "  $elementDartType? get $effectiveFieldName => object($key, $elementDartType.new$objectOpts);",
@@ -252,11 +253,11 @@ void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
   final argsMap = _buildArgsMap(field.args);
   if (!isList && isScalarLeaf) {
     out.writeln(
-      "  $elementDartType? $effectiveFieldName($params) => scalar<$elementDartType>($key, args: $argsMap);",
+      "  $elementDartType? $effectiveFieldName($params) => $scalarRead, args: $argsMap);",
     );
   } else if (isList && isScalarLeaf) {
     out.writeln(
-      "  List<$elementDartType?>? $effectiveFieldName($params) => scalarList<$elementDartType>($key, args: $argsMap);",
+      "  List<$elementDartType?>? $effectiveFieldName($params) => $scalarListRead, args: $argsMap);",
     );
   } else if (!isList) {
     out.writeln(
@@ -298,10 +299,14 @@ String _buildArgsMap(List<GqlInputValue> args) {
   return '{${entries.join(', ')}}';
 }
 
-void _emitEnumHolder(StringBuffer out, GqlType type) {
-  final className = sanitizeTypeName(type.name);
+/// A real Dart `enum` per GraphQL enum: one lowerCamelCase constant per
+/// value carrying its wire name, plus `unknown` so a value added to the
+/// schema after generation still decodes (forward compatibility).
+void _emitEnum(StringBuffer out, GqlType type) {
+  final enumName = sanitizeTypeName(type.name);
   _emitDocAndDeprecation(out, indent: '', description: type.description);
-  out.writeln('abstract final class $className {');
+  out.writeln('enum $enumName {');
+  final usedNames = <String>{};
   for (final v in type.enumValues) {
     _emitDocAndDeprecation(
       out,
@@ -310,10 +315,38 @@ void _emitEnumHolder(StringBuffer out, GqlType type) {
       isDeprecated: v.isDeprecated,
       deprecationReason: v.deprecationReason,
     );
-    final dartName = sanitizeIdentifier(v.name);
-    out.writeln('  static const $dartName = ${dartStringLiteral(v.name)};');
+    // Two wire names can camel-case to the same identifier (`FOO_BAR` and
+    // `fooBar`); the later one gets the usual `$` suffix.
+    var dartName = sanitizeEnumConstantName(v.name);
+    while (!usedNames.add(dartName)) {
+      dartName = '$dartName\$';
+    }
+    out.writeln('  $dartName(${dartStringLiteral(v.name)}),');
   }
-  out.writeln('}');
+  out
+    ..writeln('  /// A wire value this client does not know (forward compatibility).')
+    ..writeln("  unknown('');")
+    ..writeln()
+    ..writeln('  const $enumName(this.graphqlName);')
+    ..writeln()
+    ..writeln('  /// The value as spelled in the GraphQL schema.')
+    ..writeln('  final String graphqlName;')
+    ..writeln()
+    ..writeln('  /// Maps a wire value to its constant, [unknown] when unmatched.')
+    ..writeln('  static $enumName fromGraphQL(String value) =>')
+    ..writeln('      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);')
+    ..writeln()
+    ..writeln('  /// The wire value to send as an argument; [unknown] has none.')
+    ..writeln('  String toGraphQL() {')
+    ..writeln('    if (this == unknown) {')
+    ..writeln(
+      '      throw ArgumentError.value(this, ${dartStringLiteral(enumName)}, '
+      "'unknown cannot be sent as an argument');",
+    )
+    ..writeln('    }')
+    ..writeln('    return graphqlName;')
+    ..writeln('  }')
+    ..writeln('}');
 }
 
 void _emitInputClass(StringBuffer out, GqlType type) {

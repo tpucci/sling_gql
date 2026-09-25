@@ -14,7 +14,7 @@ class Query extends Accessor {
     int? first,
     String? after,
     LaunchFilter? filter,
-    String? orderBy,
+    LaunchOrder? orderBy,
   }) => object(
     'launches',
     LaunchConnection.new,
@@ -22,7 +22,7 @@ class Query extends Accessor {
       'first': Arg('Int', first),
       'after': Arg('String', after),
       'filter': Arg('LaunchFilter', filter?.toJson()),
-      'orderBy': Arg('LaunchOrder', orderBy),
+      'orderBy': Arg('LaunchOrder', orderBy?.toGraphQL()),
     },
   );
 
@@ -31,7 +31,7 @@ class Query extends Accessor {
     int? limit,
     int? offset,
     LaunchFilter? filter,
-    String? orderBy,
+    LaunchOrder? orderBy,
   }) => list(
     'launchesPage',
     Launch.new,
@@ -39,7 +39,7 @@ class Query extends Accessor {
       'limit': Arg('Int', limit),
       'offset': Arg('Int', offset),
       'filter': Arg('LaunchFilter', filter?.toJson()),
-      'orderBy': Arg('LaunchOrder', orderBy),
+      'orderBy': Arg('LaunchOrder', orderBy?.toGraphQL()),
     },
     keyed: true,
   );
@@ -93,13 +93,18 @@ class Mutation extends Accessor {
     args: {'input': Arg('ScheduleLaunchInput!', input.toJson())},
     keyed: true,
   );
-  Launch? updateLaunchStatus({required String id, required String status}) =>
-      object(
-        'updateLaunchStatus',
-        Launch.new,
-        args: {'id': Arg('ID!', id), 'status': Arg('LaunchStatus!', status)},
-        keyed: true,
-      );
+  Launch? updateLaunchStatus({
+    required String id,
+    required LaunchStatus status,
+  }) => object(
+    'updateLaunchStatus',
+    Launch.new,
+    args: {
+      'id': Arg('ID!', id),
+      'status': Arg('LaunchStatus!', status.toGraphQL()),
+    },
+    keyed: true,
+  );
 }
 
 /// Typed mutations for this schema. See `SlingClient.mutateWith`.
@@ -198,8 +203,8 @@ class Rocket extends Accessor {
   set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
-  String? get family => scalar<String>('family');
-  set family(String? v) => write('family', v);
+  RocketFamily? get family => enumValue('family', RocketFamily.fromGraphQL);
+  set family(RocketFamily? v) => write('family', v?.graphqlName);
   String? get description => scalar<String>('description');
   set description(String? v) => write('description', v);
   bool? get active => scalar<bool>('active');
@@ -313,8 +318,8 @@ class Launch extends Accessor {
   set details(String? v) => write('details', v);
   String? get date => scalar<String>('date');
   set date(String? v) => write('date', v);
-  String? get status => scalar<String>('status');
-  set status(String? v) => write('status', v);
+  LaunchStatus? get status => enumValue('status', LaunchStatus.fromGraphQL);
+  set status(LaunchStatus? v) => write('status', v?.graphqlName);
   bool? get upcoming => scalar<bool>('upcoming');
   set upcoming(bool? v) => write('upcoming', v);
   Rocket? get rocket => object('rocket', Rocket.new, keyed: true);
@@ -402,26 +407,98 @@ class Viewer extends Accessor {
   List<Launch>? get favorites => list('favorites', Launch.new, keyed: true);
 }
 
-abstract final class LaunchStatus {
-  static const SCHEDULED = 'SCHEDULED';
-  static const SUCCESS = 'SUCCESS';
-  static const FAILURE = 'FAILURE';
-  static const PARTIAL_FAILURE = 'PARTIAL_FAILURE';
-  static const SCRUBBED = 'SCRUBBED';
+enum LaunchStatus {
+  scheduled('SCHEDULED'),
+  success('SUCCESS'),
+  failure('FAILURE'),
+  partialFailure('PARTIAL_FAILURE'),
+  scrubbed('SCRUBBED'),
+
+  /// A wire value this client does not know (forward compatibility).
+  unknown('');
+
+  const LaunchStatus(this.graphqlName);
+
+  /// The value as spelled in the GraphQL schema.
+  final String graphqlName;
+
+  /// Maps a wire value to its constant, [unknown] when unmatched.
+  static LaunchStatus fromGraphQL(String value) =>
+      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);
+
+  /// The wire value to send as an argument; [unknown] has none.
+  String toGraphQL() {
+    if (this == unknown) {
+      throw ArgumentError.value(
+        this,
+        'LaunchStatus',
+        'unknown cannot be sent as an argument',
+      );
+    }
+    return graphqlName;
+  }
 }
 
-abstract final class LaunchOrder {
-  static const DATE_ASC = 'DATE_ASC';
-  static const DATE_DESC = 'DATE_DESC';
-  static const NAME_ASC = 'NAME_ASC';
+enum LaunchOrder {
+  dateAsc('DATE_ASC'),
+  dateDesc('DATE_DESC'),
+  nameAsc('NAME_ASC'),
+
+  /// A wire value this client does not know (forward compatibility).
+  unknown('');
+
+  const LaunchOrder(this.graphqlName);
+
+  /// The value as spelled in the GraphQL schema.
+  final String graphqlName;
+
+  /// Maps a wire value to its constant, [unknown] when unmatched.
+  static LaunchOrder fromGraphQL(String value) =>
+      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);
+
+  /// The wire value to send as an argument; [unknown] has none.
+  String toGraphQL() {
+    if (this == unknown) {
+      throw ArgumentError.value(
+        this,
+        'LaunchOrder',
+        'unknown cannot be sent as an argument',
+      );
+    }
+    return graphqlName;
+  }
 }
 
-abstract final class RocketFamily {
-  static const FALCON = 'FALCON';
-  static const STARSHIP = 'STARSHIP';
-  static const ATLAS = 'ATLAS';
-  static const ARIANE = 'ARIANE';
-  static const VULCAN = 'VULCAN';
+enum RocketFamily {
+  falcon('FALCON'),
+  starship('STARSHIP'),
+  atlas('ATLAS'),
+  ariane('ARIANE'),
+  vulcan('VULCAN'),
+
+  /// A wire value this client does not know (forward compatibility).
+  unknown('');
+
+  const RocketFamily(this.graphqlName);
+
+  /// The value as spelled in the GraphQL schema.
+  final String graphqlName;
+
+  /// Maps a wire value to its constant, [unknown] when unmatched.
+  static RocketFamily fromGraphQL(String value) =>
+      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);
+
+  /// The wire value to send as an argument; [unknown] has none.
+  String toGraphQL() {
+    if (this == unknown) {
+      throw ArgumentError.value(
+        this,
+        'RocketFamily',
+        'unknown cannot be sent as an argument',
+      );
+    }
+    return graphqlName;
+  }
 }
 
 class LaunchFilter {
@@ -434,7 +511,7 @@ class LaunchFilter {
     this.favorite,
   });
 
-  final String? status;
+  final LaunchStatus? status;
   final String? rocketId;
   final int? year;
   final bool? upcoming;
@@ -446,7 +523,7 @@ class LaunchFilter {
   final bool? favorite;
 
   Map<String, Object?> toJson() => {
-    if (status != null) 'status': status,
+    if (status != null) 'status': status?.toGraphQL(),
     if (rocketId != null) 'rocketId': rocketId,
     if (year != null) 'year': year,
     if (upcoming != null) 'upcoming': upcoming,

@@ -94,6 +94,12 @@ final Map<String, Object?> _schemaJson = {
           _field('name', _nonNull(_type('SCALAR', 'String'))),
           _field('age', _type('SCALAR', 'Int')),
           _field('status', _type('ENUM', 'UserStatus')),
+          _field('pastStatuses', _list(_type('ENUM', 'UserStatus'))),
+          _field(
+            'statusAt',
+            _type('ENUM', 'UserStatus'),
+            args: [_arg('date', _nonNull(_type('SCALAR', 'Date')))],
+          ),
           _field(
             'friends',
             _nonNull(_list(_nonNull(_type('OBJECT', 'User')))),
@@ -118,8 +124,12 @@ final Map<String, Object?> _schemaJson = {
         'fields': null,
         'inputFields': null,
         'enumValues': [
-          {'name': 'ACTIVE', 'description': null, 'isDeprecated': false, 'deprecationReason': null},
+          {'name': 'ACTIVE', 'description': 'Signed in recently.', 'isDeprecated': false, 'deprecationReason': null},
           {'name': 'INACTIVE', 'description': null, 'isDeprecated': false, 'deprecationReason': null},
+          {'name': 'ON_HOLD', 'description': null, 'isDeprecated': true, 'deprecationReason': 'Use INACTIVE.'},
+          {'name': 'UNKNOWN', 'description': null, 'isDeprecated': false, 'deprecationReason': null},
+          {'name': 'default', 'description': null, 'isDeprecated': false, 'deprecationReason': null},
+          {'name': 'on_hold', 'description': null, 'isDeprecated': false, 'deprecationReason': null},
         ],
       },
       {
@@ -130,6 +140,8 @@ final Map<String, Object?> _schemaJson = {
         'inputFields': [
           _arg('_eq', _type('SCALAR', 'String')),
           _arg('_and', _list(_type('INPUT_OBJECT', 'UserFilter'))),
+          _arg('status', _type('ENUM', 'UserStatus')),
+          _arg('statusIn', _list(_nonNull(_type('ENUM', 'UserStatus')))),
         ],
         'enumValues': null,
       },
@@ -235,14 +247,51 @@ void main() {
     expect(code, contains("keyed: true);"));
   });
 
-  test('enum field is read as nullable String', () {
-    expect(code, contains("String? get status => scalar<String>('status');"));
+  test('enum field is read through enumValue and written as its wire name', () {
+    expect(code, contains("UserStatus? get status => enumValue('status', UserStatus.fromGraphQL);"));
+    expect(code, contains("set status(UserStatus? v) => write('status', v?.graphqlName);"));
+    expect(
+      code,
+      contains("List<UserStatus?>? get pastStatuses => enumList('pastStatuses', UserStatus.fromGraphQL);"),
+    );
+    expect(
+      code,
+      contains(
+        "UserStatus? statusAt({required String date}) => enumValue('statusAt', UserStatus.fromGraphQL, args: {'date': Arg('Date!', date)});",
+      ),
+    );
   });
 
-  test('emits enum value holder class', () {
-    expect(code, contains('abstract final class UserStatus {'));
-    expect(code, contains("static const ACTIVE = 'ACTIVE';"));
-    expect(code, contains("static const INACTIVE = 'INACTIVE';"));
+  test('emits a real enum with lowerCamelCase constants and graphqlName', () {
+    expect(code, contains('enum UserStatus {'));
+    expect(code, contains("  /// Signed in recently.\n  active('ACTIVE'),"));
+    expect(code, contains("  inactive('INACTIVE'),"));
+    expect(code, contains("  @Deprecated('Use INACTIVE.')\n  onHold('ON_HOLD'),"));
+    expect(code, contains('  const UserStatus(this.graphqlName);'));
+    expect(code, contains('  final String graphqlName;'));
+    expect(code, contains('  static UserStatus fromGraphQL(String value) =>'));
+    expect(code, contains('  String toGraphQL() {'));
+    expect(code, isNot(contains('abstract final class UserStatus')));
+  });
+
+  test('enum gets a trailing unknown constant for forward compatibility', () {
+    expect(code, contains("  unknown('');\n\n  const UserStatus(this.graphqlName);"));
+    expect(code, contains('orElse: () => unknown'));
+    expect(code, contains("throw ArgumentError.value(this, 'UserStatus', 'unknown cannot be sent as an argument');"));
+  });
+
+  test('enum constants clashing with enum members, keywords or each other get a \$', () {
+    expect(code, contains("  unknown\$('UNKNOWN'),"));
+    expect(code, contains("  default\$('default'),"));
+    // `on_hold` camel-cases to `onHold`, already taken by `ON_HOLD`.
+    expect(code, contains("  onHold\$('on_hold'),"));
+  });
+
+  test('enum-typed input fields and args serialize through toGraphQL()', () {
+    expect(code, contains('final UserStatus? status;'));
+    expect(code, contains('final List<UserStatus>? statusIn;'));
+    expect(code, contains("if (status != null) 'status': status?.toGraphQL(),"));
+    expect(code, contains("if (statusIn != null) 'statusIn': statusIn?.map((e) => e.toGraphQL()).toList(),"));
   });
 
   test('deprecated field gets @Deprecated annotation', () {
@@ -261,7 +310,7 @@ void main() {
 
   test('input object emits class with toJson, Hasura _eq becomes \$eq', () {
     expect(code, contains('class UserFilter {'));
-    expect(code, contains('const UserFilter({this.\$eq, this.\$and});'));
+    expect(code, contains('const UserFilter({this.\$eq, this.\$and, this.status, this.statusIn});'));
     expect(code, contains('final String? \$eq;'));
     expect(code, contains("if (\$eq != null) '_eq': \$eq,"));
     expect(code, contains("if (\$and != null) '_and': \$and?.map((e) => e?.toJson()).toList(),"));

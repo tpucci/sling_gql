@@ -99,7 +99,7 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 ),
                 const SizedBox(height: 4),
                 SkeletonText(
-                  launch.date?.let((d) => 'Flight #${launch.flightNumber} · $d · ${launch.status}'),
+                  launch.date?.let((d) => 'Flight #${launch.flightNumber} · $d · ${launch.status?.graphqlName}'),
                   width: 260,
                   style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
                 ),

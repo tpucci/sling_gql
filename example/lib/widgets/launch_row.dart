@@ -57,20 +57,20 @@ class LaunchRow extends StatelessWidget {
   }
 }
 
-IconData _statusIcon(String? status) => switch (status) {
-      LaunchStatus.SUCCESS => CupertinoIcons.checkmark_circle_fill,
-      LaunchStatus.FAILURE => CupertinoIcons.xmark_circle_fill,
-      LaunchStatus.PARTIAL_FAILURE =>
+IconData _statusIcon(LaunchStatus? status) => switch (status) {
+      LaunchStatus.success => CupertinoIcons.checkmark_circle_fill,
+      LaunchStatus.failure => CupertinoIcons.xmark_circle_fill,
+      LaunchStatus.partialFailure =>
         CupertinoIcons.exclamationmark_circle_fill,
-      LaunchStatus.SCRUBBED => CupertinoIcons.pause_circle_fill,
-      LaunchStatus.SCHEDULED => CupertinoIcons.clock_fill,
-      _ => CupertinoIcons.question_circle,
+      LaunchStatus.scrubbed => CupertinoIcons.pause_circle_fill,
+      LaunchStatus.scheduled => CupertinoIcons.clock_fill,
+      LaunchStatus.unknown || null => CupertinoIcons.question_circle,
     };
 
-Color _statusColor(String? status) => switch (status) {
-      LaunchStatus.SUCCESS => CupertinoColors.systemGreen,
-      LaunchStatus.FAILURE => CupertinoColors.systemRed,
-      LaunchStatus.PARTIAL_FAILURE => CupertinoColors.systemOrange,
-      LaunchStatus.SCHEDULED => CupertinoColors.systemBlue,
-      _ => CupertinoColors.systemGrey,
+Color _statusColor(LaunchStatus? status) => switch (status) {
+      LaunchStatus.success => CupertinoColors.systemGreen,
+      LaunchStatus.failure => CupertinoColors.systemRed,
+      LaunchStatus.partialFailure => CupertinoColors.systemOrange,
+      LaunchStatus.scheduled => CupertinoColors.systemBlue,
+      LaunchStatus.scrubbed || LaunchStatus.unknown || null => CupertinoColors.systemGrey,
     };

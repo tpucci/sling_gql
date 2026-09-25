@@ -36,9 +36,17 @@ Flags:
   mutation/subscription roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)
   per field with arguments.
-- `abstract final class <EnumName> { static const value = 'value'; ... }`
-  constant holders for each `ENUM` type. Enum values are read/written as
-  `String` in this PoC.
+- `enum <EnumName> { value('VALUE'), …, unknown('') }` for each `ENUM`
+  type. Constants are the lowerCamelCase of the wire name
+  (`PARTIAL_FAILURE` → `partialFailure`); `graphqlName` is the wire value,
+  `fromGraphQL(String)` maps a wire value back (returning `unknown` for a
+  value added to the schema after generation, so a `switch` stays
+  exhaustive), and `toGraphQL()` is what arguments and input fields
+  serialize with — it throws an `ArgumentError` for `unknown`. Enum fields
+  are read through `Accessor.enumValue`/`enumList` (same miss/skeleton
+  semantics as scalars) and their setters write the wire name. Constants
+  that would clash with a Dart keyword or an enum member (`unknown`,
+  `values`, `index`, `name`, …) get a trailing `$`: `UNKNOWN` → `unknown$`.
 - `class <InputName> { const <InputName>({...}); ...; toJson() {...} }` for
   each `INPUT_OBJECT` type.
 

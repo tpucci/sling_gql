@@ -27,26 +27,28 @@ class LaunchesScreen extends StatefulWidget {
   State<LaunchesScreen> createState() => _LaunchesScreenState();
 }
 
-const _allSentinel = '__all__';
+/// Segment key for "All": `CupertinoSlidingSegmentedControl` needs non-null
+/// keys, and `LaunchStatus.unknown` is never a filter value.
+const _allSentinel = LaunchStatus.unknown;
 
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
 
-  /// Segment values: `null` = All, otherwise a `LaunchStatus` constant.
-  static const _segments = <String?, String>{
+  /// Segment values: `null` = All, otherwise a [LaunchStatus].
+  static const _segments = <LaunchStatus?, String>{
     null: 'All',
-    LaunchStatus.SCHEDULED: 'Scheduled',
-    LaunchStatus.SUCCESS: 'Success',
-    LaunchStatus.FAILURE: 'Failure',
+    LaunchStatus.scheduled: 'Scheduled',
+    LaunchStatus.success: 'Success',
+    LaunchStatus.failure: 'Failure',
   };
 
   /// Selected status, `null` for all launches.
-  String? _status;
+  LaunchStatus? _status;
 
   /// One entry per loaded page; `null` is the first page.
   List<String?> _cursors = [null];
 
-  void _onSegmentChanged(String? status) {
+  void _onSegmentChanged(LaunchStatus? status) {
     if (status == _status) return;
     setState(() {
       _status = status;
@@ -70,9 +72,7 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
             const _Header(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              // CupertinoSlidingSegmentedControl needs non-null keys; the
-              // sentinel stands for "All".
-              child: CupertinoSlidingSegmentedControl<String>(
+              child: CupertinoSlidingSegmentedControl<LaunchStatus>(
                 groupValue: _status ?? _allSentinel,
                 onValueChanged: (v) => _onSegmentChanged(v == _allSentinel ? null : v),
                 children: {

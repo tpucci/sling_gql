@@ -9,12 +9,10 @@
 /// `Arg` map keys and `toJson` keys.
 library;
 
-/// Dart keywords (reserved + built-in + contextual) that would either fail to
-/// parse or shadow language constructs if used as a field/parameter name, plus
-/// `Accessor` instance members that a generated getter/method must not clash
-/// with.
-const Set<String> dartReservedAndAccessorMembers = {
-  // Dart keywords (reserved, built-in, and contextual enough to be unsafe).
+/// Dart keywords (reserved, built-in, and contextual enough to be unsafe)
+/// that would either fail to parse or shadow language constructs if used as
+/// an identifier.
+const Set<String> dartKeywords = {
   'is', 'in', 'default', 'new', 'switch', 'case', 'do', 'if', 'else', 'for',
   'while', 'return', 'void', 'var', 'final', 'const', 'this', 'super', 'null',
   'true', 'false', 'with', 'enum', 'extends', 'implements', 'import', 'export',
@@ -24,10 +22,25 @@ const Set<String> dartReservedAndAccessorMembers = {
   'covariant', 'deferred', 'late', 'required', 'mixin', 'on', 'show', 'hide',
   'sync', 'interface', 'extension', 'base', 'sealed', 'when', 'of', 'class',
   'type',
-  // `Accessor` instance members (and dart:core `Object` members it inherits).
+};
+
+/// [dartKeywords] plus `Accessor` instance members (and dart:core `Object`
+/// members it inherits) that a generated getter/method must not clash with.
+const Set<String> dartReservedAndAccessorMembers = {
+  ...dartKeywords,
   'recorder', 'selection', 'path', 'isSkeleton', 'scalar', 'scalarList',
-  'object', 'list', 'write', 'hashCode', 'runtimeType', 'toString',
-  'noSuchMethod', 'toJson',
+  'enumValue', 'enumList', 'object', 'list', 'write', 'hashCode',
+  'runtimeType', 'toString', 'noSuchMethod', 'toJson',
+};
+
+/// [dartKeywords] plus the members every generated `enum` already has
+/// (`Enum`/`Object` members, the generated `unknown` constant, `graphqlName`,
+/// `fromGraphQL`, `toGraphQL`) that an enum constant must not clash with.
+const Set<String> dartReservedAndEnumMembers = {
+  ...dartKeywords,
+  'unknown', 'values', 'index', 'name', 'graphqlName', 'fromGraphQL',
+  'toGraphQL', 'byName', 'compareTo', 'hashCode', 'runtimeType', 'toString',
+  'noSuchMethod',
 };
 
 /// Type names that would collide with dart:core or sling_gql runtime types
@@ -50,6 +63,40 @@ String sanitizeIdentifier(String name) {
     out = '\$${out.replaceFirst(RegExp('^_+'), '')}';
   }
   if (dartReservedAndAccessorMembers.contains(out)) {
+    out = '$out\$';
+  }
+  return out;
+}
+
+/// Sanitizes a GraphQL enum value name into a lowerCamelCase Dart enum
+/// constant name.
+///
+/// - `SCHEDULED` -> `scheduled`, `PARTIAL_FAILURE` -> `partialFailure`,
+///   `created_at` -> `createdAt`, `dateAsc` -> `dateAsc`.
+/// - A leading `_` is replaced with `$` (as in [sanitizeIdentifier]) so the
+///   constant stays public: `_internal` -> `$internal`.
+/// - Dart keywords and names an enum already has (`unknown`, `values`,
+///   `index`, `name`, …) get a trailing `$`: `default` -> `default$`,
+///   `UNKNOWN` -> `unknown$`.
+String sanitizeEnumConstantName(String name) {
+  final leadingUnderscore = name.startsWith('_');
+  final trimmed = name.replaceFirst(RegExp('^_+'), '');
+  // All-caps wire names (`PARTIAL_FAILURE`) are lowercased before splitting;
+  // mixed-case ones (`dateAsc`) keep their inner capitals.
+  final normalized = trimmed.toUpperCase() == trimmed ? trimmed.toLowerCase() : trimmed;
+  final words = normalized.split('_').where((w) => w.isNotEmpty).toList();
+  final buffer = StringBuffer();
+  for (var i = 0; i < words.length; i++) {
+    final word = words[i];
+    buffer.write(i == 0
+        ? word[0].toLowerCase() + word.substring(1)
+        : word[0].toUpperCase() + word.substring(1));
+  }
+  var out = buffer.toString();
+  if (leadingUnderscore || out.isEmpty || RegExp('^[0-9]').hasMatch(out)) {
+    out = '\$$out';
+  }
+  if (dartReservedAndEnumMembers.contains(out)) {
     out = '$out\$';
   }
   return out;
