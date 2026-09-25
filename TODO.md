@@ -11,8 +11,7 @@ Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
 fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
 #31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
 
-Status (2026-09-25): P0 all done; P1 #7 #8 #10 #11 #13 #15 done, #9 in
-progress, #12 #14 #16 open. Doc follow-ups noted under #1, #5, #8, #15.
+Status (2026-09-25): P0 all done; P1 #7–#11, #13, #15 done; #12 #14 #16 open. Doc follow-ups noted under #1, #5, #8, #15.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -54,10 +53,9 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
    "never branch on list length while `hasMissingData`" rule in the docs.
    Example still uses `&& !state.isLoading`; switch it to `isSkeleton` when
    touching the screens next.
-9. **DX — Asymmetric mutation API.** `client.mutate(...)` is generated and
-   wired; `MutationBuilder<Mutation>(root: Mutation.root, …)` needs the root by
-   hand. Generate a typed builder/typedef too, or resolve the root from
-   `SlingScope`.
+9. ~~**DX — Asymmetric mutation API.**~~ done: `SlingScope(schema: slingSchema)` (generated
+   constant) or `mutationRoot:`; `MutationBuilder<Mutation>(builder: …)` needs
+   no `root:` (explicit `root:` still wins).
 10. ~~**DX — Sticky errors are undocumented at the call site.**~~ done: doc comments on `QueryState.error`/`isLoading`/`refetch` and
    `QueryScope.error`; `SlingClient(retryFailedAfter: Duration?)` auto-clears a
    failed document after that delay (default `null` = sticky).
