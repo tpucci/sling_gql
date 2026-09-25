@@ -77,9 +77,19 @@ typedef QueryWidgetBuilder<Q extends Accessor> = Widget Function(
 /// single batched request per frame (shared with every other [QueryBuilder]
 /// building in the same frame), then the widget rebuilds with real data.
 class QueryBuilder<Q extends Accessor> extends StatefulWidget {
-  const QueryBuilder({super.key, required this.builder, this.prepare});
+  const QueryBuilder({
+    super.key,
+    required this.builder,
+    this.prepare,
+    this.debugLabel,
+  });
 
   final QueryWidgetBuilder<Q> builder;
+
+  /// Names this widget's scope in dev-mode waterfall warnings
+  /// (see `SlingClient.onWaterfall`). Defaults to the widget's [key] when
+  /// set, otherwise a generated `QueryScope#n`.
+  final String? debugLabel;
 
   /// Optional selection function run *in addition to* the builder, so fields
   /// hidden behind conditionals are fetched in the first round trip instead
@@ -104,6 +114,7 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
       _scope = client.createScope(
         onChanged: _onChanged,
         scheduler: frameEndScheduler,
+        debugLabel: widget.debugLabel ?? widget.key?.toString(),
       );
     }
   }

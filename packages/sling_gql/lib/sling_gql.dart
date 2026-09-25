@@ -6,7 +6,13 @@ export 'src/accessor.dart' show Accessor, Recorder;
 export 'src/cache/cache.dart'
     show Cache, CacheWrite, NormalizedCache, Normalization, Ref, missing, depKey;
 export 'src/client.dart'
-    show SlingClient, SlingException, QueryScope, MutationScope, RootFactory;
+    show
+        SlingClient,
+        SlingException,
+        QueryScope,
+        MutationScope,
+        RootFactory,
+        WaterfallWarning;
 export 'src/pagination.dart'
     show
         PaginationController,

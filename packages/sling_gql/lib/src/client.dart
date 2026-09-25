@@ -22,6 +22,39 @@ class SlingException implements Exception {
 /// Builds the root accessor of an operation for a given recorder.
 typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
 
+/// True when asserts are enabled (debug builds and tests).
+bool get _assertsEnabled {
+  var enabled = false;
+  assert(enabled = true);
+  return enabled;
+}
+
+/// A scope caused a *second* round trip right after its first one landed:
+/// the rebuild triggered by that response read fields the first request did
+/// not select. Typical causes are a read inside an `if` on fetched data, a
+/// read inside a callback, or a missing `prepare`.
+///
+/// Reported through [SlingClient.onWaterfall] in debug mode. Requests caused
+/// by `refetch()` or by a rebuild the app triggered itself (`setState` after a
+/// tap, e.g. paginating) are not waterfalls and are never reported.
+class WaterfallWarning {
+  WaterfallWarning({required this.scope, required this.fields});
+
+  /// `debugLabel` of the scope, or a generated `QueryScope#n`.
+  final String scope;
+
+  /// Field paths that caused the extra request, e.g. `me.friends(…).age`.
+  final List<String> fields;
+
+  static const hint =
+      'read the field unconditionally at the top of build, or prepare it';
+
+  @override
+  String toString() =>
+      'sling_gql: waterfall in $scope — a second request was needed for '
+      '${fields.join(', ')}. Fix: $hint.';
+}
+
 /// Decides *when* pending selections are flushed into one request.
 ///
 /// Selections are accumulated until [flush] runs; everything recorded in the
@@ -44,7 +77,10 @@ class QueryScope<Q extends Accessor> implements Recorder {
     this.client, {
     required this.onChanged,
     this.scheduler = microtaskScheduler,
-  });
+    String? debugLabel,
+  }) : debugLabel = debugLabel ?? 'QueryScope#${++_lastId}';
+
+  static int _lastId = 0;
 
   final SlingClient<Q> client;
 
@@ -53,6 +89,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
 
   /// How this scope asks the client to flush (see [FlushScheduler]).
   final FlushScheduler scheduler;
+
+  /// Names this scope in [WaterfallWarning]s.
+  final String debugLabel;
 
   @override
   String get operation => 'query';
@@ -76,6 +115,21 @@ class QueryScope<Q extends Accessor> implements Recorder {
   Object? _error;
   Completer<void>? _settled;
 
+  /// Requests this scope took part in. A waterfall is a request after the
+  /// first one.
+  int _requestCount = 0;
+
+  /// Set when the client asked this scope to re-run (a response landed or a
+  /// write touched its deps); consumed by the next [run]. A rebuild the app
+  /// triggered itself (`setState` after user input) does not set it.
+  bool _rebuildFromClient = false;
+
+  /// True while misses are attributable to a client-triggered rebuild: from
+  /// that [run] until the next one, so reads by lazily built children and by
+  /// callbacks bound to that build count too.
+  bool _missesAreWaterfall = false;
+  final List<Selection> _waterfallLeaves = [];
+
   /// Completes when the fetch this scope is waiting on has landed (or failed).
   Future<void> get whenSettled =>
       _awaiting ? (_settled ??= Completer<void>()).future : Future.value();
@@ -98,6 +152,8 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _root = Selection.root('query');
     _deps = {};
     _hadMiss = false;
+    _missesAreWaterfall = _rebuildFromClient && _requestCount > 0;
+    _rebuildFromClient = false;
     final result = body(client.rootFactory(this));
     if (!_hadMiss) {
       // Fully served from cache: any previous error is moot.
@@ -121,7 +177,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
     // Error state is sticky until `refetch()` so a failing query does not
     // loop: build → miss → fetch → fail → rebuild → miss → …
     if (_error != null) return;
-    client._enqueueLeaf(leaf);
+    if (client._enqueueLeaf(leaf) && _missesAreWaterfall) {
+      _waterfallLeaves.add(leaf);
+    }
     _awaiting = true;
     client._schedule(this);
   }
@@ -136,6 +194,34 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _error = error;
     _settled?.complete();
     _settled = null;
+  }
+
+  void _changedByClient() {
+    _rebuildFromClient = true;
+    onChanged();
+  }
+
+  /// Called by the client when a request containing this scope's selections
+  /// is about to be sent. Returns the warning to report, if this request is a
+  /// waterfall.
+  WaterfallWarning? _requestSent() {
+    _requestCount++;
+    if (_waterfallLeaves.isEmpty) return null;
+    final fields = _waterfallLeaves.map(_fieldPath).toSet().toList();
+    _waterfallLeaves.clear();
+    return WaterfallWarning(scope: debugLabel, fields: fields);
+  }
+
+  /// `me.friends(…).age`: field names from the root, `(…)` marking
+  /// arguments.
+  static String _fieldPath(Selection leaf) {
+    final parts = <String>[];
+    Selection? node = leaf;
+    while (node != null && !node.isRoot) {
+      parts.insert(0, node.args.isEmpty ? node.field : '${node.field}(…)');
+      node = node.parent;
+    }
+    return parts.join('.');
   }
 }
 
@@ -175,8 +261,12 @@ class SlingClient<Q extends Accessor> {
     http.Client? httpClient,
     this.headers = const {},
     this.onOperation,
+    bool? warnOnWaterfall,
+    void Function(WaterfallWarning warning)? onWaterfall,
   })  : cache = cache ?? Cache(),
-        _http = httpClient ?? http.Client();
+        _http = httpClient ?? http.Client(),
+        warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
+        onWaterfall = onWaterfall ?? _printWaterfall;
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
@@ -186,6 +276,18 @@ class SlingClient<Q extends Accessor> {
 
   /// Debug hook: called with every document sent to the endpoint.
   final void Function(PrintedOperation op)? onOperation;
+
+  /// Whether scopes that need a second round trip right after their first
+  /// response are reported through [onWaterfall]. Defaults to `true` in debug
+  /// builds (asserts enabled), `false` otherwise.
+  final bool warnOnWaterfall;
+
+  /// Sink for [WaterfallWarning]s; prints them by default.
+  final void Function(WaterfallWarning warning) onWaterfall;
+
+  // `print`, not `debugPrint`: client.dart stays free of Flutter imports.
+  // ignore: avoid_print
+  static void _printWaterfall(WaterfallWarning warning) => print(warning);
 
   final Set<QueryScope<Q>> _scopes = {};
 
@@ -200,8 +302,14 @@ class SlingClient<Q extends Accessor> {
   QueryScope<Q> createScope({
     required void Function() onChanged,
     FlushScheduler scheduler = microtaskScheduler,
+    String? debugLabel,
   }) {
-    final scope = QueryScope<Q>(this, onChanged: onChanged, scheduler: scheduler);
+    final scope = QueryScope<Q>(
+      this,
+      onChanged: onChanged,
+      scheduler: scheduler,
+      debugLabel: debugLabel,
+    );
     _scopes.add(scope);
     return scope;
   }
@@ -299,9 +407,12 @@ class SlingClient<Q extends Accessor> {
     return touched;
   }
 
-  void _enqueueLeaf(Selection leaf) {
-    if (_inflight?.covers(_singleton(leaf)) ?? false) return;
+  /// Adds [leaf] to the next request. Returns `false` when an in-flight
+  /// request already covers it (no new request will be caused).
+  bool _enqueueLeaf(Selection leaf) {
+    if (_inflight?.covers(_singleton(leaf)) ?? false) return false;
     _pending.ensurePath(leaf);
+    return true;
   }
 
   void _enqueue(Selection tree, {bool force = false}) {
@@ -347,14 +458,19 @@ class SlingClient<Q extends Accessor> {
     if (op.document == _failedDocument) {
       // Same document already failed: surface the error without a round trip.
       for (final s in scopes) {
+        s._waterfallLeaves.clear();
         s._settle(_lastError);
-        s.onChanged();
+        s._changedByClient();
       }
       return;
     }
 
     _inflight = tree;
     _inflightScopes.addAll(scopes);
+    for (final s in scopes) {
+      final warning = s._requestSent();
+      if (warning != null && warnOnWaterfall) onWaterfall(warning);
+    }
     onOperation?.call(op);
 
     Object? error;
@@ -381,7 +497,7 @@ class SlingClient<Q extends Accessor> {
     }
     if (error != null) {
       for (final s in waiters) {
-        s.onChanged();
+        s._changedByClient();
       }
     } else {
       _notify(touched, always: waiters);
@@ -399,7 +515,7 @@ class SlingClient<Q extends Accessor> {
   void _notify(Set<String> touched, {Set<QueryScope<Q>> always = const {}}) {
     for (final scope in _scopes.toList()) {
       if (always.contains(scope) || touched.any(scope.deps.contains)) {
-        scope.onChanged();
+        scope._changedByClient();
       }
     }
   }
