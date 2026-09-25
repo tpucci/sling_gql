@@ -11,9 +11,8 @@ Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
 fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
 #31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
 
-P0 status (2026-09-25): all of #1–#6 done. Next: pick from P1 (#7 three
-meanings of null, #9 mutation API symmetry, #14 list membership are the
-most visible), or the doc follow-ups noted under #1 and #5.
+Status (2026-09-25): P0 all done; P1 #7 #8 #10 #11 #13 #15 done, #9 in
+progress, #12 #14 #16 open. Doc follow-ups noted under #1, #5, #8, #15.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -47,39 +46,37 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P1 — DX rough edges seen in the example
 
-7. **DX — Three meanings of `null`.** Not fetched / server null / errored path
-   all read as `null`; `isSkeleton` lives on the accessor, `hasMissingData` and
-   `isLoading` on `QueryState`, nothing on a scalar. Decide on one story
-   (e.g. `state.hasMissingData ? Skeleton : …` as the blessed pattern, and a
-   `Accessor.isFetched(field)`/`Fetched<T>` helper) and document it on the
-   first page of the guides.
-8. **DX — Skeleton lists have one element.** `list.length == 1`, `isEmpty ==
-   false`, `itemCount` renders a ghost row while loading; the example patches
-   this with `&& !state.isLoading`. Provide a loading-aware helper or make the
-   rule ("never branch on length while `hasMissingData`") prominent in docs.
+7. ~~**DX — Three meanings of `null`.**~~ done: blessed pattern is `state.hasMissingData ? Skeleton : …`;
+   `Accessor.isFetched(field, {args})` for per-field checks (no dep/miss
+   recorded); errored paths stay `null` + `state.error`. Story is on the
+   getting-started page, linked from loading-and-errors.
+8. ~~**DX — Skeleton lists have one element.**~~ done: `QueryState.isSkeleton` (first paint before data) plus the
+   "never branch on list length while `hasMissingData`" rule in the docs.
+   Example still uses `&& !state.isLoading`; switch it to `isSkeleton` when
+   touching the screens next.
 9. **DX — Asymmetric mutation API.** `client.mutate(...)` is generated and
    wired; `MutationBuilder<Mutation>(root: Mutation.root, …)` needs the root by
    hand. Generate a typed builder/typedef too, or resolve the root from
    `SlingScope`.
-10. **DX — Sticky errors are undocumented at the call site.** A failed scope
-    stays failed until `refetch()`. Add doc comments on `QueryState.error` /
-    `isLoading` explaining it, recommend pull-to-refresh, consider a
-    `retryAfter`/auto-clear option.
-11. **DX — `$` renames without explanation.** `type$`, `$typename`, `$eq`.
-    Emit a header comment in the generated file describing the scheme.
+10. ~~**DX — Sticky errors are undocumented at the call site.**~~ done: doc comments on `QueryState.error`/`isLoading`/`refetch` and
+   `QueryScope.error`; `SlingClient(retryFailedAfter: Duration?)` auto-clears a
+   failed document after that delay (default `null` = sticky).
+11. ~~**DX — `$` renames without explanation.**~~ done: generated file header lists every `$` rule.
 12. **DX — Cache is opaque to users.** `cache.read('query', ['launches_1qouruf',
     …])` uses hashed aliases nobody can type. Add typed entity access
     (`client.cache.entity<Launch>('1')`-style, generated) and a way to edit
     list membership (see #14).
-13. **Gen — Custom scalar mapping.** `DateTime` arrives as `String`
-    (`date.substring(0, 10)` in the example). Allow `--scalar DateTime=DateTime`
-    with a converter, default to `String`/`Object?` as today.
+13. ~~**Gen — Custom scalar mapping.**~~ done: `--scalar Name=DartType[:converter]` (repeatable; `DateTime`
+   built in); example regenerated with `--scalar DateTime=DateTime`
+   (`example/lib/date_format.dart`).
 14. **Runtime — List membership after a mutation (write policies).**
     `me.favorites` / `launches(filter: …)` do not gain or lose a row after
     `toggleFavorite`; only refetch fixes it. Add/remove a `Ref` in a cached list
     (typed API from #12), plus create/delete helpers (`evict` from an accessor).
-15. **Runtime — `refetchQueries` sugar** on `mutate` (refetch named scopes /
-    root fields after success) as the simple alternative to #14.
+15. ~~**Runtime — `refetchQueries` sugar**~~ done: `mutateWith(..., refetchQueries: ['me', 'launches'])` refetches
+   every scope whose root selection reads those fields (matched on field name,
+   any args); forwarded by the generated `client.mutate`. Not yet used in the
+   example app.
 16. **Test — `sling_gql_test` helpers.** `pumpUntilSettled(tester, client)`,
     a schema-aware in-memory server/`MockClient` builder, and the folklore
     (`HttpOverrides.global = null`, `pump(Duration)` for transitions,
