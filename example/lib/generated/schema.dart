@@ -119,13 +119,9 @@ class PageInfo extends Accessor {
   PageInfo(super.recorder, super.selection, super.path);
 
   bool? get hasNextPage => scalar<bool>('hasNextPage');
-  set hasNextPage(bool? v) => write('hasNextPage', v);
   bool? get hasPreviousPage => scalar<bool>('hasPreviousPage');
-  set hasPreviousPage(bool? v) => write('hasPreviousPage', v);
   String? get startCursor => scalar<String>('startCursor');
-  set startCursor(String? v) => write('startCursor', v);
   String? get endCursor => scalar<String>('endCursor');
-  set endCursor(String? v) => write('endCursor', v);
 }
 
 class Address extends Accessor {
@@ -145,7 +141,6 @@ class Company extends Accessor {
   Company(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get founder => scalar<String>('founder');
@@ -200,7 +195,6 @@ class Rocket extends Accessor {
   Rocket(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   RocketFamily? get family => enumValue('family', RocketFamily.fromGraphQL);
@@ -236,7 +230,6 @@ class Launchpad extends Accessor {
   Launchpad(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get fullName => scalar<String>('fullName');
@@ -261,7 +254,6 @@ class Astronaut extends Accessor {
   Astronaut(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get nationality => scalar<String>('nationality');
@@ -279,7 +271,6 @@ class Payload extends Accessor {
   Payload(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get type$ => scalar<String>('type');
@@ -309,7 +300,6 @@ class Launch extends Accessor {
   Launch(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   int? get flightNumber => scalar<int>('flightNumber');
   set flightNumber(int? v) => write('flightNumber', v);
   String? get name => scalar<String>('name');
@@ -348,7 +338,6 @@ class LaunchConnection extends Accessor {
   List<Launch>? get nodes => list('nodes', Launch.new, keyed: true);
   PageInfo? get pageInfo => object('pageInfo', PageInfo.new);
   int? get totalCount => scalar<int>('totalCount');
-  set totalCount(int? v) => write('totalCount', v);
 }
 
 class AstronautEdge extends Accessor {
@@ -366,7 +355,6 @@ class AstronautConnection extends Accessor {
   List<Astronaut>? get nodes => list('nodes', Astronaut.new, keyed: true);
   PageInfo? get pageInfo => object('pageInfo', PageInfo.new);
   int? get totalCount => scalar<int>('totalCount');
-  set totalCount(int? v) => write('totalCount', v);
 }
 
 class YearCount extends Accessor {
@@ -393,7 +381,6 @@ class Viewer extends Accessor {
   Viewer(super.recorder, super.selection, super.path);
 
   String? get id => scalar<String>('id');
-  set id(String? v) => write('id', v);
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get agency => scalar<String>('agency');

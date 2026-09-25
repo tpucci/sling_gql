@@ -129,6 +129,22 @@ class _EmitContext {
     if (leaf.kind != 'OBJECT' || !isKeyed(leaf.name!)) return false;
     return field.args.length == 1 && field.args.single.name == keyField;
   }
+
+  /// True when a setter must not be emitted for [field] on [owner]:
+  /// the key field of a keyed type (writing it would corrupt the entity key)
+  /// and connection metadata (`PageInfo` fields, `totalCount`/`pageInfo` on
+  /// a connection-shaped type), which only the server can know.
+  bool isReadOnly(GqlType owner, GqlField field) {
+    if (field.name == keyField && isKeyed(owner.name)) return true;
+    if (owner.name == 'PageInfo') return true;
+    return isConnection(owner) && const {'totalCount', 'pageInfo'}.contains(field.name);
+  }
+
+  /// Relay-style connection: has `pageInfo` plus `nodes` or `edges`.
+  bool isConnection(GqlType type) {
+    final names = type.fields.map((f) => f.name).toSet();
+    return names.contains('pageInfo') && (names.contains('nodes') || names.contains('edges'));
+  }
 }
 
 /// Operation root types (`Query`, `Mutation`) get a `.root` constructor that
@@ -145,7 +161,7 @@ void _emitRootClass(
   out.writeln('  $className.root(Recorder r) : super(r, r.root, const []);');
   out.writeln();
   for (final field in type.fields) {
-    _emitField(out, field, ctx);
+    _emitField(out, type, field, ctx);
   }
   out.writeln('}');
 }
@@ -175,12 +191,12 @@ void _emitObjectClass(
   out.writeln('  $className(super.recorder, super.selection, super.path);');
   out.writeln();
   for (final field in type.fields) {
-    _emitField(out, field, ctx);
+    _emitField(out, type, field, ctx);
   }
   out.writeln('}');
 }
 
-void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
+void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ctx) {
   final dartFieldName = sanitizeIdentifier(field.name);
   final leaf = field.type.named;
   final isList = field.type.isListType;
@@ -234,7 +250,9 @@ void _emitField(StringBuffer out, GqlField field, _EmitContext ctx) {
   if (!hasArgs) {
     if (!isList && isScalarLeaf) {
       out.writeln("  $elementDartType? get $effectiveFieldName => $scalarRead);");
-      out.writeln("  set $effectiveFieldName($elementDartType? v) => write($key, $writeValue);");
+      if (!ctx.isReadOnly(owner, field)) {
+        out.writeln("  set $effectiveFieldName($elementDartType? v) => write($key, $writeValue);");
+      }
     } else if (isList && isScalarLeaf) {
       out.writeln("  List<$elementDartType?>? get $effectiveFieldName => $scalarListRead);");
     } else if (!isList) {

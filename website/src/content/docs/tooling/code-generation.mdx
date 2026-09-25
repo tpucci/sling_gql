@@ -75,13 +75,19 @@ class Query extends Accessor {
 
 A field with no arguments becomes a getter that reads straight through the
 cache via `Accessor`'s helpers (`scalar`, `scalarList`, `object`, `list` —
-see [`accessor.dart`](/sling_gql/internals/architecture/)). Every scalar field
-also gets a setter for optimistic writes:
+see [`accessor.dart`](/sling_gql/internals/architecture/)). Scalar and enum
+fields also get a setter for optimistic writes:
 
 ```dart title="example/lib/generated/schema.dart"
-bool? get hasNextPage => scalar<bool>('hasNextPage');
-set hasNextPage(bool? v) => write('hasNextPage', v);
+bool? get favorite => scalar<bool>('favorite');
+set favorite(bool? v) => write('favorite', v);
 ```
+
+No setter is emitted where a write could never be right: the key field
+(`--key-field`, default `id`) of a keyed type — writing it would corrupt the
+entity key — and connection metadata only the server can know: every field of
+`PageInfo`, and `totalCount` / `pageInfo` on connection-shaped types (those
+with `pageInfo` plus `nodes` or `edges`).
 
 A field with arguments becomes a method instead of a getter. Required,
 non-nullable arguments without a schema default become `required` Dart

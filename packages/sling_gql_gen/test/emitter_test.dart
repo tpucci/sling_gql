@@ -118,6 +118,40 @@ final Map<String, Object?> _schemaJson = {
         'enumValues': null,
       },
       {
+        'kind': 'OBJECT',
+        'name': 'PageInfo',
+        'description': null,
+        'fields': [
+          _field('hasNextPage', _nonNull(_type('SCALAR', 'Boolean'))),
+          _field('endCursor', _type('SCALAR', 'String')),
+        ],
+        'inputFields': null,
+        'enumValues': null,
+      },
+      {
+        'kind': 'OBJECT',
+        'name': 'UserConnection',
+        'description': null,
+        'fields': [
+          _field('nodes', _nonNull(_list(_nonNull(_type('OBJECT', 'User'))))),
+          _field('pageInfo', _nonNull(_type('OBJECT', 'PageInfo'))),
+          _field('totalCount', _nonNull(_type('SCALAR', 'Int'))),
+          _field('label', _type('SCALAR', 'String')),
+        ],
+        'inputFields': null,
+        'enumValues': null,
+      },
+      {
+        'kind': 'OBJECT',
+        'name': 'Tally',
+        'description': 'Not a connection: no pageInfo.',
+        'fields': [
+          _field('totalCount', _nonNull(_type('SCALAR', 'Int'))),
+        ],
+        'inputFields': null,
+        'enumValues': null,
+      },
+      {
         'kind': 'ENUM',
         'name': 'UserStatus',
         'description': null,
@@ -237,6 +271,29 @@ void main() {
     expect(code, contains("String? get name => scalar<String>('name');"));
     expect(code, contains("set name(String? v) => write('name', v);"));
     expect(code, contains("int? get age => scalar<int>('age');"));
+    expect(code, contains("set age(int? v) => write('age', v);"));
+  });
+
+  test('no setter on the key field of a keyed type', () {
+    expect(code, isNot(contains("set id(String? v) => write('id', v);")));
+    // With another key field, `id` is an ordinary scalar again.
+    final unkeyed = generate(IntrospectionSchema.fromJson(_schemaJson), keyField: 'uuid');
+    expect(unkeyed, contains("set id(String? v) => write('id', v);"));
+  });
+
+  test('no setters on PageInfo fields', () {
+    expect(code, contains("bool? get hasNextPage => scalar<bool>('hasNextPage');"));
+    expect(code, contains("String? get endCursor => scalar<String>('endCursor');"));
+    expect(code, isNot(contains('set hasNextPage(')));
+    expect(code, isNot(contains('set endCursor(')));
+  });
+
+  test('no setter on totalCount of a connection-shaped type; other scalars keep theirs', () {
+    expect(code, contains("int? get totalCount => scalar<int>('totalCount');"));
+    expect(code, contains("set label(String? v) => write('label', v);"));
+    // `Tally.totalCount` is not connection metadata (no pageInfo/nodes/edges).
+    expect(code, contains("set totalCount(int? v) => write('totalCount', v);"));
+    expect(RegExp(r'set totalCount\(').allMatches(code), hasLength(1));
   });
 
   test('list-of-object field with args', () {

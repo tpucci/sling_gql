@@ -28,7 +28,7 @@ class Query extends Accessor {
 class User extends Accessor {
   User(super.recorder, super.selection, super.path);
 
-  String? get id => scalar<String>('id');
+  String? get id => scalar<String>('id'); // key field: no setter
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   int? get age => scalar<int>('age');

@@ -35,7 +35,12 @@ Flags:
 - One `class <Name> extends Accessor` per other `OBJECT` type (skipping the
   mutation/subscription roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)
-  per field with arguments.
+  per field with arguments. Scalar and enum fields without arguments also
+  get a setter for optimistic writes, except where a write could never be
+  right: the key field (`--key-field`, default `id`) of a keyed type
+  (writing it would corrupt the entity key), every field of `PageInfo`, and
+  `totalCount`/`pageInfo` on connection-shaped types (those with `pageInfo`
+  plus `nodes` or `edges`).
 - `enum <EnumName> { value('VALUE'), …, unknown('') }` for each `ENUM`
   type. Constants are the lowerCamelCase of the wire name
   (`PARTIAL_FAILURE` → `partialFailure`); `graphqlName` is the wire value,
