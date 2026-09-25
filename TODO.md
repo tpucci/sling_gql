@@ -11,8 +11,9 @@ Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
 fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
 #31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
 
-P0 status (2026-09-25): #1–#5 done; **#6 (transport hook) is the only P0
-left** — next pick.
+P0 status (2026-09-25): all of #1–#6 done. Next: pick from P1 (#7 three
+meanings of null, #9 mutation API symmetry, #14 list membership are the
+most visible), or the doc follow-ups noted under #1 and #5.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -39,10 +40,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
    `PaginatedState` in `pagination.dart`; example launches screen uses it.
    Follow-up: `guides/batching-and-waterfalls.mdx` still shows the manual
    `_cursors.add` snippet.
-6. **Runtime — Single `transport` hook** on `SlingClient`
-   (`Future<Response> Function(Request)`): covers auth headers/token refresh,
-   retry, timeout, logging, without adding a link system. Today `headers` is a
-   static map and there is no timeout.
+6. ~~**Runtime — Single `transport` hook**~~ done: `typedef Transport =
+   Future<http.Response> Function(http.Request)`, `SlingClient(transport:)`;
+   `headers` applied before the hook; queries and mutations both go through
+   it; recipes (timeout, retry, token refresh, logging) in `guides/transport`.
 
 ## P1 — DX rough edges seen in the example
 

@@ -62,9 +62,10 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    caused a second round trip. Next: the in-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
    log line per operation; `flutter_hooks` adapter (`useSlingQuery`).
 
-8. **Transport options**
+8. **Transport options** — hook done
 
-   `gql_link` adapter for auth headers, retries and persisted queries, without changing
+   `SlingClient(transport:)` is the single interception point (see
+   [Transport](/sling_gql/guides/transport/)). Left: a `gql_link` adapter for auth headers, retries and persisted queries, without changing
    the runtime's `_post` contract.
 
 </Steps>
