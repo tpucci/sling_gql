@@ -393,9 +393,12 @@ class SlingClient<Q extends Accessor> {
 
   /// Rebuilds every scope that read one of the [touched] dependency keys
   /// (`ROOT_QUERY.launches_x`, `Launch:launch-181.name`, …), plus [always].
+  ///
+  /// Iterates [touched] (a handful of keys per write) and probes each scope's
+  /// deps, rather than walking every scope's deps (~1k keys for a list screen).
   void _notify(Set<String> touched, {Set<QueryScope<Q>> always = const {}}) {
     for (final scope in _scopes.toList()) {
-      if (always.contains(scope) || scope.deps.intersection(touched).isNotEmpty) {
+      if (always.contains(scope) || touched.any(scope.deps.contains)) {
         scope.onChanged();
       }
     }
