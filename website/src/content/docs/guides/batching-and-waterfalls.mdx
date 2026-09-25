@@ -105,6 +105,15 @@ CupertinoButton(onPressed: state.loadMore)
 See the [pagination guide](/sling_gql/guides/pagination/) for the full
 `PaginatedQueryBuilder` API — the snippet above is what it does internally.
 
+<Aside type="note" title="Dev-mode waterfall warning">
+You don't have to spot these by eye: `SlingClient(warnOnWaterfall: true)` (the default
+when asserts are enabled, i.e. debug builds and tests) reports every waterfall through
+`onWaterfall` (a `void Function(WaterfallWarning)`, printed by default). Each
+`WaterfallWarning` names the scope (`QueryBuilder.debugLabel`, falling back to the
+widget's `key` then a generated `QueryScope#n`) and the fields that needed the second
+request. `refetch()` and rebuilds your own `setState` triggered never warn.
+</Aside>
+
 ### The rule
 
 > Read every field the widget *might* need at the top of `build()`, into locals.
