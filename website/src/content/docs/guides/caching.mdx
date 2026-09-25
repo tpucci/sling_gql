@@ -54,7 +54,7 @@ object types have an `id` field and emits `keyed: true` on every field returning
 `__typename` in every such selection — you never select it by hand:
 
 ```graphql
-launches(first: $v0) {
+launches(first: $first) {
   __typename
   nodes {
     __typename
@@ -77,8 +77,8 @@ entity. Fields the entity already has are read from cache; fields it lacks miss
 individually and are fetched — **only those**:
 
 ```graphql title="Detail screen opened after the list"
-query ($v0: ID!) {
-  launch_18di94z: launch(id: $v0) {
+query ($id: ID!) {
+  launch_18di94z: launch(id: $id) {
     __typename
     id
     details        # not in the list → fetched

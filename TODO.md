@@ -16,32 +16,8 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
 
-## In progress (2026-09-25)
-
-- **#12 + #14** — cache lane (typed cache access, list membership, `evict`).
-- **#34 #35 #36 #41 #42** and the follow-ups below — example/docs sweep lane.
-
-## Open follow-ups from done items
-
-- (#1) Mention `SlingClient.onWaterfall` / `QueryBuilder.debugLabel` in
-  `guides/batching-and-waterfalls.mdx`.
-- (#5) `guides/batching-and-waterfalls.mdx` still shows the manual
-  `_cursors.add` snippet; rewrite around `PaginatedQueryBuilder`.
-- (#8) Example screens use `&& !state.isLoading` to hide the ghost skeleton
-  row; switch to `state.isSkeleton`.
-- (#15) `refetchQueries` is not used in the example app (may become moot once
-  #14 lands).
-
 ## P1 — DX rough edges seen in the example
 
-12. **DX — Cache is opaque to users.** `cache.read('query', ['launches_1qouruf',
-    …])` uses hashed aliases nobody can type. Add typed entity access
-    (`client.cache.entity<Launch>('1')`-style, generated) and a way to edit
-    list membership (see #14).
-14. **Runtime — List membership after a mutation (write policies).**
-    `me.favorites` / `launches(filter: …)` do not gain or lose a row after
-    `toggleFavorite`; only refetch fixes it. Add/remove a `Ref` in a cached list
-    (typed API from #12), plus create/delete helpers (`evict` from an accessor).
 16. **Test — `sling_gql_test` helpers.** `pumpUntilSettled(tester, client)`,
     a schema-aware in-memory server/`MockClient` builder, and the folklore
     (`HttpOverrides.global = null`, `pump(Duration)` for transitions,
@@ -101,13 +77,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-34. **Example — Variable names in printed documents.** `$v0`, `$v1` make the
-    network log hard to read; use argument names (`$first`, `$after`,
-    de-duplicated) — also nicer for server-side logs.
-35. **Example — `_ErrorView` duplicated** in `launches_screen.dart` and
-    `me_screen.dart`; move to `widgets/`.
-36. **Example — `NetworkLog.add` `debugPrint`s in release builds**; guard with
-    `kDebugMode`.
 37. **Example — `settle()` test helper polls with fixed 100 ms sleeps**; replace
     with a client-level "no scope loading" future once #16 exists.
 38. **Example — Show more of the API**: `client.resolve()` (imperative
@@ -121,10 +90,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P5 — docs & repo hygiene
 
-41. **Docs — AGENTS.md header still says "proof of concept, queries only"**;
-    sweep README/website for the same phrasing.
-42. **Docs — Getting-started should show the three-`null` story (#7), the
-    waterfall rule and `prepare` on the first page**, not in guides.
 43. **Repo — No workspace/melos**: three pubspecs, three test commands, no
     versioning or publish plan. Add a pub workspace (Dart 3.5+) and a single
     `make test`/script that runs all four gates (runtime, generator, example
@@ -176,8 +141,15 @@ Kept for number stability; see git history for details.
 9. DX — `SlingScope(schema: slingSchema)` / `mutationRoot:`; `MutationBuilder` needs no `root:`.
 10. DX — Sticky-error docs + `SlingClient(retryFailedAfter:)`.
 11. DX — Generated-file header explains the `$` rename scheme.
+12. DX — Typed cache access: `client.cacheScope` (`.query`, generated `.launch(id)` per keyed type); reads never fetch.
 13. Gen — `--scalar Name=DartType[:converter]` (`DateTime` built in); example uses it.
+14. Runtime — List membership: `cacheScope.list((q) => q.me?.favorites).append/prepend/remove(e)`, `cacheScope.evict(e)`; journaled inside `optimistic:`. Example favourites update without refetch.
 15. Runtime — `mutateWith(..., refetchQueries: [...])`, forwarded by generated `client.mutate`.
+34. Example — Printed-document variables named after the argument (`$first`, `$after`, `$first2` on clash).
+35. Example — Shared `ErrorView` widget.
+36. Example — `NetworkLog.add` guarded with `kDebugMode`.
+41. Docs — "queries only" phrasing swept.
+42. Docs — "Rules of the road" block on getting-started.
 
 ## Explicitly not planned
 

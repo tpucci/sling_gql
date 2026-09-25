@@ -27,8 +27,8 @@ The body runs **twice**:
    `?.favorite` records:
 
    ```graphql
-   mutation ($v0: ID!) {
-     toggleFavorite_1u2xg8k: toggleFavorite(launchId: $v0) {
+   mutation ($launchId: ID!) {
+     toggleFavorite_1u2xg8k: toggleFavorite(launchId: $launchId) {
        __typename
        id
        favorite
