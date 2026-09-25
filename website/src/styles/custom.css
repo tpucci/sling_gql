@@ -50,11 +50,14 @@
 @view-transition {
   navigation: auto;
 }
+/* Old and new must share the exact same duration and timing function so their
+   opacities sum to 1 at every instant; otherwise the crossfade dips below full
+   coverage mid-transition and the page background flashes through. */
 ::view-transition-old(root) {
-  animation: 180ms ease-out both sling-fade-out;
+  animation: 220ms ease both sling-fade-out;
 }
 ::view-transition-new(root) {
-  animation: 260ms ease-in both sling-fade-in;
+  animation: 220ms ease both sling-fade-in;
 }
 @keyframes sling-fade-out {
   to {
