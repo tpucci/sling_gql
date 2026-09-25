@@ -75,7 +75,7 @@ void main() {
     await settle(tester);
 
     expect(log.entries, hasLength(2), reason: 'only the second page is fetched');
-    expect(log.entries.first.variables, containsPair('v1', isA<String>()),
+    expect(log.entries.first.variables, containsPair('after', isA<String>()),
         reason: 'the `after` cursor is sent as a variable');
     await tester.scrollUntilVisible(
       find.textContaining('Load more'),
@@ -136,7 +136,7 @@ void main() {
     expect(log.entries, hasLength(4), reason: 'one mutation request');
     final mutation = log.entries.first.document;
     expect(mutation, startsWith('mutation'));
-    expect(mutation, contains('toggleFavorite(launchId: \$v0) {\n    __typename\n    id\n    favorite\n  }'));
+    expect(mutation, contains('toggleFavorite(launchId: \$launchId) {\n    __typename\n    id\n    favorite\n  }'));
     expect(
       find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
       findsOneWidget,
@@ -204,7 +204,7 @@ void main() {
     expect(log.entries, hasLength(3),
         reason: 'a status filter is a new argument set → new cache entry → one request');
     final statusDoc = log.entries.first;
-    expect(statusDoc.document, contains('filter: \$v1'));
+    expect(statusDoc.document, contains('filter: \$filter'));
     expect(
       statusDoc.variables.values.any((v) => v is Map && v['status'] == 'SUCCESS'),
       isTrue,

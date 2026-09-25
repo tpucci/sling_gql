@@ -152,7 +152,27 @@ class PrintedOperation {
   static PrintedOperation from(Selection root) {
     final variables = <String, Object?>{};
     final varDefs = <String>[];
-    var counter = 0;
+    // Variable names default to the argument name ('$first', '$after').
+    // Two arguments with the same name but a different value (e.g. the same
+    // field queried twice with a different `id`) get a numeric suffix on the
+    // second and later distinct value ('$first', '$first2'); the same name
+    // with the *same* value (by canonical JSON) reuses one variable.
+    final namesByArg = <String, Map<String, String>>{};
+    final suffixByArg = <String, int>{};
+
+    String nameFor(String argName, Object? value, String graphqlType) {
+      final canonical = jsonEncode(value);
+      final byValue = namesByArg.putIfAbsent(argName, () => {});
+      final existing = byValue[canonical];
+      if (existing != null) return existing;
+      final suffix = suffixByArg[argName] ?? 1;
+      suffixByArg[argName] = suffix + 1;
+      final name = suffix == 1 ? argName : '$argName$suffix';
+      byValue[canonical] = name;
+      variables[name] = value;
+      varDefs.add('\$$name: $graphqlType');
+      return name;
+    }
 
     String printNode(Selection node, int depth) {
       final indent = '  ' * depth;
@@ -163,9 +183,7 @@ class PrintedOperation {
       if (args.isNotEmpty) {
         buf.write('(');
         buf.write(args.map((e) {
-          final name = 'v${counter++}';
-          variables[name] = e.value.value;
-          varDefs.add('\$$name: ${e.value.graphqlType}');
+          final name = nameFor(e.key, e.value.value, e.value.graphqlType);
           return '${e.key}: \$$name';
         }).join(', '));
         buf.write(')');

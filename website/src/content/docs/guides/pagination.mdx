@@ -78,9 +78,9 @@ What happens on the wire:
 | `state.refetch()` (pull to refresh) | `launches_a` **and** `launches_b` in one document — `refetch()` replays the whole last selection, cursors are kept |
 | `controller.reset()` | back to `launches_a`, from cache; the other pages stay cached too |
 
-```graphql title="request after one “Load more”"
-query ($v0: Int, $v1: String) {
-  launches_fg1t1s: launches(first: $v0, after: $v1) {
+```graphql title="request after one "Load more""
+query ($first: Int, $after: String) {
+  launches_fg1t1s: launches(first: $first, after: $after) {
     __typename
     nodes { __typename status name date id rocket { __typename name } }
     pageInfo { __typename hasNextPage endCursor }

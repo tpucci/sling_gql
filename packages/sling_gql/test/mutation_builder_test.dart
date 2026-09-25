@@ -17,7 +17,7 @@ void main() {
         httpClient: mockGraphQL((query, vars) {
           final alias = RegExp(r'(rename_\w+):').firstMatch(query)!.group(1)!;
           return {
-            alias: {'__typename': 'User', 'id': vars['v0'], 'name': vars['v1']},
+            alias: {'__typename': 'User', 'id': vars['id'], 'name': vars['name']},
           };
         }),
       );

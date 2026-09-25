@@ -33,10 +33,10 @@ Column(children: [
 ```
 
 ```graphql title="the only request"
-query ($v0: Int) {
+query ($first: Int) {
   company { __typename name }
   stats { __typename totalLaunches }
-  launches_1qouruf: launches(first: $v0) {
+  launches_1qouruf: launches(first: $first) {
     __typename
     nodes { __typename status name date id rocket { __typename name } }
     pageInfo { __typename hasNextPage endCursor }

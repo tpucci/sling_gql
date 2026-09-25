@@ -67,7 +67,7 @@ Map<String, Object?> _handler(String document, Map vars) {
   if (RegExp(r'^  users \{', multiLine: true).hasMatch(document)) {
     data['users'] = _page(null);
   }
-  for (final m in RegExp(r'(users_\w+): users\(after: \$(v\d+)\)').allMatches(document)) {
+  for (final m in RegExp(r'(users_\w+): users\(after: \$(\w+)\)').allMatches(document)) {
     data[m.group(1)!] = _page(vars[m.group(2)!] as String);
   }
   return data;
@@ -152,8 +152,8 @@ void main() {
 
     expect(h.sent, hasLength(2));
     final doc = h.sent.last.document;
-    expect(doc, contains('users(after: \$v0)'));
-    expect(h.sent.last.variables, {'v0': 'c2'});
+    expect(doc, contains('users(after: \$after)'));
+    expect(h.sent.last.variables, {'after': 'c2'});
     expect(doc, isNot(contains('  users {')), reason: 'page one comes from cache');
     expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
     expect(h.state.hasMore, isFalse);
@@ -198,7 +198,7 @@ void main() {
     expect(h.sent, hasLength(3));
     final doc = h.sent.last.document;
     expect(doc, contains('  users {'));
-    expect(doc, contains('users(after: \$v0)'));
+    expect(doc, contains('users(after: \$after)'));
     expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
   });
 

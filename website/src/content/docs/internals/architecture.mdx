@@ -47,11 +47,13 @@ A `Selection` node is a field name, its arguments, and children. Its **alias** i
 used both as the GraphQL alias in the printed document and as the key in the cache, so the
 response can be merged without a lookup table.
 
-`PrintedOperation.from(root)` walks the tree, emits `alias: field(arg: $v0)` lines, adds
+`PrintedOperation.from(root)` walks the tree, emits `alias: field(arg: $first)` lines, adds
 `__typename` to every object node (and `id` to keyed ones), and collects arguments into variables with their
-declared GraphQL type (`Arg('LaunchFilter', filter.toJson())`). Object nodes without
-children — a list that was read but whose rows were not built — still print `{ __typename }`
-so the document is valid.
+declared GraphQL type (`Arg('LaunchFilter', filter.toJson())`). Variables are named after
+the argument (`$first`, `$after`, `$filter`); the same argument name used twice with a
+different value in one operation gets a numeric suffix (`$first`, `$first2`). Object nodes
+without children — a list that was read but whose rows were not built — still print
+`{ __typename }` so the document is valid.
 
 ### 2. `Cache` — entities, keyed by `__typename:id`
 

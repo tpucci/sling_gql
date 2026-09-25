@@ -179,8 +179,8 @@ query {
     );
 
     final op = h.sent.single;
-    expect(op.variables, {'v0': 2});
-    expect(op.document, contains('friends(limit: \$v0)'));
+    expect(op.variables, {'limit': 2});
+    expect(op.document, contains('friends(limit: \$limit)'));
     // Cache key = alias = field + hash(args)
     final alias = RegExp(r'(friends_\w+): friends').firstMatch(op.document)!.group(1);
     expect(alias, 'friends_1n0h7gq');
@@ -245,7 +245,7 @@ query {
       (m) => m.setStatus(id: '1', status: UserStatus.inactive)?.status,
     );
     expect(status, UserStatus.inactive);
-    expect(h.sent.single.variables, {'v0': '1', 'v1': 'INACTIVE'});
+    expect(h.sent.single.variables, {'id': '1', 'status': 'INACTIVE'});
 
     expect(
       () => h.client.mutate((m) => m.setStatus(id: '1', status: UserStatus.unknown)),
@@ -326,11 +326,11 @@ query {
     final scope = h.client.createScope(onChanged: () {});
     scope.run((q) => q.me.friends(limit: 1));
     expect(PrintedOperation.from(scope.root).document, '''
-query (\$v0: Int) {
+query (\$limit: Int) {
   me {
     __typename
     id
-    friends_${_friendsAlias(1)}: friends(limit: \$v0) {
+    friends_${_friendsAlias(1)}: friends(limit: \$limit) {
       __typename
       id
     }
@@ -513,7 +513,7 @@ void _mutationTests() {
         if (failMutation) throw StateError('mutation refused');
         final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
         return {
-          alias: {'__typename': 'User', 'id': v['v0'], 'name': v['v1']},
+          alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']},
         };
       });
 
@@ -526,9 +526,9 @@ void _mutationTests() {
     expect(name, 'Robert');
     expect(h.sent, hasLength(2));
     final op = h.sent.last;
-    expect(op.document, contains('mutation (\$v0: ID!, \$v1: String!) {'));
-    expect(op.document, contains(': rename(id: \$v0, name: \$v1) {\n    __typename\n    id\n    name\n  }'));
-    expect(op.variables, {'v0': 'a', 'v1': 'Robert'});
+    expect(op.document, contains('mutation (\$id: ID!, \$name: String!) {'));
+    expect(op.document, contains(': rename(id: \$id, name: \$name) {\n    __typename\n    id\n    name\n  }'));
+    expect(op.variables, {'id': 'a', 'name': 'Robert'});
   });
 
   test('the response updates the entity everywhere and notifies readers', () async {
@@ -612,7 +612,7 @@ void _mutationTests() {
         final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
         final v = body['variables'] as Map;
         return http.Response(
-          jsonEncode({'data': {alias: {'__typename': 'User', 'id': v['v0'], 'name': v['v1']}}}),
+          jsonEncode({'data': {alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']}}}),
           200,
         );
       }),
@@ -664,7 +664,7 @@ void _mutationTests() {
 }
 
 String _deleteAlias(Map vars) => Selection.root('mutation')
-    .child('deleteUser', {'id': Arg('ID!', vars['v0'])})
+    .child('deleteUser', {'id': Arg('ID!', vars['id'])})
     .alias
     .substring('deleteUser_'.length);
 
@@ -712,10 +712,10 @@ void _normalizationTests() {
     final age = await h.client.resolve((q) => q.user(id: 'a')?.age);
     expect(age, 41);
     expect(h.sent, hasLength(2));
-    expect(h.sent.last.document, contains('user(id: \$v0) {\n    __typename\n    id\n    age\n  }'));
+    expect(h.sent.last.document, contains('user(id: \$id) {\n    __typename\n    id\n    age\n  }'));
     expect(h.sent.last.document, isNot(contains('\n    name')), reason: 'name was cached');
     // After the fetch the root field points at the same entity.
-    expect(h.client.cache.entity('ROOT_QUERY')!['user_${_alias({'v0': 'a'})}'],
+    expect(h.client.cache.entity('ROOT_QUERY')!['user_${_alias({'id': 'a'})}'],
         const Ref('User:a'));
   });
 
@@ -844,6 +844,6 @@ String _friendsAlias(int limit) => Selection.root('query')
 String _alias(Map vars) {
   // Recompute the alias the same way Selection does, for the test server.
   final root = Selection.root('query');
-  final sel = root.child('user', {'id': Arg('ID!', vars['v0'])});
+  final sel = root.child('user', {'id': Arg('ID!', vars['id'])});
   return sel.alias.substring('user_'.length);
 }

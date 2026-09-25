@@ -97,12 +97,12 @@ final page = query.launches(
 ```
 
 ```graphql title="generated"
-query ($v0: ID!, $v1: Int, $v2: LaunchFilter, $v3: LaunchOrder) {
-  launch_18di94z: launch(id: $v0) {
+query ($id: ID!, $first: Int, $filter: LaunchFilter, $orderBy: LaunchOrder) {
+  launch_18di94z: launch(id: $id) {
     __typename
     # …
   }
-  launches_5c0z2wq: launches(first: $v1, filter: $v2, orderBy: $v3) {
+  launches_5c0z2wq: launches(first: $first, filter: $filter, orderBy: $orderBy) {
     __typename
     # …
   }
@@ -110,8 +110,12 @@ query ($v0: ID!, $v1: Int, $v2: LaunchFilter, $v3: LaunchOrder) {
 ```
 
 ```json title="variables"
-{ "v0": "launch-181", "v1": 20, "v2": { "status": "SUCCESS", "year": 2024 }, "v3": "DATE_DESC" }
+{ "id": "launch-181", "first": 20, "filter": { "status": "SUCCESS", "year": 2024 }, "orderBy": "DATE_DESC" }
 ```
+
+Variables are named after the argument (`$first`, `$after`, `$filter`); if the same
+argument name is used twice with a different value in one operation, the second (and
+later) distinct value gets a numeric suffix (`$first`, `$first2`).
 
 Arguments always travel as **variables**, so input objects and enums need no client-side
 serialization beyond `toJson()`, which the generated input classes implement. The
