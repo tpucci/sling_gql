@@ -1,0 +1,56 @@
+---
+/**
+ * Starlight `Head` override: the default head plus Astro's `<ClientRouter />`,
+ * so page navigations are client-side with Astro's default fade transition.
+ *
+ * Starlight 0.42 is not ClientRouter-aware; the script below patches the parts
+ * of its state that a full page load would otherwise have re-created.
+ */
+import Default from '@astrojs/starlight/components/Head.astro';
+import { ClientRouter } from 'astro:transitions';
+---
+
+<Default />
+<ClientRouter />
+
+<script>
+  /** Sidebar scroll offset captured before the swap, re-applied after it. */
+  let sidebarScroll = 0;
+
+  document.addEventListener('astro:before-swap', (event) => {
+    const newDoc = event.newDocument;
+
+    // Every page is server-rendered with `<html data-theme="dark">` (Starlight's ThemeProvider
+    // resolves the real theme from localStorage `starlight-theme` in an inline script that the
+    // router does not re-run) and the router copies the new root's attributes onto the live
+    // `<html>`: carry the current, already resolved theme over.
+    const theme = document.documentElement.dataset.theme;
+    if (theme) newDoc.documentElement.dataset.theme = theme;
+
+    // Starlight restores the sidebar (group open state, scroll) from sessionStorage on a full page
+    // load only. Carry it over from the live sidebar when both pages share the same sidebar.
+    const oldSidebar = document.querySelector<HTMLElement>('sl-sidebar-state-persist');
+    const newSidebar = newDoc.querySelector<HTMLElement>('sl-sidebar-state-persist');
+    sidebarScroll = 0;
+    if (oldSidebar && newSidebar && oldSidebar.dataset.hash === newSidebar.dataset.hash) {
+      const oldGroups = oldSidebar.querySelectorAll('details');
+      newSidebar.querySelectorAll('details').forEach((details, i) => {
+        const old = oldGroups[i];
+        if (old) details.open = old.open;
+      });
+      sidebarScroll = document.getElementById('starlight__sidebar')?.scrollTop ?? 0;
+    }
+
+    // The search element is persisted across navigations (see Search.astro). Empty the incoming
+    // copy so its `<site-search>` is never upgraded: its constructor would register a window
+    // keydown listener bound to a dialog that is discarded right after the swap.
+    newDoc
+      .querySelector('[data-astro-transition-persist="starlight-search"]')
+      ?.replaceChildren();
+  });
+
+  document.addEventListener('astro:after-swap', () => {
+    const scroller = document.getElementById('starlight__sidebar');
+    if (scroller && sidebarScroll) scroller.scrollTop = sidebarScroll;
+  });
+</script>

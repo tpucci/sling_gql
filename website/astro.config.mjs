@@ -15,6 +15,12 @@ export default defineConfig({
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/tpucci/sling_gql' }],
       editLink: { baseUrl: 'https://github.com/tpucci/sling_gql/edit/main/website/' },
       customCss: ['./src/styles/custom.css'],
+      // Head adds Astro's <ClientRouter /> (client-side page transitions); Search is
+      // persisted across those navigations. See the components for details.
+      components: {
+        Head: './src/components/Head.astro',
+        Search: './src/components/Search.astro',
+      },
       lastUpdated: true,
       sidebar: [
         {

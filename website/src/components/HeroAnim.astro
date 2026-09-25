@@ -9,10 +9,21 @@
 <script>
   import lottie from 'lottie-web/build/player/lottie_light';
 
-  const container = document.getElementById('hero-anim');
-  if (container) {
+  // Bundled scripts run once per visit under Astro's <ClientRouter />: (re)mount on every
+  // `astro:page-load` and dispose before the page is swapped out.
+  let anim: ReturnType<typeof lottie.loadAnimation> | null = null;
+
+  function unmount() {
+    anim?.destroy();
+    anim = null;
+  }
+
+  function mount() {
+    unmount();
+    const container = document.getElementById('hero-anim');
+    if (!container) return;
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const anim = lottie.loadAnimation({
+    anim = lottie.loadAnimation({
       container,
       renderer: 'svg',
       loop: true,
@@ -22,6 +33,10 @@
     // `#frame=N` freezes the animation on one frame (used for screenshots/debugging).
     const frame = Number(new URLSearchParams(location.hash.slice(1)).get('frame'));
     const still = reduce ? 300 : Number.isFinite(frame) && frame > 0 ? frame : null;
-    if (still !== null) anim.addEventListener('DOMLoaded', () => anim.goToAndStop(still, true));
+    const current = anim;
+    if (still !== null) current.addEventListener('DOMLoaded', () => current.goToAndStop(still, true));
   }
+
+  document.addEventListener('astro:page-load', mount);
+  document.addEventListener('astro:before-swap', unmount);
 </script>

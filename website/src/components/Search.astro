@@ -1,0 +1,13 @@
+---
+/**
+ * Starlight `Search` override: the default search, persisted across ClientRouter
+ * navigations. Starlight creates the Pagefind UI on `DOMContentLoaded`, which
+ * never fires again after a client-side navigation, so a freshly swapped-in
+ * search dialog would stay empty. Head.astro relies on the persist id.
+ */
+import Default from '@astrojs/starlight/components/Search.astro';
+---
+
+<div transition:persist="starlight-search" style="display: contents">
+  <Default {...Astro.props} />
+</div>
