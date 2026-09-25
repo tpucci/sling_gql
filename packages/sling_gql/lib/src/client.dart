@@ -113,6 +113,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
   bool _hadMiss = false;
   bool _awaiting = false;
   Object? _error;
+
+  /// When [_error] was set; used to expire it once `retryFailedAfter` elapses.
+  DateTime? _errorAt;
   Completer<void>? _settled;
 
   /// Requests this scope took part in. A waterfall is a request after the
@@ -141,6 +144,15 @@ class QueryScope<Q extends Accessor> implements Recorder {
   bool get hasMissingData => _hadMiss;
 
   /// The last error from a fetch this scope took part in.
+  ///
+  /// **Sticky until [refetch].** Once a request this scope took part in
+  /// fails, [error] stays set — even though the scope's fields are still
+  /// `missing` and every rebuild reads them again — so the client does not
+  /// re-send the same failing document forever: without this, a failing
+  /// query would loop build → miss → fetch → fail → rebuild → miss → …
+  /// Call [refetch] to clear it and try again (a pull-to-refresh gesture is
+  /// the natural trigger). See also `SlingClient.retryFailedAfter` for
+  /// automatic retries after a cooldown instead of forever-sticky errors.
   Object? get error => _error;
 
   /// Runs [body] with a fresh selection tree, returning its result.
@@ -158,6 +170,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
     if (!_hadMiss) {
       // Fully served from cache: any previous error is moot.
       _error = null;
+      _errorAt = null;
     }
     return result;
   }
@@ -165,6 +178,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// Re-fetches everything this scope selected during its last run.
   Future<void> refetch() {
     _error = null;
+    _errorAt = null;
     _awaiting = true;
     client._enqueue(_root, force: true);
     client._schedule(this);
@@ -174,9 +188,19 @@ class QueryScope<Q extends Accessor> implements Recorder {
   @override
   void onMiss(Selection leaf) {
     _hadMiss = true;
-    // Error state is sticky until `refetch()` so a failing query does not
-    // loop: build → miss → fetch → fail → rebuild → miss → …
-    if (_error != null) return;
+    // Error state is sticky until `refetch()` (or `SlingClient.retryFailedAfter`
+    // elapses) so a failing query does not loop:
+    // build → miss → fetch → fail → rebuild → miss → …
+    if (_error != null) {
+      final retryAfter = client.retryFailedAfter;
+      final at = _errorAt;
+      final expired = retryAfter != null &&
+          at != null &&
+          client._now().difference(at) >= retryAfter;
+      if (!expired) return;
+      _error = null;
+      _errorAt = null;
+    }
     if (client._enqueueLeaf(leaf) && _missesAreWaterfall) {
       _waterfallLeaves.add(leaf);
     }
@@ -192,6 +216,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   void _settle(Object? error) {
     _awaiting = false;
     _error = error;
+    _errorAt = error != null ? client._now() : null;
     _settled?.complete();
     _settled = null;
   }
@@ -284,12 +309,17 @@ class SlingClient<Q extends Accessor> {
     this.onOperation,
     bool? warnOnWaterfall,
     void Function(WaterfallWarning warning)? onWaterfall,
+    this.retryFailedAfter,
+    // Clock behind `retryFailedAfter`; only worth overriding in tests.
+    DateTime Function() now = DateTime.now,
   })  : cache = cache ?? Cache(),
         _http = httpClient ?? http.Client(),
         // ignore: prefer_initializing_formals
         _transport = transport,
         warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
-        onWaterfall = onWaterfall ?? _printWaterfall;
+        onWaterfall = onWaterfall ?? _printWaterfall,
+        // ignore: prefer_initializing_formals
+        _now = now;
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
@@ -318,6 +348,17 @@ class SlingClient<Q extends Accessor> {
   /// Sink for [WaterfallWarning]s; prints them by default.
   final void Function(WaterfallWarning warning) onWaterfall;
 
+  /// How long a failed document stays sticky (see [QueryScope.error]) before
+  /// it is retried automatically on the next miss. `null` (the default)
+  /// means sticky forever — only an explicit `refetch()` retries. Set this to
+  /// give transient failures (a flaky connection, a cold server) a chance to
+  /// heal themselves without the user pulling to refresh; the clock is
+  /// checked lazily, on the next miss for that document, not on a timer.
+  final Duration? retryFailedAfter;
+
+  /// Clock used by [retryFailedAfter]; overridable for tests.
+  final DateTime Function() _now;
+
   // `print`, not `debugPrint`: client.dart stays free of Flutter imports.
   // ignore: avoid_print
   static void _printWaterfall(WaterfallWarning warning) => print(warning);
@@ -329,8 +370,13 @@ class SlingClient<Q extends Accessor> {
   Set<QueryScope<Q>> _pendingScopes = {};
   bool _flushScheduled = false;
 
-  /// Query document that last failed; suppresses automatic retry loops.
+  /// Query document that last failed; suppresses automatic retry loops
+  /// (forever, unless [retryFailedAfter] is set — see [_failedAt]).
   String? _failedDocument;
+
+  /// When [_failedDocument] failed; used to expire it once [retryFailedAfter]
+  /// has elapsed.
+  DateTime? _failedAt;
 
   QueryScope<Q> createScope({
     required void Function() onChanged,
@@ -469,7 +515,10 @@ class SlingClient<Q extends Accessor> {
   }
 
   void _enqueue(Selection tree, {bool force = false}) {
-    if (force) _failedDocument = null;
+    if (force) {
+      _failedDocument = null;
+      _failedAt = null;
+    }
     _pending.mergeFrom(tree);
   }
 
@@ -508,7 +557,11 @@ class SlingClient<Q extends Accessor> {
     }
 
     final op = PrintedOperation.from(tree);
-    if (op.document == _failedDocument) {
+    final failedAt = _failedAt;
+    final expired = retryFailedAfter != null &&
+        failedAt != null &&
+        _now().difference(failedAt) >= retryFailedAfter!;
+    if (op.document == _failedDocument && !expired) {
       // Same document already failed: surface the error without a round trip.
       for (final s in scopes) {
         s._waterfallLeaves.clear();
@@ -516,6 +569,11 @@ class SlingClient<Q extends Accessor> {
         s._changedByClient();
       }
       return;
+    }
+    if (expired) {
+      // Cooldown elapsed since the last failure: give it a fresh try.
+      _failedDocument = null;
+      _failedAt = null;
     }
 
     _inflight = tree;
@@ -532,13 +590,16 @@ class SlingClient<Q extends Accessor> {
       (touched, error) = await _send('query', tree, op);
       if (error != null) {
         _failedDocument = op.document;
+        _failedAt = _now();
         _lastError = error;
       } else {
         _failedDocument = null;
+        _failedAt = null;
       }
     } catch (e) {
       error = e;
       _failedDocument = op.document;
+      _failedAt = _now();
       _lastError = e;
     }
 

@@ -54,15 +54,29 @@ class QueryState {
   final QueryScope _scope;
 
   /// A fetch containing this widget's selections is in flight.
+  ///
+  /// This does *not* imply [hasMissingData] is true: a write to one field can
+  /// cause a re-fetch of the whole selection while everything else is
+  /// already cached and rendering for real, e.g. after [refetch].
   bool get isLoading => _scope.isLoading;
 
   /// The last run read data that is not (yet) cached — skeleton values were
   /// returned. Convenient for showing placeholders.
   bool get hasMissingData => _scope.hasMissingData;
 
+  /// The last error from a request this widget took part in.
+  ///
+  /// **Sticky until [refetch].** A failing query does not retry itself on
+  /// every rebuild — that would loop build → miss → fetch → fail → rebuild →
+  /// miss → … — so [error] stays set until you call [refetch] (bind it to
+  /// pull-to-refresh, a retry button, `state.error != null` in an
+  /// `ErrorView`). `SlingClient(retryFailedAfter:)` adds an automatic retry
+  /// after a cooldown instead, for transient failures.
   Object? get error => _scope.error;
 
-  /// Re-fetch everything this widget selected in its last build.
+  /// Re-fetch everything this widget selected in its last build. Clears
+  /// [error] immediately and resolves once the new attempt has landed (or
+  /// failed again).
   Future<void> refetch() => _scope.refetch();
 }
 

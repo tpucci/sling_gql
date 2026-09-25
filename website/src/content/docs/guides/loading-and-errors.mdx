@@ -48,6 +48,14 @@ icons or wrappers where a `null` field alone is ambiguous (a nullable `details: 
 legitimately be `null` from the server).
 </Aside>
 
+<Aside type="caution" title="Never branch on list length while loading">
+The one-element skeleton list means `list.isEmpty` is `false` and `list.length` is `1`
+before any real data exists. Guard list-shape UI (`itemCount`, an "empty state" widget, …) on
+`state.hasMissingData` first, the same way you guard individual fields:
+`if (state.hasMissingData) return const SkeletonRow();` before anything that reads
+`list.length` or `list.isEmpty` for real.
+</Aside>
+
 ## `QueryState`
 
 The third argument to the builder describes the widget's scope:
@@ -57,7 +65,8 @@ QueryBuilder<Query>(
   builder: (context, query, state) {
     state.isLoading;       // a request containing this widget's selections is in flight
     state.hasMissingData;  // the last build read at least one field not in cache
-    state.error;           // last error from a request this widget took part in
+    state.isSkeleton;      // hasMissingData && isLoading: gate a whole-widget skeleton on this
+    state.error;           // last error from a request this widget took part in (sticky, see below)
     state.refetch();       // Future<void>: refetch everything selected in the last build
   },
 )
@@ -66,12 +75,17 @@ QueryBuilder<Query>(
 `isLoading` is what you use for a discreet activity indicator next to the content — the
 content itself is already rendering as skeletons.
 
-## Null from the server vs. not fetched
+## Null from the server vs. not fetched vs. errored
 
-The cache stores a real `null` when the server sends one. The `missing` sentinel is used
-for paths that were never written. Accessors turn both into `null` for scalars, but only
-`missing` records a miss (and therefore a fetch). So a nullable field the server returned
-as `null` does **not** cause refetch loops.
+`null` from an accessor getter is ambiguous on its own — see
+["`null` means three things"](/sling_gql/guides/getting-started/#null-means-three-things) in
+Getting started for the full story (the table, `state.hasMissingData`/`state.isSkeleton` for
+the whole widget, `accessor.isFetched('field')` for one field) and how each case is told
+apart from the other two. The short version: the cache stores a real `null` when the server
+sends one and a `missing` sentinel for paths never written; only `missing` records a miss
+(and therefore a fetch), so a nullable field the server returned as `null` does **not**
+cause refetch loops — and an errored path never gets a real `null` cached either (see
+[Errors](#errors) below).
 
 ## Errors
 
@@ -88,7 +102,17 @@ Two behaviours are worth knowing:
 
 - **Errors are sticky.** Until you call `refetch()`, a scope that still misses data will
   *not* schedule a new request for the same document. Without this, a failing query would
-  loop: build → miss → fetch → fail → rebuild → miss → …
+  loop: build → miss → fetch → fail → rebuild → miss → … In practice this means a screen
+  that failed once stays in its error state until the user does something — bind
+  `state.refetch` to a retry button or, more commonly, to pull-to-refresh
+  (`CupertinoSliverRefreshControl`/`RefreshIndicator`) rather than polling.
+
+  If you would rather transient failures heal themselves without user action, pass
+  `SlingClient(retryFailedAfter: Duration(seconds: 30))` (or whatever cooldown fits): once
+  that much time has passed since the failure, the next miss for the same document retries
+  it automatically instead of staying sticky forever — useful for a flaky connection or a
+  cold server, at the cost of a possible extra request while the underlying problem is
+  still there. The default (`null`) keeps errors sticky forever, as above.
 - **Partial errors are pruned.** GraphQL can return `data` *and* `errors`. sling_gql removes
   the values at each error's `path` before merging, so a `null` the server put at a failed
   field is not cached as a real `null`. The rest of the response is cached normally, and
