@@ -11,11 +11,8 @@ Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
 fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
 #31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
 
-**In progress (2026-09-25):** #4 and #1 are on branch
-`pi-subagents/lane-a-runtime-29c44df-d943-s0-t0` (worktree under
-`~/Dev/worktrees/sling_gql/`): #4 committed, #1 implemented (needs
-`flutter analyze && flutter test` + commit), then rebase onto `main`. #6 not
-started.
+P0 status (2026-09-25): #1–#5 done; **#6 (transport hook) is the only P0
+left** — next pick.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -23,21 +20,20 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P0 — biggest multipliers
 
-1. **DX — Dev-mode waterfall warning.** When a scope triggers a *second*
-   request after its first one settled (a field read inside an `if`, in a
-   callback, or a missing `prepare`), log which widget/scope, which field, and
-   the fix. Per-scope deps/misses already exist; this is a debug-mode hook in
-   `QueryScope.onMiss` + `SlingClient._doFlush`. Roadmap "dev overlay" starts
-   here; the in-app overlay (which widget caused which request) comes after.
+1. ~~**DX — Dev-mode waterfall warning.**~~ done: `SlingClient(warnOnWaterfall:,
+   onWaterfall:)` (on when asserts are enabled, prints by default),
+   `WaterfallWarning(scope, fields)`, `QueryBuilder.debugLabel` (falls back
+   to the key, then `QueryScope#n`). Only rebuilds the *client* triggered
+   count; `refetch()` and `setState` rebuilds never warn. Follow-up: mention
+   it in the batching-and-waterfalls guide; in-app overlay is #46.
 2. ~~**Gen — Real Dart `enum`s**~~ done: lowerCamel constants + `unknown`,
    `.graphqlName`, `fromGraphQL`/`toGraphQL` (throws on `unknown` as an
    argument); `Accessor.enumValue`/`enumList`.
 3. ~~**Gen — No setter on the key field**~~ done: no setter on the key field,
    on `PageInfo` fields, or on `pageInfo`/`totalCount` of connection types.
    Explicit `write(...)` call deliberately not adopted (setters stay).
-4. **Perf — `_notify` iterates the large set.** `scope.deps.intersection(touched)`
-   walks ~1k deps per scope per write (1.6 ms for 50 scopes measured). Iterate
-   the small `touched` set instead: `touched.any(scope.deps.contains)`.
+4. ~~**Perf — `_notify` iterates the large set.**~~ done:
+   `touched.any(scope.deps.contains)`.
 5. ~~**DX — Pagination helper.**~~ done: `PaginationController`,
    `ConnectionPage<Node>`, `PaginatedQueryBuilder<Q, Node>` /
    `PaginatedState` in `pagination.dart`; example launches screen uses it.
