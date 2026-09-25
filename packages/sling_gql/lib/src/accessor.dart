@@ -78,6 +78,21 @@ abstract class Accessor {
   Object? _read(Selection sel) => recorder.cache
       .read(recorder.operation, [...path, sel.alias], deps: recorder.deps);
 
+  /// True when the cache holds a value for [field] on this object —
+  /// including an explicit server `null` — false when it was never fetched.
+  /// This is the per-field counterpart to `QueryState.hasMissingData`: use it
+  /// to tell "not fetched yet" apart from "the server said `null`" for one
+  /// field, without branching the whole widget on [isSkeleton].
+  ///
+  /// Reading [field] here does *not* record a miss or a dependency — calling
+  /// [isFetched] alone never causes a fetch or a rebuild. Read the field for
+  /// real ([scalar], [object], …) wherever you display it; an errored path
+  /// (see `QueryState.error`) also reads as not fetched here.
+  bool isFetched(String field, {Map<String, Arg>? args}) {
+    final sel = _select(field, args);
+    return recorder.cache.read(recorder.operation, [...path, sel.alias]) != missing;
+  }
+
   /// Reads a scalar field. Returns `null` (and records a miss) when not cached.
   T? scalar<T>(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
