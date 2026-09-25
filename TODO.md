@@ -11,6 +11,12 @@ Roadmap status: ~~normalized cache~~ done · ~~mutations~~ done ·
 fine-grained rebuilds mostly done (#19, #20) · subscriptions #30 · unions
 #31 · expiry/SWR #23 · dev experience #1, #46, #47 · transport #6, #48.
 
+**In progress (2026-09-25):** #4 and #1 are on branch
+`pi-subagents/lane-a-runtime-29c44df-d943-s0-t0` (worktree under
+`~/Dev/worktrees/sling_gql/`): #4 committed, #1 implemented (needs
+`flutter analyze && flutter test` + commit), then rebase onto `main`. #6 not
+started.
+
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
@@ -23,20 +29,20 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
    the fix. Per-scope deps/misses already exist; this is a debug-mode hook in
    `QueryScope.onMiss` + `SlingClient._doFlush`. Roadmap "dev overlay" starts
    here; the in-app overlay (which widget caused which request) comes after.
-2. **Gen — Real Dart `enum`s** instead of `abstract final class` of `String`
-   constants. Exhaustive `switch`, no typos; include an `unknown` value for
-   forward compatibility; keep the wire value accessible (`.graphqlName`).
-3. **Gen — No setter on the key field** (`id`) — writing it corrupts the entity
-   key. Consider also skipping setters on connection metadata (`pageInfo.*`,
-   `totalCount`) or making optimistic writes an explicit call
-   (`launch.write(name: …)`) instead of plain assignment on every scalar.
+2. ~~**Gen — Real Dart `enum`s**~~ done: lowerCamel constants + `unknown`,
+   `.graphqlName`, `fromGraphQL`/`toGraphQL` (throws on `unknown` as an
+   argument); `Accessor.enumValue`/`enumList`.
+3. ~~**Gen — No setter on the key field**~~ done: no setter on the key field,
+   on `PageInfo` fields, or on `pageInfo`/`totalCount` of connection types.
+   Explicit `write(...)` call deliberately not adopted (setters stay).
 4. **Perf — `_notify` iterates the large set.** `scope.deps.intersection(touched)`
    walks ~1k deps per scope per write (1.6 ms for 50 scopes measured). Iterate
    the small `touched` set instead: `touched.any(scope.deps.contains)`.
-5. **DX — Pagination helper.** Every list screen repeats `_cursors = [null]`,
-   N `launches(after:)` calls, flattening `nodes`, reset on filter change. Ship
-   a `Connection`/paginated-query helper (or a documented recipe + reusable
-   widget) that owns cursors, `loadMore`, `hasMore`, and refetch-all.
+5. ~~**DX — Pagination helper.**~~ done: `PaginationController`,
+   `ConnectionPage<Node>`, `PaginatedQueryBuilder<Q, Node>` /
+   `PaginatedState` in `pagination.dart`; example launches screen uses it.
+   Follow-up: `guides/batching-and-waterfalls.mdx` still shows the manual
+   `_cursors.add` snippet.
 6. **Runtime — Single `transport` hook** on `SlingClient`
    (`Future<Response> Function(Request)`): covers auth headers/token refresh,
    retry, timeout, logging, without adding a link system. Today `headers` is a
