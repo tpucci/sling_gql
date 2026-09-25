@@ -44,6 +44,9 @@ class Mutation extends Accessor {
       );
 }
 
+/// What the generator emits so apps never name roots by hand.
+const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);
+
 /// `me` with two friends, as the mock endpoint would answer.
 Map<String, Object?> meWithFriends() => {
       'me': {

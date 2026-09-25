@@ -12,6 +12,7 @@ export 'src/client.dart'
         QueryScope,
         MutationScope,
         RootFactory,
+        SlingSchema,
         WaterfallWarning,
         Transport;
 export 'src/pagination.dart'

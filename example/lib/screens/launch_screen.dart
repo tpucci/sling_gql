@@ -169,7 +169,6 @@ class _FavoriteButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = launch.id;
     return MutationBuilder<Mutation>(
-      root: Mutation.root,
       builder: (context, mutate, state) => CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: id == null || favorite == null || state.isLoading

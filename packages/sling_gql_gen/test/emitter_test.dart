@@ -248,12 +248,23 @@ void main() {
     expect(RegExp('class Mutation extends Accessor').allMatches(code), hasLength(1));
   });
 
-  test('no Mutation class when the schema has no mutation type', () {
+  test('emits the slingSchema convenience constant', () {
+    expect(
+      code,
+      contains(
+        'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
+        'mutation: Mutation.root);',
+      ),
+    );
+  });
+
+  test('no Mutation class or slingSchema when the schema has no mutation type', () {
     final json = Map<String, Object?>.from(_schemaJson);
     final schema = Map<String, Object?>.from(json['__schema'] as Map<String, Object?>)
       ..['mutationType'] = null;
     final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
     expect(code, isNot(contains('extension SlingMutations')));
+    expect(code, isNot(contains('slingSchema')));
   });
 
   test('non-null required arg without default -> required T', () {

@@ -155,6 +155,11 @@ extension SlingMutations on SlingClient<Query> {
   );
 }
 
+const slingSchema = SlingSchema<Query, Mutation>(
+  query: Query.root,
+  mutation: Mutation.root,
+);
+
 class PageInfo extends Accessor {
   PageInfo(super.recorder, super.selection, super.path);
 

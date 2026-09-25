@@ -28,6 +28,7 @@ void main() {
   Future<void> pumpApp(WidgetTester tester) async {
     await tester.pumpWidget(SlingScope<Query>(
       client: client,
+      schema: slingSchema,
       child: NetworkLogScope(
         log: log,
         child: const SlingApp(),

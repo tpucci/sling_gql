@@ -5,11 +5,33 @@ import 'accessor.dart';
 import 'client.dart';
 
 /// Provides a [SlingClient] to the widget tree.
+///
+/// [MutationBuilder] resolves its root from here when it isn't given an
+/// explicit `root:` — pass either [mutationRoot] directly (the generated
+/// `Mutation.root` constructor) or [schema] (the generated `slingSchema`
+/// constant, which also carries the query root); passing both is an error.
 class SlingScope<Q extends Accessor> extends StatelessWidget {
-  const SlingScope({super.key, required this.client, required this.child});
+  const SlingScope({
+    super.key,
+    required this.client,
+    required this.child,
+    this.mutationRoot,
+    this.schema,
+  }) : assert(
+         mutationRoot == null || schema == null,
+         'SlingScope: pass either mutationRoot: or schema:, not both.',
+       );
 
   final SlingClient<Q> client;
   final Widget child;
+
+  /// The generated `Mutation.root` constructor, for [MutationBuilder]s below
+  /// that don't set `root:` themselves. Mutually exclusive with [schema].
+  final RootFactory<Accessor>? mutationRoot;
+
+  /// The generated `slingSchema` constant. Equivalent to passing its
+  /// `.mutation` as [mutationRoot]. Mutually exclusive with [mutationRoot].
+  final SlingSchema<Q, Accessor>? schema;
 
   /// The client, typed with its query root.
   static SlingClient<Q> of<Q extends Accessor>(BuildContext context) {
@@ -25,17 +47,41 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
     return scope!.client;
   }
 
+  /// The mutation root provided by the nearest [SlingScope], via either
+  /// [mutationRoot] or [schema]. Used by [MutationBuilder] when it isn't
+  /// given an explicit `root:`.
+  static RootFactory<M> mutationRootOf<M extends Accessor>(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<_InheritedClient>();
+    assert(scope != null, 'No SlingScope found above this widget');
+    final root = scope!.mutationRoot;
+    assert(
+      root != null && root is RootFactory<M>,
+      root == null
+          ? 'MutationBuilder<$M> has no root: and the nearest SlingScope was '
+              'not given mutationRoot: or schema: — pass one of the three.'
+          : 'SlingScope above provides a mutation root for a different type '
+              'than $M — check schema:/mutationRoot: matches MutationBuilder<$M>.',
+    );
+    return root as RootFactory<M>;
+  }
+
   @override
-  Widget build(BuildContext context) => _InheritedClient(client: client, child: child);
+  Widget build(BuildContext context) => _InheritedClient(
+        client: client,
+        mutationRoot: mutationRoot ?? schema?.mutation,
+        child: child,
+      );
 }
 
 class _InheritedClient extends InheritedWidget {
-  const _InheritedClient({required this.client, required super.child});
+  const _InheritedClient({required this.client, this.mutationRoot, required super.child});
 
   final SlingClient<Accessor> client;
+  final RootFactory<Accessor>? mutationRoot;
 
   @override
-  bool updateShouldNotify(_InheritedClient oldWidget) => client != oldWidget.client;
+  bool updateShouldNotify(_InheritedClient oldWidget) =>
+      client != oldWidget.client || mutationRoot != oldWidget.mutationRoot;
 }
 
 /// Flushes at the end of the current (or next) frame, after layout, so that
@@ -189,7 +235,6 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 ///
 /// ```dart
 /// MutationBuilder<Mutation>(
-///   root: Mutation.root,
 ///   builder: (context, mutate, state) => CupertinoButton(
 ///     onPressed: state.isLoading
 ///         ? null
@@ -202,13 +247,18 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 /// )
 /// ```
 ///
+/// The mutation root is resolved from the nearest [SlingScope] (its
+/// `mutationRoot:` or `schema:`) unless [root] is given explicitly, which
+/// always wins.
+///
 /// The response is normalized into the shared cache, so the widgets reading
 /// the returned entities — here every copy of the launch — rebuild on their own.
 class MutationBuilder<M extends Accessor> extends StatefulWidget {
-  const MutationBuilder({super.key, required this.root, required this.builder});
+  const MutationBuilder({super.key, this.root, required this.builder});
 
-  /// The generated `Mutation.root` constructor.
-  final RootFactory<M> root;
+  /// The generated `Mutation.root` constructor. Optional: when omitted, it is
+  /// resolved from the nearest [SlingScope] via [SlingScope.mutationRootOf].
+  final RootFactory<M>? root;
 
   final MutationWidgetBuilder<M> builder;
 
@@ -219,6 +269,21 @@ class MutationBuilder<M extends Accessor> extends StatefulWidget {
 class _MutationBuilderState<M extends Accessor> extends State<MutationBuilder<M>> {
   bool _loading = false;
   Object? _error;
+  RootFactory<M>? _root;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _root = widget.root ?? SlingScope.mutationRootOf<M>(context);
+  }
+
+  @override
+  void didUpdateWidget(MutationBuilder<M> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.root != oldWidget.root) {
+      _root = widget.root ?? SlingScope.mutationRootOf<M>(context);
+    }
+  }
 
   Future<T?> _mutate<T>(
     T Function(M mutation) body, {
@@ -232,7 +297,7 @@ class _MutationBuilderState<M extends Accessor> extends State<MutationBuilder<M>
     });
     try {
       return await client.mutateWith(
-        widget.root,
+        _root!,
         body,
         optimistic: optimistic,
         refetchQueries: refetchQueries,

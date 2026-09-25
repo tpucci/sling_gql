@@ -98,6 +98,11 @@ extension on SlingClient<Query> {
       mutateWith(Mutation.root, body, optimistic: optimistic, refetchQueries: refetchQueries);
 }
 
+/// What the generator emits so apps never name roots by hand: pass to
+/// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` resolves its
+/// root without a `root:` argument.
+const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);
+
 // --- Test harness -------------------------------------------------------------
 
 class Harness {

@@ -22,6 +22,18 @@ class SlingException implements Exception {
 /// Builds the root accessor of an operation for a given recorder.
 typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
 
+/// The generator's single per-schema convenience: bundles the query and
+/// mutation root factories so app code never has to name `Mutation.root` by
+/// hand — `SlingScope(schema: slingSchema, ...)` resolves both `QueryBuilder`
+/// (via the client's `rootFactory`) and `MutationBuilder` (via
+/// `SlingScope.mutationRootOf`) from it.
+class SlingSchema<Q extends Accessor, M extends Accessor> {
+  const SlingSchema({required this.query, required this.mutation});
+
+  final RootFactory<Q> query;
+  final RootFactory<M> mutation;
+}
+
 /// True when asserts are enabled (debug builds and tests).
 bool get _assertsEnabled {
   var enabled = false;

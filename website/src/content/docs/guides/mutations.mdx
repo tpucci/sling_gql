@@ -61,7 +61,6 @@ them in the body (`launch..status..upcoming`) if the UI shows them.
 
 ```dart
 MutationBuilder<Mutation>(
-  root: Mutation.root,
   builder: (context, mutate, state) => CupertinoButton(
     onPressed: state.isLoading
         ? null
@@ -73,6 +72,21 @@ MutationBuilder<Mutation>(
   ),
 )
 ```
+
+`MutationBuilder` needs no root of its own: it resolves `Mutation.root` from the nearest
+`SlingScope`, which takes the generated `slingSchema` constant (or `mutationRoot:` for the
+root factory alone) alongside `client:`:
+
+```dart
+SlingScope<Query>(
+  client: client,
+  schema: slingSchema, // generated: SlingSchema(query: Query.root, mutation: Mutation.root)
+  child: const App(),
+)
+```
+
+An explicit `root: Mutation.root` on `MutationBuilder` still works and always wins over the
+scope — useful for a widget wired to a different schema than the one above it.
 
 `mutate` returns `Future<T?>`: the body's value on success, `null` on failure with the error
 on `state.error`. `state.isLoading` is true while the request is in flight. The widget does

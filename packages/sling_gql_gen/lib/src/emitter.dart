@@ -114,6 +114,8 @@ String generate(
     _emitRootClass(out, mutationType, ctx, className: 'Mutation');
     out.writeln();
     _emitMutateExtension(out);
+    out.writeln();
+    _emitSlingSchema(out);
   }
 
   for (final t in objectTypes) {
@@ -212,6 +214,15 @@ void _emitRootClass(
     _emitField(out, type, field, ctx);
   }
   out.writeln('}');
+}
+
+/// A schema-wide convenience so apps never name roots by hand: pass to
+/// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` resolves its
+/// root without a `root:` argument.
+void _emitSlingSchema(StringBuffer out) {
+  out.writeln(
+    'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);',
+  );
 }
 
 /// `client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)` without
