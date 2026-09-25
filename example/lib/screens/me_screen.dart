@@ -63,7 +63,7 @@ class MeScreen extends StatelessWidget {
                   itemCount: favorites.length,
                   itemBuilder: (context, i) => LaunchRow(favorites[i]),
                 ),
-                if (favorites.isEmpty && !state.isLoading)
+                if (favorites.isEmpty && !state.isSkeleton)
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.all(32),
