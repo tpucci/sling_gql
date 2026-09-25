@@ -108,8 +108,9 @@ cache entry. That means:
    references to the same `Launch:<id>` entities, so a heart toggled on the
    detail screen shows in every segment.
 
-Switching the segment also resets `_cursors` to `[null]` so the first page
-is re-read from cache (or fetched fresh if absent).
+Switching the segment also calls `_pagination.reset()` on the screen's
+`PaginationController`, so only the first page is read — from cache, or
+fetched fresh if absent. See [Pagination](/sling_gql/guides/pagination/).
 
 **Known limitation:** the *membership* of a filtered list is fixed at fetch
 time. After `updateLaunchStatus` or `toggleFavorite`, the entity's fields

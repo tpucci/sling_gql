@@ -1,20 +1,106 @@
 ---
 title: Pagination
-description: Cursor and offset pagination with per-argument cache entries — no special API needed.
+description: Cursor and offset pagination with per-argument cache entries — a small helper on top of plain state.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-sling_gql has no pagination API. It does not need one: a field called with different
-arguments is a **different cache entry**, and a widget's selection can include as many of
-them as it likes. Pagination is then just state.
+sling_gql needs no pagination *machinery*: a field called with different arguments is a
+**different cache entry**, and a widget's selection can include as many of them as it
+likes. Pagination is then just state — which pages to read. `PaginatedQueryBuilder` owns
+that state for cursor connections; the manual recipe below shows what it does.
 
-## Cursor pagination (Relay style)
+## Cursor pagination with `PaginatedQueryBuilder`
 
-The mock API exposes `launches(first, after): LaunchConnection!`. The example keeps a list
-of cursors — one per loaded page — and reads every page during build:
+The mock API exposes `launches(first, after): LaunchConnection!`. The example's list body
+is a `PaginatedQueryBuilder<Query, Launch>`:
 
 ```dart title="launches_screen.dart (excerpt)"
+class _LaunchesScreenState extends State<LaunchesScreen> {
+  static const pageSize = 20;
+  final _pagination = PaginationController(); // cursors: [null] = first page
+
+  void _onSegmentChanged(String? status) {
+    setState(() => _status = status);
+    _pagination.reset(); // new filter → back to page one
+  }
+
+  @override
+  Widget build(BuildContext context) => PaginatedQueryBuilder<Query, Launch>(
+    controller: _pagination,
+    // Runs once per loaded page, every build. Read every field here.
+    page: (query, after) {
+      final page = query.launches(first: pageSize, after: after, filter: filter);
+      return ConnectionPage(
+        nodes: page?.nodes,
+        hasNextPage: page?.pageInfo?.hasNextPage,
+        endCursor: page?.pageInfo?.endCursor,
+        totalCount: page?.totalCount,
+      );
+    },
+    builder: (context, state) => CustomScrollView(slivers: [
+      CupertinoSliverRefreshControl(onRefresh: state.refetch),
+      SliverList.builder(
+        itemCount: state.items.length,
+        itemBuilder: (_, i) => LaunchRow(state.items[i]),
+      ),
+      SliverToBoxAdapter(
+        child: state.hasMore
+            ? CupertinoButton.filled(
+                onPressed: state.loadMore,
+                child: Text('Load more (${state.items.length} / ${state.totalCount})'),
+              )
+            : state.isLoading
+                ? const CupertinoActivityIndicator()
+                : Text('${state.items.length} launches'),
+      ),
+    ]),
+  );
+}
+```
+
+- **`page`** maps the query root and a cursor to a `ConnectionPage` — the generated
+  connection types are plain classes, so you name the four fields once. The widget calls
+  it for every cursor in the controller during a single build.
+- **`PaginatedState`** hands the builder `items` (all pages flattened), `hasMore`,
+  `totalCount`, `loadMore()`, `refetch()`, plus `isLoading` / `hasMissingData` / `error`
+  from the underlying `QueryBuilder`.
+- **`PaginationController`** is optional. Pass your own when something outside the
+  builder must `reset()` it (a filter or sort change); otherwise the widget keeps a private
+  one.
+
+What happens on the wire:
+
+| Interaction | Request |
+| --- | --- |
+| First frame | `launches_a: launches(first: 20)` — plus the header's `company` and `stats`, batched |
+| `state.loadMore()` | `launches_b: launches(first: 20, after: "…")` — **only** the new page; page 1 is served from cache |
+| `state.refetch()` (pull to refresh) | `launches_a` **and** `launches_b` in one document — `refetch()` replays the whole last selection, cursors are kept |
+| `controller.reset()` | back to `launches_a`, from cache; the other pages stay cached too |
+
+```graphql title="request after one “Load more”"
+query ($v0: Int, $v1: String) {
+  launches_fg1t1s: launches(first: $v0, after: $v1) {
+    __typename
+    nodes { __typename status name date id rocket { __typename name } }
+    pageInfo { __typename hasNextPage endCursor }
+    totalCount
+  }
+}
+```
+
+<Aside type="note" title="Skeleton lists have one element">
+While the first page is loading, `state.items` holds one skeleton node (so `.map` still
+records the row selection). Rows render as placeholders on their own; for counts or empty
+states check `state.isLoading` / `state.hasMissingData` first, as the example does.
+</Aside>
+
+## The manual recipe
+
+`PaginatedQueryBuilder` is thin — this is what it does, and what you would write for a
+connection shape it does not fit:
+
+```dart
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
   final List<String?> _cursors = [null]; // null = first page
@@ -52,35 +138,18 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
 }
 ```
 
-What happens on the wire:
-
-| Interaction | Request |
-| --- | --- |
-| First frame | `launches_a: launches(first: 20)` — plus the header's `company` and `stats`, batched |
-| "Load more" | `launches_b: launches(first: 20, after: "…")` — **only** the new page; page 1 is served from cache |
-| Pull to refresh | `launches_a` **and** `launches_b` in one document — `refetch()` replays the whole last selection |
-
-```graphql title="request after one “Load more”"
-query ($v0: Int, $v1: String) {
-  launches_fg1t1s: launches(first: $v0, after: $v1) {
-    __typename
-    nodes { __typename status name date id rocket { __typename name } }
-    pageInfo { __typename hasNextPage endCursor }
-    totalCount
-  }
-}
-```
-
 <Aside type="caution" title="Read the cursor during build">
 The first version of this screen read `page.pageInfo.endCursor` inside `onPressed`. Since
 nothing had read `endCursor` during build, it was not fetched; the tap recorded a miss,
 fetched it, and meanwhile appended `null` — the first page — again. The request-counting
-test caught it. Always capture what a callback needs in a local during `build()`.
+test caught it. Always capture what a callback needs in a local during `build()` — this is
+why `ConnectionPage` asks for `endCursor` up front and `PaginatedState.loadMore()` takes no
+arguments.
 </Aside>
 
 ## Offset pagination
 
-Identical pattern with `launchesPage(limit, offset)`:
+Same idea with `launchesPage(limit, offset)`, a page counter instead of cursors:
 
 ```dart
 final pages = [
@@ -108,5 +177,5 @@ final recent = launch.rocket?.launches(first: 5)?.nodes ?? const <Launch>[];
 Each page's `nodes` is a list of references to `Launch:<id>` entities, so a launch that
 shows up in two pages is stored once and a future favourite mutation updates every row.
 What is still missing is a *connection merge policy*: the pages are separate cache
-entries stitched together by the widget (`_cursors`), not one growing list in the cache
-(Apollo's `relayStylePagination`). See [Caching](/sling_gql/guides/caching/).
+entries stitched together by the widget, not one growing list in the cache (Apollo's
+`relayStylePagination`). See [Caching](/sling_gql/guides/caching/).

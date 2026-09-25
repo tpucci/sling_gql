@@ -7,6 +7,14 @@ export 'src/cache/cache.dart'
     show Cache, CacheWrite, NormalizedCache, Normalization, Ref, missing, depKey;
 export 'src/client.dart'
     show SlingClient, SlingException, QueryScope, MutationScope, RootFactory;
+export 'src/pagination.dart'
+    show
+        PaginationController,
+        ConnectionPage,
+        PageSelector,
+        PaginatedState,
+        PaginatedQueryBuilder,
+        PaginatedWidgetBuilder;
 export 'src/selection.dart' show Arg, Selection, PrintedOperation;
 export 'src/widgets.dart'
     show
