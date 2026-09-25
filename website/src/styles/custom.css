@@ -44,38 +44,6 @@
   --sl-color-black: #ffffff;
 }
 
-/* ---------------------------------------------------------------------------
-   Cross-document view transitions: a soft fade between pages, no JS.
---------------------------------------------------------------------------- */
-@view-transition {
-  navigation: auto;
-}
-/* Old and new must share the exact same duration and timing function so their
-   opacities sum to 1 at every instant; otherwise the crossfade dips below full
-   coverage mid-transition and the page background flashes through. */
-::view-transition-old(root) {
-  animation: 220ms ease both sling-fade-out;
-}
-::view-transition-new(root) {
-  animation: 220ms ease both sling-fade-in;
-}
-@keyframes sling-fade-out {
-  to {
-    opacity: 0;
-  }
-}
-@keyframes sling-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation: none;
-  }
-}
-
 /* Gradient headline utility used on the landing page and in guides. */
 .gradient-text {
   background: var(--sling-gradient);

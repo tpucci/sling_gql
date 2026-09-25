@@ -16,29 +16,6 @@ export default defineConfig({
       editLink: { baseUrl: 'https://github.com/tpucci/sling_gql/edit/main/website/' },
       customCss: ['./src/styles/custom.css'],
       lastUpdated: true,
-      head: [
-        {
-          tag: 'script',
-          // The landing page has no sidebar/TOC (a full-width hero), while every
-          // other page uses the 3-column docs layout. Crossfading between those
-          // two very different layouts (custom.css's @view-transition) ghosts the
-          // hero text over the sidebar/content, which reads as a flash. Skip the
-          // native transition for any navigation that touches the landing page;
-          // docs-to-docs navigations (same layout) keep the crossfade.
-          content: `
-            window.addEventListener('pageswap', (e) => {
-              if (e.viewTransition && document.documentElement.hasAttribute('data-has-hero')) {
-                e.viewTransition.skipTransition();
-              }
-            });
-            window.addEventListener('pagereveal', (e) => {
-              if (e.viewTransition && document.documentElement.hasAttribute('data-has-hero')) {
-                e.viewTransition.skipTransition();
-              }
-            });
-          `,
-        },
-      ],
       sidebar: [
         {
           label: 'Start here',
