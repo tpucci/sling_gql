@@ -16,7 +16,10 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 ```
 
 This writes `lib/generated/schema.dart` and formats it with `dart format`
-(a formatting failure is logged but does not fail the run).
+(a formatting failure is logged but does not fail the run). The generated
+file starts with a header comment explaining the `$`-rename scheme
+(`type$`, `$typename`, `$eq`, ...) in one place, so a reader never has to
+go digging for why an identifier looks the way it does.
 
 Flags:
 

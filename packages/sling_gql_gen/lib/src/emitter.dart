@@ -3,6 +3,47 @@ import 'scalars.dart';
 import 'schema.dart';
 import 'type_resolver.dart';
 
+/// The identifier-renaming scheme explained once, in the file every reader
+/// of the generated output actually opens (see `naming.dart` for the
+/// implementation and `tooling/code-generation.mdx`'s "Name sanitization"
+/// section for the full write-up — keep all three in sync by hand). A raw
+/// string: no `$` in it is Dart interpolation, all of it is literal text.
+const String _headerComment = r'''
+//
+// This file is generated from the GraphQL schema; do not edit it directly --
+// change the schema and regenerate instead (see the package README).
+//
+// Identifier scheme (GraphQL name -> Dart name), and why:
+//   - A leading `_` becomes `$`, so the identifier stays public in Dart (a
+//     leading underscore would make it library-private): Hasura-style
+//     `_eq` -> `$eq`, `_and` -> `$and`.
+//   - A Dart keyword, or a name `Accessor` already declares (`selection`,
+//     `write`, `isSkeleton`, ...), gets a trailing `$` so the generated
+//     getter/method doesn't fail to parse or shadow the base class:
+//     `type` -> `type$`, `class` -> `class$`.
+//   - A GraphQL type name that collides with `dart:core` or a sling_gql
+//     runtime type (`Object`, `String`, `List`, `Map`, `Cache`, `Accessor`,
+//     `Selection`, `Arg`, `Recorder`) gets a trailing `$`:
+//     `Object` -> `Object$`.
+//   - A field whose Dart name is spelled exactly like its own return type
+//     (common with lowercase table types, e.g. a `users` field returning
+//     type `users`) is disambiguated at the member, not the type, so it
+//     doesn't shadow the class inside its own body: `users` -> `users$`.
+//   - Enum constants are lowerCamelCased (`PARTIAL_FAILURE` ->
+//     `partialFailure`) and get the same trailing `$` on a clash with a
+//     keyword or an enum member (`unknown`, `values`, `index`, `name`, ...),
+//     or when two wire names camel-case to the same identifier.
+//   - `Accessor.$typename` (declared once, in the runtime, not per
+//     generated type) reads the cached `__typename`; it is named with a
+//     leading `$` for the same public-identifier reason as `_eq` above.
+//
+// The original GraphQL name is never lost: it is always kept as the string
+// literal used for cache keys, `Arg` map keys and `toJson` keys, so renaming
+// here is purely cosmetic on the Dart side.
+//
+// See packages/sling_gql_gen/lib/src/naming.dart for the implementation.
+//''';
+
 /// Generates the full contents of the `sling_gql`-style accessor file for
 /// [schema]. [importPath] is the import used to bring in `Accessor`/`Arg`/
 /// `Recorder` (defaults to `package:sling_gql/sling_gql.dart`).
@@ -49,9 +90,10 @@ String generate(
 
   final out = StringBuffer()
     ..writeln('// GENERATED CODE - DO NOT MODIFY BY HAND')
+    ..writeln(_headerComment)
     ..writeln(
       '// ignore_for_file: non_constant_identifier_names, camel_case_types, '
-      'constant_identifier_names, camel_case_extensions',
+      'camel_case_extensions',
     )
     ..writeln()
     ..writeln("import '$importPath';")

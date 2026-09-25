@@ -217,6 +217,13 @@ maps them to safe Dart names while always keeping the original GraphQL name
 as the string literal used for cache keys, `Arg` map keys and `toJson` keys
 — sanitization is purely cosmetic on the Dart side.
 
+<Aside type="tip">
+The generated file itself starts with a header comment listing every rule
+below in one place (GraphQL name → Dart name, and why), right above the
+`// GENERATED CODE - DO NOT MODIFY BY HAND` line, so a reader never has to
+go looking for why `type$` or `$typename` is spelled that way.
+</Aside>
+
 - **Dart keywords and `Accessor` member names** get a trailing `$`:
   `type` → `type$`, `class` → `class$`. This also covers accidental
   collisions with `Accessor` itself (`selection`, `write`, `isSkeleton`, …).
