@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:sling_gql/sling_gql.dart';
 
 /// Keeps every GraphQL document the client sent, newest first. The whole point
@@ -8,7 +9,9 @@ class NetworkLog extends ChangeNotifier {
 
   void add(PrintedOperation op) {
     entries.insert(0, op);
-    debugPrint('[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}');
+    if (kDebugMode) {
+      debugPrint('[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}');
+    }
     notifyListeners();
   }
 
