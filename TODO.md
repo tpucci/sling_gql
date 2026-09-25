@@ -12,6 +12,11 @@ Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ �
 subscriptions #30 · unions #31 · expiry/SWR #23 · dev experience #46, #47 ·
 `gql_link` #48.
 
+Status (2026-09-25): P0 done (#1–#6); P1 done except #16; example/docs
+sweep done (#34–#36, #41, #42). 20 items in **Done**. Suggested next picks:
+#16 (test helpers), #23 (fetch policies) and #19/#20 (per-row rebuilds), or
+#43/#44 (workspace + CI) before the codebase grows further.
+
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.

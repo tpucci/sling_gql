@@ -23,12 +23,11 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
 
    `client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)` and
    `MutationBuilder<Mutation>`, with journaled optimistic writes rolled back on failure. See
-   [Mutations](/sling_gql/guides/mutations/). Left for later: write policies for
-   create/delete (prepend a ref to a list, `evict` helpers on the accessor), `refetchQueries`
-   sugar, and **list membership after a mutation** — e.g. after `toggleFavorite`, the
-   `me.favorites` list and `launches(filter: {favorite: true})` should gain or lose the
-   launch without a full refetch; that requires write policies that add/remove a `Ref` in a
-   cached list.
+   [Mutations](/sling_gql/guides/mutations/). Also done: `refetchQueries` sugar, typed cache
+   access (`client.cacheScope`), and list membership after a mutation
+   (`cacheScope.list((q) => q.me?.favorites).append/remove`, `evict`) — see
+   [Caching](/sling_gql/guides/caching/). Left for later: connection-aware type policies so
+   paginated/filtered lists update without `refetchQueries`.
 
 3. **Subscriptions**
 
