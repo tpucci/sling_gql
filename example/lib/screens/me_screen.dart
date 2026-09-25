@@ -4,6 +4,7 @@ import 'package:sling_gql/sling_gql.dart';
 import '../generated/schema.dart';
 import '../network_log.dart';
 import '../theme.dart';
+import '../widgets/error_view.dart';
 import '../widgets/launch_row.dart';
 import '../widgets/skeleton.dart';
 
@@ -40,7 +41,7 @@ class MeScreen extends StatelessWidget {
             final favorites = me?.favorites ?? const <Launch>[];
 
             if (state.error != null) {
-              return _ErrorView(
+              return ErrorView(
                 error: state.error!,
                 onRetry: state.refetch,
               );
@@ -170,36 +171,3 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.error, required this.onRetry});
-  final Object error;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(CupertinoIcons.exclamationmark_triangle, size: 40),
-              const SizedBox(height: 8),
-              Text('$error', textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              const Text(
-                'Is the mock API running? `cd mock-api && npm start`',
-                style: TextStyle(
-                  color: CupertinoColors.systemGrey,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 16),
-              CupertinoButton.filled(
-                onPressed: onRetry,
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
-}
