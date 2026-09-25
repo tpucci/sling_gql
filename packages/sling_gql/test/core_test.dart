@@ -90,8 +90,12 @@ enum UserStatus {
 
 /// What the generator emits so `client.mutate` needs no wiring.
 extension on SlingClient<Query> {
-  Future<T> mutate<T>(T Function(Mutation m) body, {void Function()? optimistic}) =>
-      mutateWith(Mutation.root, body, optimistic: optimistic);
+  Future<T> mutate<T>(
+    T Function(Mutation m) body, {
+    void Function()? optimistic,
+    Iterable<String>? refetchQueries,
+  }) =>
+      mutateWith(Mutation.root, body, optimistic: optimistic, refetchQueries: refetchQueries);
 }
 
 // --- Test harness -------------------------------------------------------------

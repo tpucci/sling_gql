@@ -242,7 +242,8 @@ void main() {
       ),
     );
     expect(code, contains('extension SlingMutations on SlingClient<Query> {'));
-    expect(code, contains('mutateWith(Mutation.root, body, optimistic: optimistic);'));
+    expect(code, contains('refetchQueries: refetchQueries,'));
+    expect(code, contains('mutateWith('));
     // Mutation is not emitted twice (once as root, once as plain object).
     expect(RegExp('class Mutation extends Accessor').allMatches(code), hasLength(1));
   });

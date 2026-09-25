@@ -223,8 +223,14 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('  Future<T> mutate<T>(')
     ..writeln('    T Function(Mutation mutation) body, {')
     ..writeln('    void Function()? optimistic,')
+    ..writeln('    Iterable<String>? refetchQueries,')
     ..writeln('  }) =>')
-    ..writeln('      mutateWith(Mutation.root, body, optimistic: optimistic);')
+    ..writeln('      mutateWith(')
+    ..writeln('        Mutation.root,')
+    ..writeln('        body,')
+    ..writeln('        optimistic: optimistic,')
+    ..writeln('        refetchQueries: refetchQueries,')
+    ..writeln('      );')
     ..writeln('}');
 }
 

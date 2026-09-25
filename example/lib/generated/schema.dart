@@ -146,7 +146,13 @@ extension SlingMutations on SlingClient<Query> {
   Future<T> mutate<T>(
     T Function(Mutation mutation) body, {
     void Function()? optimistic,
-  }) => mutateWith(Mutation.root, body, optimistic: optimistic);
+    Iterable<String>? refetchQueries,
+  }) => mutateWith(
+    Mutation.root,
+    body,
+    optimistic: optimistic,
+    refetchQueries: refetchQueries,
+  );
 }
 
 class PageInfo extends Accessor {

@@ -105,7 +105,8 @@ Regenerate:
 ```sh
 cd example
 dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
-  --schema graphql/schema.json --out lib/generated/schema.dart
+  --schema graphql/schema.json --out lib/generated/schema.dart \
+  --scalar DateTime=DateTime
 ```
 
 ## Conventions
