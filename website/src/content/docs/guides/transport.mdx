@@ -1,0 +1,112 @@
+---
+title: Transport
+description: One hook on SlingClient for auth headers, token refresh, retries, timeouts and logging — no link system.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every request — batched queries and mutations alike — goes through a single
+function:
+
+```dart
+typedef Transport = Future<http.Response> Function(http.Request request);
+```
+
+By default the client sends the request with its `http.Client`. Pass your own
+`transport` to intercept it. The request you receive is a finalized `POST` with
+`content-type: application/json` and the client's static `headers` already
+applied; you can mutate its headers before sending.
+
+```dart
+final client = SlingClient<Query>(
+  endpoint: Uri.parse('https://api.example.com/graphql'),
+  rootFactory: Query.root,
+  headers: const {'x-app-version': '1.2.0'}, // static, applied before transport
+  transport: (request) async {
+    request.headers['authorization'] = 'Bearer ${await auth.token()}';
+    return http.Response.fromStream(await http.Client().send(request));
+  },
+);
+```
+
+<Aside type="note">
+There is deliberately no link chain. Most apps need one function; compose it
+yourself with ordinary Dart. If you already use `gql_link`, an adapter is a
+single `Transport` (see the roadmap).
+</Aside>
+
+## Recipes
+
+Keep one `http.Client` around instead of creating one per request:
+
+```dart
+final _http = http.Client();
+Future<http.Response> send(http.Request r) async =>
+    http.Response.fromStream(await _http.send(r));
+```
+
+### Timeout
+
+```dart
+transport: (request) => send(request).timeout(const Duration(seconds: 10)),
+```
+
+A `TimeoutException` surfaces as `QueryState.error` for every scope in the
+batch (sticky until `refetch()`, see
+[Loading states & errors](/sling_gql/guides/loading-and-errors/)).
+
+### Retry
+
+An `http.Request` can be sent once, so copy it before each attempt:
+
+```dart
+http.Request copy(http.Request r) => http.Request(r.method, r.url)
+  ..headers.addAll(r.headers)
+  ..bodyBytes = r.bodyBytes;
+
+transport: (request) async {
+  for (var attempt = 0;; attempt++) {
+    final res = await send(copy(request));
+    if (res.statusCode < 500 || attempt == 2) return res;
+    await Future.delayed(Duration(milliseconds: 200 * (1 << attempt)));
+  }
+},
+```
+
+Retry inside the transport is invisible to widgets: the scope only sees the
+final response.
+
+### Token refresh on 401
+
+```dart
+transport: (request) async {
+  request.headers['authorization'] = 'Bearer ${auth.current}';
+  final res = await send(copy(request));
+  if (res.statusCode != 401) return res;
+  await auth.refresh();
+  request.headers['authorization'] = 'Bearer ${auth.current}';
+  return send(copy(request));
+},
+```
+
+### Logging
+
+`onOperation` already reports every printed document; use the transport when
+you want status codes and timing too:
+
+```dart
+transport: (request) async {
+  final sw = Stopwatch()..start();
+  final res = await send(request);
+  log('${res.statusCode} ${sw.elapsedMilliseconds}ms ${request.body.length}B');
+  return res;
+},
+```
+
+## What the client does with the response
+
+- `statusCode >= 400` → `SlingException('HTTP <code>')` for the whole batch.
+- A JSON body without `data` → `SlingException` with the first GraphQL error.
+- `errors` alongside `data` → the errored paths are pruned before caching and
+  the error is attached to the scopes that asked for them (see
+  [Loading states & errors](/sling_gql/guides/loading-and-errors/)).

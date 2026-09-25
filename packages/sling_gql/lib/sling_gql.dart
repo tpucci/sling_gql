@@ -12,7 +12,8 @@ export 'src/client.dart'
         QueryScope,
         MutationScope,
         RootFactory,
-        WaterfallWarning;
+        WaterfallWarning,
+        Transport;
 export 'src/pagination.dart'
     show
         PaginationController,

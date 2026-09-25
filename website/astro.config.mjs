@@ -33,6 +33,7 @@ export default defineConfig({
             { label: 'Pagination', slug: 'guides/pagination' },
             { label: 'Caching', slug: 'guides/caching' },
             { label: 'Mutations', slug: 'guides/mutations' },
+            { label: 'Transport', slug: 'guides/transport' },
           ],
         },
         {

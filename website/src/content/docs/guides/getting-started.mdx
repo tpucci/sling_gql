@@ -56,7 +56,7 @@ introspection.
      final client = SlingClient<Query>(
        endpoint: Uri.parse('https://api.example.com/graphql'),
        rootFactory: Query.root,
-       headers: {'Authorization': 'Bearer …'},          // optional
+       headers: {'Authorization': 'Bearer …'},          // optional; see Transport
        onOperation: (op) => debugPrint(op.document),    // optional: log every request
      );
 

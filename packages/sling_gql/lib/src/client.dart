@@ -251,6 +251,26 @@ class MutationScope implements Recorder {
   void onWrite(CacheWrite write) => client._onWrite(write);
 }
 
+/// Sends one HTTP request and returns its response. The single extension
+/// point for auth headers / token refresh, retries, timeouts and logging:
+///
+/// ```dart
+/// SlingClient<Query>(
+///   endpoint: uri,
+///   rootFactory: Query.root,
+///   transport: (request) async {
+///     request.headers['authorization'] = 'Bearer ${await token()}';
+///     return http.Response.fromStream(await http.Client().send(request))
+///         .timeout(const Duration(seconds: 10));
+///   },
+/// );
+/// ```
+///
+/// The request is a finalized POST with `content-type` and
+/// [SlingClient.headers] already applied; queries and mutations alike go
+/// through it. An `http.Request` can be sent once: copy it before retrying.
+typedef Transport = Future<http.Response> Function(http.Request request);
+
 /// Batches selections into a single GraphQL document per microtask, fetches
 /// them over HTTP, writes results into the cache and notifies scopes.
 class SlingClient<Q extends Accessor> {
@@ -259,20 +279,33 @@ class SlingClient<Q extends Accessor> {
     required this.rootFactory,
     Cache? cache,
     http.Client? httpClient,
+    Transport? transport,
     this.headers = const {},
     this.onOperation,
     bool? warnOnWaterfall,
     void Function(WaterfallWarning warning)? onWaterfall,
   })  : cache = cache ?? Cache(),
         _http = httpClient ?? http.Client(),
+        // ignore: prefer_initializing_formals
+        _transport = transport,
         warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
         onWaterfall = onWaterfall ?? _printWaterfall;
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
   final Cache cache;
+
+  /// Static headers added to every request (before [transport] sees it).
   final Map<String, String> headers;
   final http.Client _http;
+  final Transport? _transport;
+
+  /// The [Transport] every request goes through; sends over [httpClient]
+  /// (or a default `http.Client`) unless one was passed in.
+  Transport get transport => _transport ?? _sendWithHttpClient;
+
+  Future<http.Response> _sendWithHttpClient(http.Request request) async =>
+      http.Response.fromStream(await _http.send(request));
 
   /// Debug hook: called with every document sent to the endpoint.
   final void Function(PrintedOperation op)? onOperation;
@@ -564,11 +597,10 @@ class SlingClient<Q extends Accessor> {
 
   Future<(Map<String, Object?>, List<Map<String, Object?>>)> _post(
       PrintedOperation op) async {
-    final response = await _http.post(
-      endpoint,
-      headers: {'content-type': 'application/json', ...headers},
-      body: jsonEncode({'query': op.document, 'variables': op.variables}),
-    );
+    final request = http.Request('POST', endpoint)
+      ..headers.addAll({'content-type': 'application/json', ...headers})
+      ..body = jsonEncode({'query': op.document, 'variables': op.variables});
+    final response = await transport(request);
     if (response.statusCode >= 400) {
       throw SlingException('HTTP ${response.statusCode}', statusCode: response.statusCode);
     }
