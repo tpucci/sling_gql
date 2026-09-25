@@ -52,9 +52,13 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    `maxAge`, `staleWhileRevalidate`, `WeakReference`-held stale entries, soft `refetch()`
    that is a no-op on fresh data.
 
-7. **Developer experience**
+7. **Developer experience** — in progress
 
-   In-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
+   Done: real Dart `enum`s with an `unknown` value (see
+   [Code generation](/sling_gql/tooling/code-generation/)), no setters on key fields or
+   connection metadata, and `PaginatedQueryBuilder` (see
+   [Pagination](/sling_gql/guides/pagination/)). Next: dev-mode waterfall warning, then the
+   in-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
    log line per operation; `flutter_hooks` adapter (`useSlingQuery`).
 
 8. **Transport options**
