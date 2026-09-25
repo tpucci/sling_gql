@@ -6,9 +6,10 @@ description: Add sling_gql to a Flutter app, generate typed accessors from your 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Proof of concept">
-sling_gql is not on pub.dev and only supports **queries** today. You depend on it straight
-from the Git repository. Everything below works against any GraphQL endpoint that allows
-introspection.
+sling_gql is not on pub.dev. It supports **queries** (with a normalized cache and a
+pagination helper), **mutations**, and a single `transport` hook for auth/retry/logging —
+but not subscriptions or unions/interfaces yet. You depend on it straight from the Git
+repository. Everything below works against any GraphQL endpoint that allows introspection.
 </Aside>
 
 <Steps>
