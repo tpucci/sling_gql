@@ -123,17 +123,29 @@ to build:
 | **Errored path** | The field's path failed with a GraphQL error; sling_gql never caches a `null` from an errored path as real data. | `state.error` is set. It stays set (see [Loading states & errors](/sling_gql/guides/loading-and-errors/#errors)) until you call `state.refetch()`. |
 
 The blessed pattern is: gate the **whole widget** on `state.hasMissingData` for the
-first-paint skeleton, and reach for `accessor.isFetched('field')` only when a single field
-— not the whole screen — needs to tell "not fetched" apart from "the server said `null`":
+first-paint skeleton (or the shorthand `state.isSkeleton`, which is exactly
+`hasMissingData && isLoading`), and reach for `accessor.isFetched('field')` only when a
+single field — not the whole screen — needs to tell "not fetched" apart from "the server
+said `null`":
 
 ```dart
 builder: (context, query, state) {
-  if (state.hasMissingData) return const SkeletonScreen();  // first paint only
+  if (state.isSkeleton) return const SkeletonScreen();  // first paint only
   final launch = query.latestLaunch;
-  final hasDetails = launch.isFetched('details');            // per-field, no extra rebuild
+  final hasDetails = launch.isFetched('details');       // per-field, no extra rebuild
   return LaunchCard(launch, showDetailsPlaceholder: !hasDetails);
 }
 ```
+
+<Aside type="caution" title="Never branch on list length while loading">
+A skeleton list has exactly **one** placeholder element, so `.map` and `itemCount` still
+work during the first build — but that also means `list.isEmpty` is `false` and
+`list.length` is `1` before any real data exists. Guard list-shape decisions the same way:
+`if (state.hasMissingData) return const SkeletonRow(); return ListView(itemCount: list.length, …);`
+never `if (list.isEmpty) return EmptyState();` on its own. See
+[Loading states & errors](/sling_gql/guides/loading-and-errors/#skeletons-not-spinners) for
+the full skeleton-shape table.
+</Aside>
 
 ## Where to go next
 

@@ -64,6 +64,14 @@ class QueryState {
   /// returned. Convenient for showing placeholders.
   bool get hasMissingData => _scope.hasMissingData;
 
+  /// True on the very first paint: [hasMissingData] and [isLoading] are both
+  /// true, i.e. every accessor is still returning skeleton values *and* the
+  /// request to fill them is in flight. Use this to gate a whole-widget
+  /// skeleton (`state.isSkeleton ? Skeleton() : …`) instead of checking
+  /// individual fields or list lengths — see "the three meanings of null" and
+  /// "never branch on list length while loading" in `guides/getting-started`.
+  bool get isSkeleton => hasMissingData && isLoading;
+
   /// The last error from a request this widget took part in.
   ///
   /// **Sticky until [refetch].** A failing query does not retry itself on
