@@ -89,18 +89,21 @@ final text = total == null ? null : '$total launches · $rate% · CEO $ceo';
 
 ### Anti-pattern 2 — reads inside callbacks
 
-```dart del={2-4} ins={6-9}
+```dart del={2-6} ins={8-9}
 // ❌ endCursor is first read on tap → fetch → the tap adds `null` as a cursor
+final _cursors = <String?>[null];
 CupertinoButton(
-  onPressed: () => setState(() => _cursors.add(page!.pageInfo!.endCursor)),
+  onPressed: () =>
+      setState(() => _cursors.add(page!.pageInfo!.endCursor)),
 )
 
-// ✅ read during build, capture in the closure
-final endCursor = page?.pageInfo?.endCursor;
-CupertinoButton(
-  onPressed: () => setState(() => _cursors.add(endCursor)),
-)
+// ✅ let PaginatedQueryBuilder own the cursor list; it reads endCursor
+// during its own build, so a tap never has to read it for the first time.
+CupertinoButton(onPressed: state.loadMore)
 ```
+
+See the [pagination guide](/sling_gql/guides/pagination/) for the full
+`PaginatedQueryBuilder` API — the snippet above is what it does internally.
 
 ### The rule
 
