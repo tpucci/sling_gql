@@ -103,6 +103,12 @@ extension on SlingClient<Query> {
 /// root without a `root:` argument.
 const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);
 
+/// What the generator emits for typed, non-fetching cache access: one
+/// method per keyed type (`CacheScope.entity`).
+extension SlingCacheAccess on CacheScope<Query> {
+  User? user(String id) => entity('User', id, User.new);
+}
+
 // --- Test harness -------------------------------------------------------------
 
 class Harness {

@@ -9,6 +9,7 @@ export 'src/client.dart'
     show
         SlingClient,
         SlingException,
+        CacheScope,
         QueryScope,
         MutationScope,
         RootFactory,

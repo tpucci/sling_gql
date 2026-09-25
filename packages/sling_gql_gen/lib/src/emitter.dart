@@ -118,6 +118,15 @@ String generate(
     _emitSlingSchema(out);
   }
 
+  final entityTypes = objectTypes
+      .where((t) => t.name != schema.queryTypeName && t.name != schema.mutationTypeName)
+      .where((t) => ctx.isKeyed(t.name))
+      .toList();
+  if (entityTypes.isNotEmpty) {
+    out.writeln();
+    _emitCacheAccessExtension(out, entityTypes, ctx);
+  }
+
   for (final t in objectTypes) {
     if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName) continue;
     out.writeln();
@@ -243,6 +252,50 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('        refetchQueries: refetchQueries,')
     ..writeln('      );')
     ..writeln('}');
+}
+
+/// `CacheScope` members (and `Object`'s) a generated entity method must not
+/// shadow — extension members lose to instance members silently.
+const Set<String> _cacheScopeMembers = {
+  ...dartKeywords,
+  'client', 'operation', 'root', 'cache', 'deps', 'onMiss', 'onWrite',
+  'locateList', 'query', 'entity', 'list', 'evict', 'hashCode',
+  'runtimeType', 'toString', 'noSuchMethod',
+};
+
+/// `cacheScope.launch('launch-181')`: one method per keyed type, returning
+/// the cached entity or `null` (see `CacheScope.entity`). The method is the
+/// lowerCamelCase type name (`Launch` -> `launch`), with the usual trailing
+/// `$` on a clash with a keyword, a `CacheScope` member, or another type.
+void _emitCacheAccessExtension(
+  StringBuffer out,
+  List<GqlType> entityTypes,
+  _EmitContext ctx,
+) {
+  final keyParam = sanitizeIdentifier(ctx.keyField);
+  out
+    ..writeln('/// Typed, non-fetching cache access for this schema\'s keyed types:')
+    ..writeln("/// `client.cacheScope.launch('launch-181')` returns the cached entity or")
+    ..writeln('/// `null`. See `CacheScope`.')
+    ..writeln('extension SlingCacheAccess on CacheScope<Query> {');
+  final used = <String>{};
+  for (final t in entityTypes) {
+    final className = sanitizeTypeName(t.name);
+    var method = className[0].toLowerCase() + className.substring(1);
+    if (method.startsWith(r'$') && method.length > 1) {
+      method = '\$${method[1].toLowerCase()}${method.substring(2)}';
+    }
+    while (_cacheScopeMembers.contains(method) || !used.add(method)) {
+      method = '$method\$';
+    }
+    final keyType = scalarDartType(
+      t.fields.firstWhere((f) => f.name == ctx.keyField).type.named.name!,
+    );
+    out.writeln(
+      "  $className? $method($keyType $keyParam) => entity(${dartStringLiteral(t.name)}, $keyParam, $className.new);",
+    );
+  }
+  out.writeln('}');
 }
 
 void _emitObjectClass(

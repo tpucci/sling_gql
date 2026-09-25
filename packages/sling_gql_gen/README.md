@@ -65,6 +65,14 @@ Flags:
   `values`, `index`, `name`, …) get a trailing `$`: `UNKNOWN` → `unknown$`.
 - `class <InputName> { const <InputName>({...}); ...; toJson() {...} }` for
   each `INPUT_OBJECT` type.
+- `extension SlingCacheAccess on CacheScope<Query>` with one method per
+  keyed type (an `OBJECT` with a scalar `--key-field`), returning the cached
+  entity or `null` without ever fetching:
+  `Launch? launch(String id) => entity('Launch', id, Launch.new);` — used as
+  `client.cacheScope.launch('launch-181')`. The method is the type name with
+  a lowercase first letter; a clash with a Dart keyword, a `CacheScope`
+  member (`query`, `list`, `entity`, `evict`, …) or another type's method
+  gets a trailing `$` (`Entity` → `entity$`). Omitted when no type is keyed.
 
 All getters are nullable (`T?`, `R?`, `List<R>?`) regardless of the schema's
 non-null markers, since cache data may be missing — see

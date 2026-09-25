@@ -114,6 +114,49 @@ Because there is one `Launch:launch-181`, setting `name` on the detail screen **
 list row too**. When mutations land, the pattern will be: write optimistically, send the
 mutation, let the response overwrite, refetch on error.
 
+## Typed cache access: `client.cacheScope`
+
+`cache.read('query', ['launches_1qouruf', 'nodes', 0])` works, but nobody can type a hashed
+alias. Outside a widget build — in an `optimistic:` callback, after `await client.mutate(...)`,
+in a push-notification handler — use the typed scope instead:
+
+```dart
+final cache = client.cacheScope;              // SlingScope.of<Query>(context).cacheScope
+final launch = cache.launch('launch-181');     // Launch? — the cached entity, or null
+launch?.favorite = true;                       // ordinary generated setter
+final name = cache.query.me?.name;             // typed root fields, from the cache only
+```
+
+`client.cacheScope` returns a `CacheScope<Query>`, a recorder like the one behind every
+`QueryBuilder`, with two differences: **reads never fetch** (a field that is not cached reads
+as `null`, an object as a skeleton, and nothing is sent) and it **never rebuilds** (it records
+no dependencies). Writes go through the normal write path: every scope that read the field
+rebuilds, and inside a mutation's `optimistic` callback they are journaled and rolled back on
+failure, exactly like setters on accessors you got from a build.
+
+The generator emits one method per keyed type (`extension SlingCacheAccess on
+CacheScope<Query>`):
+
+```dart title="lib/generated/schema.dart"
+extension SlingCacheAccess on CacheScope<Query> {
+  Launch? launch(String id) => entity('Launch', id, Launch.new);
+  Rocket? rocket(String id) => entity('Rocket', id, Rocket.new);
+  // …
+}
+```
+
+`entity(typename, id, ctor)` resolves the key through `Normalization.lookup` —
+`launch('launch-181')` addresses `Launch:launch-181` — and returns `null` when that entity is
+not in the cache: **never a skeleton, never a request**. The accessor it returns is the ordinary
+generated `Launch`, starting at the entity (`path == [Ref('Launch:launch-181')]`), so
+everything reachable from it (`launch.rocket?.name`) reads the same way.
+
+<Aside type="caution" title="Writing through a skeleton">
+`cache.query.me` is a skeleton when `me` was never fetched; a setter on it would create a
+partial object the next fetch has to merge into. Check `isSkeleton` (or use an entity method,
+which returns `null` instead) before writing.
+</Aside>
+
 ## Eviction
 
 `cache.evict('Launch:launch-181')` removes the entity, drops it from every list that

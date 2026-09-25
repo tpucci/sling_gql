@@ -288,6 +288,71 @@ class MutationScope implements Recorder {
   void onWrite(CacheWrite write) => client._onWrite(write);
 }
 
+/// Typed, imperative access to the cache — outside a widget build, in an
+/// `optimistic:` callback, after `await client.mutate(...)`. Get one from
+/// [SlingClient.cacheScope]; the generator adds one method per keyed type
+/// (`extension SlingCacheAccess on CacheScope<Query>`: `launch(id)`, …).
+///
+/// The accessors it hands out are the ordinary generated classes, bound to
+/// this scope:
+/// - **reads never fetch** — a field that is not cached reads as `null`
+///   (objects as skeletons, see [Accessor.isSkeleton]) and nothing is sent;
+/// - **writes** (generated setters) go through the normal write path:
+///   dependent scopes rebuild, and inside a mutation's `optimistic` callback
+///   they are journaled and undone on failure.
+///
+/// A scope records nothing that outlives it: [deps] is always empty (it
+/// never rebuilds) and misses are ignored. Scopes are cheap; take a fresh
+/// one per use.
+class CacheScope<Q extends Accessor> implements Recorder {
+  CacheScope(this.client);
+
+  final SlingClient<Q> client;
+
+  @override
+  String get operation => 'query';
+
+  @override
+  final Selection root = Selection.root('query');
+
+  @override
+  Cache get cache => client.cache;
+
+  /// Always a fresh empty set: a cache scope never rebuilds.
+  @override
+  Set<String> get deps => <String>{};
+
+  /// Reads through a cache scope never fetch.
+  @override
+  void onMiss(Selection leaf) {}
+
+  @override
+  void onWrite(CacheWrite write) => client._onWrite(write);
+
+  /// The typed query root, reading from the cache only: `cacheScope.query.me`.
+  /// Root fields that were never fetched read as skeletons — check
+  /// [Accessor.isSkeleton] before writing through one, or the write creates
+  /// a partial object the next fetch has to merge into.
+  Q get query => client.rootFactory(this);
+
+  /// The cached entity `typename:id` as a [T] (via [ctor], the generated
+  /// constructor tear-off), or `null` when it is not in the cache — never a
+  /// skeleton, and never a request. Keys are resolved with
+  /// [Normalization.lookup], so with [Normalization.none] this is always
+  /// `null`. Generated code wraps it: `cacheScope.launch('launch-181')`.
+  T? entity<T extends Accessor>(
+    String typename,
+    Object id,
+    T Function(Recorder, Selection, List<Object>) ctor,
+  ) {
+    final key = cache.normalization.lookup(typename, {
+      cache.normalization.keyField: Arg('ID', id),
+    });
+    if (key == null || !cache.hasEntity(key)) return null;
+    return ctor(this, root, [Ref(key)]);
+  }
+}
+
 /// Sends one HTTP request and returns its response. The single extension
 /// point for auth headers / token refresh, retries, timeouts and logging:
 ///
@@ -404,6 +469,17 @@ class SlingClient<Q extends Accessor> {
     _scopes.add(scope);
     return scope;
   }
+
+  /// Typed, non-fetching access to the cache (see [CacheScope]): read or
+  /// write entities and root fields outside a widget build. Each access
+  /// returns a fresh scope.
+  ///
+  /// ```dart
+  /// final cache = client.cacheScope;
+  /// cache.launch('launch-181')?.favorite = true; // generated per keyed type
+  /// final name = cache.query.me?.name; // root fields, from the cache only
+  /// ```
+  CacheScope<Q> get cacheScope => CacheScope<Q>(this);
 
   /// Imperative one-shot: runs [body] against a throwaway scope, fetches what
   /// is missing, and resolves once the cache is populated. Useful for

@@ -160,6 +160,19 @@ const slingSchema = SlingSchema<Query, Mutation>(
   mutation: Mutation.root,
 );
 
+/// Typed, non-fetching cache access for this schema's keyed types:
+/// `client.cacheScope.launch('launch-181')` returns the cached entity or
+/// `null`. See `CacheScope`.
+extension SlingCacheAccess on CacheScope<Query> {
+  Company? company(String id) => entity('Company', id, Company.new);
+  Rocket? rocket(String id) => entity('Rocket', id, Rocket.new);
+  Launchpad? launchpad(String id) => entity('Launchpad', id, Launchpad.new);
+  Astronaut? astronaut(String id) => entity('Astronaut', id, Astronaut.new);
+  Payload? payload(String id) => entity('Payload', id, Payload.new);
+  Launch? launch(String id) => entity('Launch', id, Launch.new);
+  Viewer? viewer(String id) => entity('Viewer', id, Viewer.new);
+}
+
 class PageInfo extends Accessor {
   PageInfo(super.recorder, super.selection, super.path);
 

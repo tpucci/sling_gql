@@ -44,6 +44,11 @@ class Mutation extends Accessor {
       );
 }
 
+/// What the generator emits for typed, non-fetching cache access.
+extension SlingCacheAccess on CacheScope<Query> {
+  User? user(String id) => entity('User', id, User.new);
+}
+
 /// What the generator emits so apps never name roots by hand.
 const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);
 

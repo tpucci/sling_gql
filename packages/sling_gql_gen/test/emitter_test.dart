@@ -258,6 +258,43 @@ void main() {
     );
   });
 
+  test('emits SlingCacheAccess: one entity method per keyed type', () {
+    expect(code, contains('extension SlingCacheAccess on CacheScope<Query> {'));
+    expect(code, contains("User? user(String id) => entity('User', id, User.new);"));
+    // Unkeyed types (no `id`) and the roots get no entity method.
+    expect(code, isNot(contains('PageInfo? pageInfo(String id)')));
+    expect(code, isNot(contains('Query? query(')));
+    expect(code, isNot(contains('Mutation? mutation(')));
+  });
+
+  test('SlingCacheAccess method names avoid CacheScope members and keywords', () {
+    final json = Map<String, Object?>.from(_schemaJson);
+    final schema = Map<String, Object?>.from(json['__schema'] as Map<String, Object?>);
+    Map<String, Object?> keyedType(String name) => {
+          'kind': 'OBJECT',
+          'name': name,
+          'description': null,
+          'fields': [_field('id', _nonNull(_type('SCALAR', 'Int')))],
+          'inputFields': null,
+          'enumValues': null,
+        };
+    schema['types'] = [
+      ...schema['types'] as List,
+      keyedType('Entity'),
+      keyedType('Class'),
+      keyedType('_Service'),
+    ];
+    final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
+    expect(code, contains(r"Entity? entity$(int id) => entity('Entity', id, Entity.new);"));
+    expect(code, contains(r"Class? class$(int id) => entity('Class', id, Class.new);"));
+    expect(code, contains(r"$Service? $service(int id) => entity('_Service', id, $Service.new);"));
+  });
+
+  test('no SlingCacheAccess when no type is keyed', () {
+    final unkeyed = generate(IntrospectionSchema.fromJson(_schemaJson), keyField: 'uuid');
+    expect(unkeyed, isNot(contains('SlingCacheAccess')));
+  });
+
   test('no Mutation class or slingSchema when the schema has no mutation type', () {
     final json = Map<String, Object?>.from(_schemaJson);
     final schema = Map<String, Object?>.from(json['__schema'] as Map<String, Object?>)
