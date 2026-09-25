@@ -63,6 +63,11 @@ final Map<String, Object?> _schemaJson = {
             _list(_nonNull(_type('OBJECT', 'User'))),
             args: [_arg('where', _type('INPUT_OBJECT', 'UserFilter'))],
           ),
+          _field(
+            'usersSince',
+            _list(_nonNull(_type('OBJECT', 'User'))),
+            args: [_arg('since', _nonNull(_type('SCALAR', 'Date')))],
+          ),
         ],
         'inputFields': null,
         'enumValues': null,
@@ -113,6 +118,7 @@ final Map<String, Object?> _schemaJson = {
           ),
           _field('createdAt', _type('SCALAR', 'Date')),
           _field('externalId', _type('SCALAR', 'ObjectID')),
+          _field('reminders', _list(_type('SCALAR', 'Date'))),
         ],
         'inputFields': null,
         'enumValues': null,
@@ -402,5 +408,95 @@ void main() {
         "List<User>? users({UserFilter? where}) => list('users', User.new, args: {'where': Arg('UserFilter', where?.toJson())}, keyed: true);",
       ),
     );
+  });
+
+  group('--scalar custom scalar mapping', () {
+    late String mapped;
+
+    setUpAll(() {
+      final schema = IntrospectionSchema.fromJson(_schemaJson);
+      mapped = generate(
+        schema,
+        scalars: [
+          const ScalarMapping('Date', 'DateTime'),
+          const ScalarMapping('ObjectID', 'ObjectId', converter: 'ObjectIdConverter'),
+        ],
+      );
+    });
+
+    test('mapped getter reads through scalarAs with the built-in DateTime converter', () {
+      expect(
+        mapped,
+        contains("DateTime? get createdAt => scalarAs<DateTime, String>('createdAt', DateTime.parse);"),
+      );
+    });
+
+    test('mapped setter serializes back to the wire string (nullable)', () {
+      expect(
+        mapped,
+        contains("set createdAt(DateTime? v) => write('createdAt', v?.toIso8601String());"),
+      );
+    });
+
+    test('mapped list of scalar reads through scalarListAs', () {
+      expect(
+        mapped,
+        contains("List<DateTime?>? get reminders => scalarListAs<DateTime, String>('reminders', DateTime.parse);"),
+      );
+      // Lists never get a setter (same rule as every other list field).
+      expect(mapped, isNot(contains('set reminders(')));
+    });
+
+    test('mapped argument (non-null) serializes without a null check', () {
+      expect(
+        mapped,
+        contains(
+          "List<User>? usersSince({required DateTime since}) => list('usersSince', User.new, args: {'since': Arg('Date!', since.toIso8601String())}, keyed: true);",
+        ),
+      );
+    });
+
+    test('unmapped scalars are unaffected by --scalar', () {
+      expect(mapped, contains("int? get age => scalar<int>('age');"));
+    });
+
+    test('generic converter: getter/setter call the named converter class', () {
+      expect(
+        mapped,
+        contains("ObjectId? get externalId => scalarAs<ObjectId, String>('externalId', ObjectIdConverter.parse);"),
+      );
+      expect(
+        mapped,
+        contains(
+          "set externalId(ObjectId? v) => write('externalId', (v == null ? null : ObjectIdConverter.serialize(v)));",
+        ),
+      );
+      // No longer flagged as an unknown custom scalar once mapped.
+      expect(mapped, isNot(contains('Unknown custom scalar `ObjectID`')));
+    });
+  });
+
+  group('ScalarMapping.parseFlag', () {
+    test('parses Name=DartType (built-in DateTime)', () {
+      final m = ScalarMapping.parseFlag('DateTime=DateTime');
+      expect(m.graphqlName, 'DateTime');
+      expect(m.dartType, 'DateTime');
+      expect(m.converter, isNull);
+    });
+
+    test('parses Name=DartType:converterExpr', () {
+      final m = ScalarMapping.parseFlag('Money=Decimal:MoneyConverter');
+      expect(m.graphqlName, 'Money');
+      expect(m.dartType, 'Decimal');
+      expect(m.converter, 'MoneyConverter');
+    });
+
+    test('rejects a non-DateTime type without a converter', () {
+      expect(() => ScalarMapping.parseFlag('Money=Decimal'), throwsFormatException);
+    });
+
+    test('rejects a malformed flag', () {
+      expect(() => ScalarMapping.parseFlag('DateTime'), throwsFormatException);
+    });
   });
 }

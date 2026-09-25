@@ -41,6 +41,7 @@ Flags:
 | `-H`, `--header` | no | HTTP header for `--endpoint`, repeatable: `-H "Authorization: Bearer …"`. |
 | `--out` | yes | Path of the Dart file to write. Parent directories are created as needed. |
 | `--part-of-import` | no | Overrides the `sling_gql` import. Defaults to `package:sling_gql/sling_gql.dart`. |
+| `--scalar` | no, repeatable | Custom scalar mapping: `Name=DartType[:converterExpr]`. See [Scalar mapping](#scalar-mapping) below. |
 
 The generator writes the file, then shells out to `dart format`. A
 formatting failure is logged to stderr but does not fail the run — you get
@@ -199,7 +200,40 @@ scalar, so anything it doesn't recognize falls back to `Object` and gets a
 doc comment noting it: `/// Unknown custom scalar `Foo`; read as `Object?`.`
 The three custom scalars it *does* know (`Date`, `DateTime`, `timestamptz`)
 are all ISO strings on real-world APIs it has been tested against, so they
-map to `String` like the built-in string types.
+map to `String` like the built-in string types by default.
+
+`--scalar Name=DartType[:converterExpr]` (repeatable) overrides that default
+for one scalar name, so the getter returns a richer type instead of the raw
+wire string — setters, arguments and input fields all serialize back to the
+wire form the same way:
+
+```sh
+dart run sling_gql_gen --schema graphql/schema.json --out lib/generated/schema.dart \
+  --scalar DateTime=DateTime
+```
+
+```dart title="example/lib/generated/schema.dart"
+DateTime? get date => scalarAs<DateTime, String>('date', DateTime.parse);
+set date(DateTime? v) => write('date', v?.toIso8601String());
+```
+
+Two forms:
+
+- **Built-in**: `DartType` is `DateTime` and there is no `converterExpr` —
+  reads with `DateTime.parse`, writes with `.toIso8601String()`.
+- **Generic**: a `converterExpr` names a class with static
+  `T parse(String)` and `String serialize(T)` methods, e.g.
+  `--scalar Money=Decimal:MoneyConverter` emits
+  `scalarAs<Decimal, String>('amount', MoneyConverter.parse)` for the getter
+  and `MoneyConverter.serialize(v)` for the setter/arguments. A converter is
+  required unless `DartType` is `DateTime` — the generator has no way to
+  guess how to (de)serialize an arbitrary type otherwise.
+
+Both forms assume the wire value is a JSON string, true of every custom
+scalar this generator has been tested against (ISO dates, opaque ids, big
+decimals, …). The read path goes through `Accessor.scalarAs`/`scalarListAs`
+— the same miss/skeleton/dependency-tracking semantics as every other
+scalar, just with a conversion step.
 
 ## Nullability
 

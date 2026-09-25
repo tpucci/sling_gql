@@ -243,8 +243,9 @@ class Rocket extends Accessor {
   set costPerLaunch(int? v) => write('costPerLaunch', v);
   int? get successRatePct => scalar<int>('successRatePct');
   set successRatePct(int? v) => write('successRatePct', v);
-  String? get firstFlight => scalar<String>('firstFlight');
-  set firstFlight(String? v) => write('firstFlight', v);
+  DateTime? get firstFlight =>
+      scalarAs<DateTime, String>('firstFlight', DateTime.parse);
+  set firstFlight(DateTime? v) => write('firstFlight', v?.toIso8601String());
   Dimension? get height => object('height', Dimension.new);
   Dimension? get diameter => object('diameter', Dimension.new);
   Mass? get mass => object('mass', Mass.new);
@@ -340,8 +341,8 @@ class Launch extends Accessor {
   set name(String? v) => write('name', v);
   String? get details => scalar<String>('details');
   set details(String? v) => write('details', v);
-  String? get date => scalar<String>('date');
-  set date(String? v) => write('date', v);
+  DateTime? get date => scalarAs<DateTime, String>('date', DateTime.parse);
+  set date(DateTime? v) => write('date', v?.toIso8601String());
   LaunchStatus? get status => enumValue('status', LaunchStatus.fromGraphQL);
   set status(LaunchStatus? v) => write('status', v?.graphqlName);
   bool? get upcoming => scalar<bool>('upcoming');
@@ -566,7 +567,7 @@ class ScheduleLaunchInput {
   final String? name;
   final String? rocketId;
   final String? launchpadId;
-  final String? date;
+  final DateTime? date;
   final String? details;
   final List<String>? payloadNames;
 
@@ -574,7 +575,7 @@ class ScheduleLaunchInput {
     if (name != null) 'name': name,
     if (rocketId != null) 'rocketId': rocketId,
     if (launchpadId != null) 'launchpadId': launchpadId,
-    if (date != null) 'date': date,
+    if (date != null) 'date': date?.toIso8601String(),
     if (details != null) 'details': details,
     if (payloadNames != null) 'payloadNames': payloadNames,
   };

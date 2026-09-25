@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 
+import '../date_format.dart';
 import '../generated/schema.dart';
 import '../screens/launch_screen.dart';
 import '../theme.dart';
@@ -28,7 +29,7 @@ class LaunchRow extends StatelessWidget {
           : Icon(_statusIcon(status), color: _statusColor(status)),
       title: SkeletonText(launch.name, width: 160),
       subtitle: SkeletonText(
-        date == null ? null : '${date.substring(0, 10)} · $rocketName',
+        date == null ? null : '${formatDate(date)} · $rocketName',
         width: 200,
       ),
       trailing: Row(

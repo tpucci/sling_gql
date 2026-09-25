@@ -11,8 +11,9 @@ import 'package:sling_gql/sling_gql.dart';
 //
 // type Query    { me: User!  user(id: ID!): User }
 // type User     { id: ID!  name: String!  age: Int  status: UserStatus
-//                 friends(limit: Int): [User!]! }
+//                 createdAt: DateTime  friends(limit: Int): [User!]! }
 // enum UserStatus { ACTIVE  INACTIVE }
+// scalar DateTime  -- generated with `--scalar DateTime=DateTime`
 // type Mutation { rename(id: ID!, name: String!): User!  deleteUser(id: ID!): Boolean!
 //                 setStatus(id: ID!, status: UserStatus!): User! }
 
@@ -35,6 +36,10 @@ class User extends Accessor {
   set age(int? v) => write('age', v);
   UserStatus? get status => enumValue('status', UserStatus.fromGraphQL);
   set status(UserStatus? v) => write('status', v?.graphqlName);
+  // `--scalar DateTime=DateTime`: read/written through the built-in
+  // DateTime.parse / toIso8601String converter via Accessor.scalarAs.
+  DateTime? get createdAt => scalarAs<DateTime, String>('createdAt', DateTime.parse);
+  set createdAt(DateTime? v) => write('createdAt', v?.toIso8601String());
   List<User> friends({int? limit}) =>
       list('friends', User.new, args: {'limit': Arg('Int', limit)}, keyed: true)!;
 }
@@ -193,6 +198,31 @@ query {
 
     scope.run((q) => q.me.status = UserStatus.inactive);
     expect(h.client.cache.read('query', ['me', 'status']), 'INACTIVE');
+  });
+
+  test('custom scalar (DateTime): wire ISO string mapped on read, serialized on write',
+      () async {
+    final h = Harness((q, v) => {
+          'me': {
+            '__typename': 'User',
+            'id': '1',
+            'createdAt': '2024-01-02T03:04:05.000Z',
+          },
+        });
+    final scope = h.client.createScope(onChanged: () {});
+
+    expect(scope.run((q) => q.me.createdAt), isNull);
+    expect(scope.hasMissingData, isTrue, reason: 'custom scalar read records a miss like a scalar');
+    await scope.whenSettled;
+
+    final createdAt = scope.run((q) => q.me.createdAt);
+    expect(createdAt, DateTime.parse('2024-01-02T03:04:05.000Z'));
+    expect(scope.hasMissingData, isFalse);
+    expect(h.sent.single.document, contains('createdAt'));
+
+    final written = DateTime.utc(2025, 6, 7, 8, 9, 10);
+    scope.run((q) => q.me.createdAt = written);
+    expect(h.client.cache.read('query', ['me', 'createdAt']), written.toIso8601String());
   });
 
   test('enum arguments are sent as their wire name; unknown throws', () async {

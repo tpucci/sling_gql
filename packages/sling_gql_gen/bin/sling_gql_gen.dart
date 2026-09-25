@@ -22,6 +22,14 @@ Future<void> main(List<String> arguments) async {
       help: 'Field that identifies an object for cache normalization. '
           'Object types having it are stored once as `__typename:<key>`.',
     )
+    ..addMultiOption(
+      'scalar',
+      help: 'Custom scalar mapping, repeatable: Name=DartType[:converterExpr]. '
+          'E.g. "DateTime=DateTime" uses the built-in DateTime.parse/'
+          'toIso8601String converter; "Money=Decimal:MoneyConverter" calls '
+          'MoneyConverter.parse/MoneyConverter.serialize. A converter is '
+          'required unless DartType is DateTime.',
+    )
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 
   final ArgResults results;
@@ -45,6 +53,15 @@ Future<void> main(List<String> arguments) async {
   final outPath = results['out'] as String;
   final importPath = results['part-of-import'] as String? ?? 'package:sling_gql/sling_gql.dart';
   final keyField = results['key-field'] as String;
+
+  final List<ScalarMapping> scalars;
+  try {
+    scalars = (results['scalar'] as List<String>).map(ScalarMapping.parseFlag).toList();
+  } on FormatException catch (e) {
+    stderr.writeln(e.message);
+    exitCode = 64;
+    return;
+  }
 
   if ((schemaPath == null) == (endpoint == null)) {
     stderr.writeln('Pass exactly one of --schema or --endpoint.');
@@ -89,7 +106,7 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln('Introspected $endpoint');
   }
   final schema = IntrospectionSchema.fromJson(json);
-  final code = generate(schema, importPath: importPath, keyField: keyField);
+  final code = generate(schema, importPath: importPath, keyField: keyField, scalars: scalars);
 
   final outFile = File(outPath);
   await outFile.parent.create(recursive: true);

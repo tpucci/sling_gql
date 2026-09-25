@@ -54,13 +54,18 @@ const String _headerComment = r'''
 /// the key field and which returns a keyed object (`launch(id: ID!): Launch`)
 /// is emitted with `lookup: 'Launch'` so it can be served from the entity
 /// cache without a request.
+///
+/// [scalars] overrides how specific custom scalars are read/written (see
+/// `--scalar` / [ScalarMapping]); every other scalar keeps the
+/// [scalarDartType] default.
 String generate(
   IntrospectionSchema schema, {
   String importPath = 'package:sling_gql/sling_gql.dart',
   String keyField = 'id',
+  Iterable<ScalarMapping> scalars = const [],
 }) {
   final typesByName = schema.typesByName;
-  final ctx = _EmitContext(typesByName, keyField);
+  final ctx = _EmitContext(typesByName, keyField, ScalarRegistry(scalars));
   // Subscriptions are not supported yet; the Mutation root is emitted like
   // Query, with a `.root` constructor and a `client.mutate` extension.
   final skipRootNames = {
@@ -124,7 +129,7 @@ String generate(
 
   for (final t in inputTypes) {
     out.writeln();
-    _emitInputClass(out, t);
+    _emitInputClass(out, t, ctx.registry);
   }
 
   return out.toString();
@@ -149,10 +154,11 @@ void _emitDocAndDeprecation(
 
 /// Schema-wide facts the field emitter needs.
 class _EmitContext {
-  _EmitContext(this.typesByName, this.keyField);
+  _EmitContext(this.typesByName, this.keyField, this.registry);
 
   final Map<String, GqlType> typesByName;
   final String keyField;
+  final ScalarRegistry registry;
 
   /// True when [typeName] is an object type with a scalar [keyField].
   bool isKeyed(String typeName) {
@@ -253,8 +259,9 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
           ? ', keyed: true'
           : '';
 
+  final scalarMapping = leaf.kind == 'SCALAR' ? ctx.registry[leaf.name!] : null;
   final elementDartType =
-      leaf.kind == 'SCALAR' ? scalarDartType(leaf.name!) : sanitizeTypeName(leaf.name!);
+      leaf.kind == 'SCALAR' ? ctx.registry.dartType(leaf.name!) : sanitizeTypeName(leaf.name!);
 
   // A field whose sanitized Dart name is spelled exactly like the Dart
   // class it returns (common with Hasura's lowercase table types, e.g. a
@@ -271,23 +278,33 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
     isDeprecated: field.isDeprecated,
     deprecationReason: field.deprecationReason,
   );
-  if (leaf.kind == 'SCALAR' && !isKnownScalar(leaf.name!)) {
+  if (leaf.kind == 'SCALAR' && !ctx.registry.isKnown(leaf.name!)) {
     out.writeln('  /// Unknown custom scalar `${leaf.name}`; read as `Object?`.');
   }
 
   final hasArgs = field.args.isNotEmpty;
   final key = dartStringLiteral(field.name);
 
-  // Enums are cached as their wire `String` and mapped on read; the setter
-  // writes the wire value back.
+  // Enums are cached as their wire `String` and mapped on read; a `--scalar`
+  // mapped scalar (e.g. `DateTime`) goes through the same conversion path
+  // (`Accessor.scalarAs`/`scalarListAs`) with its own parse/serialize; the
+  // setter writes the wire value back either way.
   final isEnum = leaf.kind == 'ENUM';
   final scalarRead = isEnum
       ? 'enumValue($key, $elementDartType.fromGraphQL'
-      : 'scalar<$elementDartType>($key';
+      : scalarMapping != null
+          ? 'scalarAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
+          : 'scalar<$elementDartType>($key';
   final scalarListRead = isEnum
       ? 'enumList($key, $elementDartType.fromGraphQL'
-      : 'scalarList<$elementDartType>($key';
-  final writeValue = isEnum ? 'v?.graphqlName' : 'v';
+      : scalarMapping != null
+          ? 'scalarListAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
+          : 'scalarList<$elementDartType>($key';
+  final writeValue = isEnum
+      ? 'v?.graphqlName'
+      : scalarMapping != null
+          ? scalarMapping.serializeCall('v', nonNull: false)
+          : 'v';
 
   if (!hasArgs) {
     if (!isList && isScalarLeaf) {
@@ -309,8 +326,8 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
     return;
   }
 
-  final params = _buildParamList(field.args);
-  final argsMap = _buildArgsMap(field.args);
+  final params = _buildParamList(field.args, ctx.registry);
+  final argsMap = _buildArgsMap(field.args, ctx.registry);
   if (!isList && isScalarLeaf) {
     out.writeln(
       "  $elementDartType? $effectiveFieldName($params) => $scalarRead, args: $argsMap);",
@@ -331,10 +348,10 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
 }
 
 /// `{required String id, LaunchFind? find, int? limit}`
-String _buildParamList(List<GqlInputValue> args) {
+String _buildParamList(List<GqlInputValue> args, ScalarRegistry registry) {
   final parts = <String>[];
   for (final a in args) {
-    final resolved = resolveArgDartType(a.type);
+    final resolved = resolveArgDartType(a.type, scalars: registry);
     final dartName = sanitizeIdentifier(a.name);
     final required = resolved.nonNull && a.defaultValue == null;
     if (required) {
@@ -347,13 +364,13 @@ String _buildParamList(List<GqlInputValue> args) {
 }
 
 /// `{'id': Arg('ID!', id), 'find': Arg('LaunchFind', find?.toJson())}`
-String _buildArgsMap(List<GqlInputValue> args) {
+String _buildArgsMap(List<GqlInputValue> args, ScalarRegistry registry) {
   final entries = <String>[];
   for (final a in args) {
-    final resolved = resolveArgDartType(a.type);
+    final resolved = resolveArgDartType(a.type, scalars: registry);
     final required = resolved.nonNull && a.defaultValue == null;
     final dartName = sanitizeIdentifier(a.name);
-    final valueExpr = argValueExpression(dartName, a.type, nonNull: required);
+    final valueExpr = argValueExpression(dartName, a.type, nonNull: required, scalars: registry);
     entries.add("'${a.name}': Arg('${a.type.toGraphQLLiteral()}', $valueExpr)");
   }
   return '{${entries.join(', ')}}';
@@ -409,7 +426,7 @@ void _emitEnum(StringBuffer out, GqlType type) {
     ..writeln('}');
 }
 
-void _emitInputClass(StringBuffer out, GqlType type) {
+void _emitInputClass(StringBuffer out, GqlType type, ScalarRegistry registry) {
   final className = sanitizeTypeName(type.name);
   _emitDocAndDeprecation(out, indent: '', description: type.description);
   out.writeln('class $className {');
@@ -419,7 +436,7 @@ void _emitInputClass(StringBuffer out, GqlType type) {
   out.writeln();
 
   for (final f in type.inputFields) {
-    final resolved = resolveArgDartType(f.type);
+    final resolved = resolveArgDartType(f.type, scalars: registry);
     _emitDocAndDeprecation(out, indent: '  ', description: f.description);
     out.writeln('  final ${resolved.dartType}? ${sanitizeIdentifier(f.name)};');
   }
@@ -428,7 +445,7 @@ void _emitInputClass(StringBuffer out, GqlType type) {
   out.writeln('  Map<String, Object?> toJson() => {');
   for (final f in type.inputFields) {
     final dartName = sanitizeIdentifier(f.name);
-    final valueExpr = argValueExpression(dartName, f.type, nonNull: false);
+    final valueExpr = argValueExpression(dartName, f.type, nonNull: false, scalars: registry);
     out.writeln("    if ($dartName != null) '${f.name}': $valueExpr,");
   }
   out.writeln('  };');

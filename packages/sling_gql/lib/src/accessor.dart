@@ -101,19 +101,31 @@ abstract class Accessor {
     return (value as List).map(_coerce<T>).toList();
   }
 
-  /// Reads an enum field: the cached wire `String` mapped through [parse]
-  /// (the generated `fromGraphQL`). Same miss/skeleton semantics as [scalar].
-  T? enumValue<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) {
-    final raw = scalar<String>(field, args: args);
+  /// Reads a scalar field whose wire form (type [W], read via [scalar] —
+  /// usually `String`) is converted to a richer Dart type [T] by [parse].
+  /// Backs both [enumValue] and a generator `--scalar` mapping (e.g.
+  /// `DateTime`). Same miss/skeleton semantics as [scalar].
+  T? scalarAs<T, W>(String field, T Function(W) parse, {Map<String, Arg>? args}) {
+    final raw = scalar<W>(field, args: args);
     return raw == null ? null : parse(raw);
   }
 
-  /// Reads a list of enums, mapping each wire `String` through [parse].
-  /// Same miss/skeleton semantics as [scalarList].
-  List<T?>? enumList<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) {
-    final raw = scalarList<String>(field, args: args);
+  /// Reads a list of such values (see [scalarAs]). Same miss/skeleton
+  /// semantics as [scalarList].
+  List<T?>? scalarListAs<T, W>(String field, T Function(W) parse, {Map<String, Arg>? args}) {
+    final raw = scalarList<W>(field, args: args);
     return raw?.map((e) => e == null ? null : parse(e)).toList();
   }
+
+  /// Reads an enum field: the cached wire `String` mapped through [parse]
+  /// (the generated `fromGraphQL`). Same miss/skeleton semantics as [scalar].
+  T? enumValue<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) =>
+      scalarAs<T, String>(field, parse, args: args);
+
+  /// Reads a list of enums, mapping each wire `String` through [parse].
+  /// Same miss/skeleton semantics as [scalarList].
+  List<T?>? enumList<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) =>
+      scalarListAs<T, String>(field, parse, args: args);
 
   /// Reads an object field. Returns a skeleton accessor when not cached,
   /// `null` only when the server explicitly returned `null`.

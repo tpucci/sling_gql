@@ -29,6 +29,14 @@ Flags:
   are created as needed.
 - `--part-of-import` (optional): overrides the `sling_gql` import in the
   generated file. Defaults to `package:sling_gql/sling_gql.dart`.
+- `--scalar` (optional, repeatable): custom scalar mapping,
+  `Name=DartType[:converterExpr]`. `--scalar DateTime=DateTime` uses the
+  built-in `DateTime.parse`/`.toIso8601String()` converter; a `DartType`
+  other than `DateTime` needs a converter, e.g.
+  `--scalar Money=Decimal:MoneyConverter` calls
+  `MoneyConverter.parse`/`MoneyConverter.serialize` (a class with those two
+  static methods you provide). Scalars without a `--scalar` flag keep the
+  default in the table below.
 
 ## What it generates
 

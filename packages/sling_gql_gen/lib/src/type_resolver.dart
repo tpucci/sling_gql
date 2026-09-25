@@ -10,19 +10,23 @@ import 'type_ref.dart';
 /// The outermost `NON_NULL` wrapper is reported via [ResolvedDartType.nonNull]
 /// rather than baked into the type string, so callers can choose between
 /// `required T name` and `T? name`.
-ResolvedDartType resolveArgDartType(TypeRef ref) {
+///
+/// [scalars] resolves a `SCALAR` leaf's Dart type; defaults to
+/// [ScalarRegistry.empty] (every scalar uses [scalarDartType]).
+ResolvedDartType resolveArgDartType(TypeRef ref, {ScalarRegistry? scalars}) {
+  final registry = scalars ?? ScalarRegistry.empty;
   if (ref.kind == 'NON_NULL') {
-    final inner = resolveArgDartType(ref.ofType!);
+    final inner = resolveArgDartType(ref.ofType!, scalars: registry);
     return ResolvedDartType(inner.dartType, true);
   }
   if (ref.kind == 'LIST') {
-    final inner = resolveArgDartType(ref.ofType!);
+    final inner = resolveArgDartType(ref.ofType!, scalars: registry);
     final elementType = inner.nonNull ? inner.dartType : '${inner.dartType}?';
     return ResolvedDartType('List<$elementType>', false);
   }
   switch (ref.kind) {
     case 'SCALAR':
-      return ResolvedDartType(scalarDartType(ref.name!), false);
+      return ResolvedDartType(registry.dartType(ref.name!), false);
     case 'ENUM':
     case 'INPUT_OBJECT':
     case 'OBJECT':
@@ -36,32 +40,50 @@ ResolvedDartType resolveArgDartType(TypeRef ref) {
 
 /// Builds the Dart expression that serializes [dartExpr] (a value of the
 /// resolved Dart type for [ref]) for use as an `Arg` value / `toJson` entry:
-/// input objects call `.toJson()`, enums call `.toGraphQL()` (both
-/// recursively for lists), everything else passes through unchanged.
+/// input objects call `.toJson()`, enums call `.toGraphQL()`, a `--scalar`
+/// mapped scalar goes through its converter (both recursively for lists),
+/// everything else passes through unchanged.
 ///
 /// [nonNull] must match the `nonNull` used to decide whether [dartExpr]
-/// itself can be null (i.e. whether `?.` is needed to reach `.toJson()`).
-String argValueExpression(String dartExpr, TypeRef ref, {required bool nonNull}) {
+/// itself can be null (i.e. whether `?.` is needed to reach the serializer).
+String argValueExpression(
+  String dartExpr,
+  TypeRef ref, {
+  required bool nonNull,
+  ScalarRegistry? scalars,
+}) {
+  final registry = scalars ?? ScalarRegistry.empty;
   final unwrapped = ref.withoutTopNonNull;
   if (unwrapped.kind == 'LIST') {
     final elementRef = unwrapped.ofType!;
-    final serializer = _serializerCall(elementRef.named.kind);
-    if (serializer == null) return dartExpr;
+    final wire = _wireExpression('e', elementRef.named, nonNull: elementRef.isNonNull, registry: registry);
+    if (wire == null) return dartExpr;
     final listAccessor = nonNull ? '.' : '?.';
-    final elementAccessor = elementRef.isNonNull ? '.' : '?.';
-    return '$dartExpr$listAccessor'
-        'map((e) => e$elementAccessor$serializer).toList()';
+    return '$dartExpr${listAccessor}map((e) => $wire).toList()';
   }
-  final serializer = _serializerCall(unwrapped.named.kind);
-  if (serializer == null) return dartExpr;
-  final accessor = nonNull ? '.' : '?.';
-  return '$dartExpr$accessor$serializer';
+  final wire = _wireExpression(dartExpr, unwrapped.named, nonNull: nonNull, registry: registry);
+  return wire ?? dartExpr;
 }
 
-/// The method that turns a value of the given named [kind] into its JSON
-/// form, or `null` when the value passes through unchanged.
-String? _serializerCall(String kind) => switch (kind) {
-      'INPUT_OBJECT' => 'toJson()',
-      'ENUM' => 'toGraphQL()',
-      _ => null,
-    };
+/// The wire-form expression for a single value [expr] of the named type
+/// [namedRef], or `null` when it passes through unchanged (built-in
+/// scalars, unmapped custom scalars, objects/interfaces/unions).
+String? _wireExpression(
+  String expr,
+  TypeRef namedRef, {
+  required bool nonNull,
+  required ScalarRegistry registry,
+}) {
+  switch (namedRef.kind) {
+    case 'INPUT_OBJECT':
+      return nonNull ? '$expr.toJson()' : '$expr?.toJson()';
+    case 'ENUM':
+      return nonNull ? '$expr.toGraphQL()' : '$expr?.toGraphQL()';
+    case 'SCALAR':
+      final mapping = registry[namedRef.name!];
+      if (mapping == null) return null;
+      return mapping.serializeCall(expr, nonNull: nonNull);
+    default:
+      return null;
+  }
+}

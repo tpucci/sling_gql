@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:sling_gql/sling_gql.dart';
 
+import '../date_format.dart';
 import '../generated/schema.dart';
 import '../network_log.dart';
 import '../theme.dart';
@@ -99,7 +100,10 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 ),
                 const SizedBox(height: 4),
                 SkeletonText(
-                  launch.date?.let((d) => 'Flight #${launch.flightNumber} · $d · ${launch.status?.graphqlName}'),
+                  launch.date?.let(
+                    (d) => 'Flight #${launch.flightNumber} · ${formatDate(d)} · '
+                        '${launch.status?.graphqlName}',
+                  ),
                   width: 260,
                   style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
                 ),
