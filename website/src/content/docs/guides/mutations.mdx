@@ -124,3 +124,46 @@ The detail screen's heart is a `MutationBuilder`; the list row reads `launch.fav
 depends on `Launch:<id>.favorite`. `example/test/app_test.dart` asserts, against the real
 mock server: one request for the mutation, the optimistic state before the response, the
 confirmed state after, and the list row updated on the way back with **no** extra request.
+
+## `refetchQueries`
+
+The [Updating lists](#updating-lists) section above covers the two cases a normalized cache
+cannot fix by itself — a new entity nothing references yet, or one that should disappear from
+every list. `refetchQueries` is the simple, always-available way to handle both without a
+write policy:
+
+```dart
+await client.mutateWith(
+  Mutation.root,
+  (m) => m.scheduleLaunch(name: name)?.id,
+  refetchQueries: ['launches'],
+);
+```
+
+Names are **root query field names** — `'me'`, `'launches'` — not aliases, so arguments and
+aliasing do not matter: `refetchQueries: ['launches']` matches every live scope that
+selected a `launches` field, however it was paginated or filtered. After the mutation's
+response has been written and every scope notified as usual, each matching scope is
+[`refetch()`](/sling_gql/guides/loading-and-errors/#querystate)ed.
+
+The refetches are **fire-and-forget**: `mutateWith`/`mutate` resolves as soon as the
+mutation itself lands, it does not wait for the refetches too. Their errors surface the
+normal way, on the affected scopes' `state.error` — not on the mutation's `catch`/`state.error`.
+If the mutation itself fails, no refetch happens at all.
+
+`MutationBuilder`'s `mutate` takes the same parameter:
+
+```dart
+mutate(
+  (m) => m.scheduleLaunch(name: name)?.id,
+  refetchQueries: ['launches'],
+);
+```
+
+<Aside type="tip" title="refetchQueries vs. reading more fields">
+If the mutation's response already contains everything the list needs (an existing entity
+changing a field it already shows), you do not need `refetchQueries` at all — normalization
+already updates every copy, as in the favoriting example above. Reach for `refetchQueries`
+specifically for creates and deletes, where no amount of reading the response teaches an
+*existing* list scope about a row it never selected.
+</Aside>

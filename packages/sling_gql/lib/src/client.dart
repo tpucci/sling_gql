@@ -381,10 +381,21 @@ class SlingClient<Q extends Accessor> {
   /// before the request; the writes it makes through generated setters are
   /// journaled and undone if the mutation fails. Generated code exposes this
   /// as `client.mutate(...)` with the schema's `Mutation` type bound.
+  ///
+  /// [refetchQueries] names root **query** field names (`'me'`, `'launches'`
+  /// — not aliases, so arguments and aliasing do not matter) to refetch once
+  /// the mutation has succeeded and written its response: every live
+  /// [QueryScope] whose last run selected a child with that field name is
+  /// [QueryScope.refetch]ed. This is the simple alternative to a write policy
+  /// (see `guides/mutations` § refetchQueries) for the common "a list needs a
+  /// new/removed row" case. Refetches are fire-and-forget — the returned
+  /// future completes once the mutation itself lands, not once the refetches
+  /// do; their errors surface on the affected scopes' `state.error` as usual.
   Future<T> mutateWith<M extends Accessor, T>(
     RootFactory<M> root,
     T Function(M mutation) body, {
     void Function()? optimistic,
+    Iterable<String>? refetchQueries,
   }) async {
     final journal = <CacheWrite>[];
     if (optimistic != null) {
@@ -414,6 +425,15 @@ class SlingClient<Q extends Accessor> {
       throw error;
     }
     _notify(touched);
+
+    if (refetchQueries != null && refetchQueries.isNotEmpty) {
+      final names = refetchQueries.toSet();
+      for (final s in _scopes.toList()) {
+        if (s.root.children.any((c) => names.contains(c.field))) {
+          s.refetch(); // fire-and-forget; errors surface on the scope as usual
+        }
+      }
+    }
 
     final result = body(root(scope));
     // The payload lives on in the entities it referenced; the root fields

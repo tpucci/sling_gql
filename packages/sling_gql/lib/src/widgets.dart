@@ -145,6 +145,7 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
 typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
   T Function(M mutation) body, {
   void Function()? optimistic,
+  Iterable<String>? refetchQueries,
 });
 
 /// Status of the last mutation run by a [MutationBuilder].
@@ -197,14 +198,23 @@ class _MutationBuilderState<M extends Accessor> extends State<MutationBuilder<M>
   bool _loading = false;
   Object? _error;
 
-  Future<T?> _mutate<T>(T Function(M mutation) body, {void Function()? optimistic}) async {
+  Future<T?> _mutate<T>(
+    T Function(M mutation) body, {
+    void Function()? optimistic,
+    Iterable<String>? refetchQueries,
+  }) async {
     final client = SlingScope.clientOf(context);
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      return await client.mutateWith(widget.root, body, optimistic: optimistic);
+      return await client.mutateWith(
+        widget.root,
+        body,
+        optimistic: optimistic,
+        refetchQueries: refetchQueries,
+      );
     } catch (e) {
       _error = e;
       return null;
