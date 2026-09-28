@@ -1,0 +1,69 @@
+name: Publish to pub.dev
+
+# Pushing a `vX.Y.Z` tag publishes both packages (they are versioned in
+# lockstep). pub.dev "Automated publishing" is enabled for tpucci/sling_gql
+# with tag pattern `v{{version}}`; auth is the GitHub OIDC token, no secrets.
+#
+# Release flow:
+#   melos version   # or bump both pubspec.yaml + CHANGELOG.md by hand
+#   git push && git push --tags
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  id-token: write # pub.dev OIDC
+  contents: read
+
+jobs:
+  verify:
+    name: tag matches package versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for p in packages/sling_gql packages/sling_gql_gen; do
+            v=$(awk '/^version:/ {print $2}' "$p/pubspec.yaml")
+            if [ "$v" != "$tag" ]; then
+              echo "::error::$p is $v but tag is $tag"; exit 1
+            fi
+          done
+
+  publish:
+    needs: verify
+    strategy:
+      # Runtime first: the generator's docs point at it.
+      max-parallel: 1
+      matrix:
+        package: [sling_gql, sling_gql_gen]
+    name: publish ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned Flutter version
+        id: versions
+        run: |
+          echo "flutter=$(awk '/^flutter/ {print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+
+      # Requests the pub.dev OIDC token and stores it in the shared pub token
+      # store (~/.config/dart/pub-tokens.json). Runs *before* flutter-action so
+      # Flutter's `dart` ends up first on PATH — sling_gql depends on the
+      # Flutter SDK and cannot be published with a standalone Dart.
+      - uses: dart-lang/setup-dart@v1
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+          channel: stable
+          cache: true
+
+      - name: Resolve workspace
+        run: flutter pub get
+
+      - name: Publish
+        working-directory: packages/${{ matrix.package }}
+        run: dart pub publish --force

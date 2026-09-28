@@ -74,6 +74,12 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
    It deploys to GitHub Pages on every push to `main` that touches `website/`.
 
+7. **CI and releases.** Every push and pull request runs the four gates above
+   (`.github/workflows/ci.yml`), plus analyze, format and a check that the example's
+   generated file is up to date. Pushing a `vX.Y.Z` tag publishes `sling_gql` and
+   `sling_gql_gen` to pub.dev (`publish.yml`, pub.dev automated publishing; both
+   `pubspec.yaml` versions must equal the tag).
+
 </Steps>
 
 ## Conventions

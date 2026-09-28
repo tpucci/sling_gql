@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Gates 1–3: runtime, generator, example (against the mock API), plus
+  # analyze + format. Runs on Linux; the example's widget tests do not need
+  # an iOS toolchain.
+  dart:
+    name: analyze · format · runtime · generator · example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          echo "flutter=$(awk '/^flutter/ {print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: mock-api/package-lock.json
+
+      - name: Bootstrap workspace
+        run: |
+          dart pub global activate melos
+          melos bootstrap
+
+      - name: Analyze
+        run: melos run analyze --no-select
+
+      - name: Format
+        run: melos run format --no-select
+
+      - name: Runtime tests
+        run: melos run test:runtime --no-select
+
+      - name: Generator tests
+        run: melos run test:gen --no-select
+
+      - name: Generated code is up to date
+        run: |
+          melos run generate --no-select
+          git diff --exit-code -- example/lib/generated/schema.dart
+
+      - name: Example tests (mock API)
+        run: melos run test:example --no-select
+
+  # Gate 4: the docs site builds. Deploy stays in website.yml.
+  website:
+    name: website build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+        working-directory: website
+      - run: npm run build
+        working-directory: website

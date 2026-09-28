@@ -34,9 +34,15 @@ on the code.
 - **Publishing.** `sling_gql` and `sling_gql_gen` are published to pub.dev in
   lockstep (same version, MIT). Each has its own `README.md`, `CHANGELOG.md`,
   `LICENSE` (copy of the root one). Before a release: bump both versions +
-  changelogs (`melos version` or by hand), `melos run publish:dry-run`, then
-  `melos publish --no-dry-run`. Code must be `dart format`ed (pub.dev scores
+  changelogs (`melos version` or by hand), `melos run publish:dry-run`, commit,
+  then push a `vX.Y.Z` tag: `.github/workflows/publish.yml` checks both
+  pubspec versions equal the tag and publishes via pub.dev automated
+  publishing (OIDC, no secrets). Code must be `dart format`ed (pub.dev scores
   it; `melos run format` checks).
+- **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
+  runtime + generator tests, a check that `melos run generate` leaves
+  `example/lib/generated/schema.dart` unchanged, example tests against the
+  mock API, website build. `website.yml` deploys the docs on push to `main`.
 - The example talks to `http://localhost:4000/graphql` (iOS simulator shares
   the host network). Its introspection is snapshotted in
   `example/graphql/schema.json`.
