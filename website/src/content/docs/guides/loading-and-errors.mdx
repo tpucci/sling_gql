@@ -66,8 +66,10 @@ QueryBuilder<Query>(
     state.isLoading;       // a request containing this widget's selections is in flight
     state.hasMissingData;  // the last build read at least one field not in cache
     state.isSkeleton;      // hasMissingData && isLoading: gate a whole-widget skeleton on this
+    state.isStale;         // rendering data older than maxAge while it is refetched (see fetch policies)
     state.error;           // last error from a request this widget took part in (sticky, see below)
     state.refetch();       // Future<void>: refetch everything selected in the last build
+    state.revalidate();    // refetch only if something read is older than maxAge
   },
 )
 ```
@@ -100,8 +102,9 @@ if (state.error != null) {
 
 Two behaviours are worth knowing:
 
-- **Errors are sticky.** Until you call `refetch()`, a scope that still misses data will
-  *not* schedule a new request for the same document. Without this, a failing query would
+- **Errors are sticky.** Until you call `refetch()`, a scope that still misses data (or
+  is stale, or failed a `refetch()`/background refresh — the cached data stays on screen
+  in those cases) will *not* schedule a new request for the same document. Without this, a failing query would
   loop: build → miss → fetch → fail → rebuild → miss → … In practice this means a screen
   that failed once stays in its error state until the user does something — bind
   `state.refetch` to a retry button or, more commonly, to pull-to-refresh

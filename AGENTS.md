@@ -124,7 +124,17 @@ Design decisions worth knowing before changing things:
 - **Partial GraphQL errors** are pruned from `data` before caching (a `null`
   at an errored path is not a real null) and surfaced as the scope's error.
 - **Errors are sticky per scope** until `refetch()`; otherwise a failing query
-  would loop build → miss → fetch → fail → rebuild.
+  would loop build → miss → fetch → fail → rebuild. A run served entirely from
+  fresh cache clears a *miss-driven* error; an error from a background fetch
+  (`refetch()`, `cacheAndNetwork`, stale revalidation) stays until the next
+  `refetch()`/`retryFailedAfter` since cached data is still on screen.
+- **Fetch policies live on the scope.** `FetchPolicy.networkOnly` swaps the
+  scope's `cache` for a `_BypassCache` (every read `missing`) until its first
+  successful response; `cacheAndNetwork` enqueues the whole `_root` on the
+  first `run()`; `maxAge` compares each dep key's `Cache.fetchedAt` (stamped
+  by `writeResponse(at:)` for every key a response writes, changed or not)
+  and enqueues the whole selection when any is stale. All three go through
+  `_errorBlocksFetch()` so a failing server never loops.
 - **Notification is per entity field** (`Launch:launch-181.name`). Inline
   objects and lists notify at the granularity of the entity field that
   contains them.

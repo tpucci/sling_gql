@@ -206,9 +206,9 @@ in this package. What a persistence layer needs is exposed and deliberately smal
 
 ## Not in the PoC
 
-- **Expiry / stale-while-revalidate.** Dart has `WeakReference` and `Finalizer`, so stale
-  entries can be held weakly and evicted by the GC rather than by timers alone.
-- **Cache policies** (`cache-first`, `no-cache`…). Today: cache-first, with `refetch()` as
-  the escape hatch.
+- **Eviction of stale entries.** `maxAge` revalidates stale data (see
+  [Fetch policies & freshness](/sling_gql/guides/fetch-policies/)) but never drops it;
+  Dart has `WeakReference` and `Finalizer`, so stale entries could be held weakly and
+  evicted by the GC rather than by timers.
 - **Type policies** beyond identity (custom merge functions per field, pagination merging
   à la Apollo `relayStylePagination`).

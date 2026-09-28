@@ -46,10 +46,13 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    list-index granularity for inline lists, and skipping rebuilds when a written value is
    equal to the cached one inside inline objects.
 
-6. **Cache expiry and SWR**
+6. **Cache expiry and SWR** — done
 
-   `maxAge`, `staleWhileRevalidate`, `WeakReference`-held stale entries, soft `refetch()`
-   that is a no-op on fresh data.
+   `FetchPolicy` (`cacheFirst` / `cacheAndNetwork` / `networkOnly`) per widget or
+   client-wide, `maxAge` stale-while-revalidate on per-field fetch stamps, `state.isStale`,
+   soft `state.revalidate()` — see
+   [Fetch policies & freshness](/sling_gql/guides/fetch-policies/). Left: `WeakReference`-held
+   stale entries as an eviction mechanism.
 
 7. **Developer experience** — in progress
 

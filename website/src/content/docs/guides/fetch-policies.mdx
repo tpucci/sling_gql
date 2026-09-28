@@ -1,0 +1,102 @@
+---
+title: Fetch policies & freshness
+description: cache-first, cache-and-network, network-only per widget, and maxAge for stale-while-revalidate.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+By default sling_gql is **cache-first**: a field that is in the cache is rendered and never
+asked for again; only what is missing is fetched. That is the right default for a client
+whose cache is normalized — the list already fetched the launch's name, the detail screen
+should not fetch it again — but not every screen wants data that could be hours old. Two
+knobs change that, per widget or client-wide, and they compose.
+
+## `fetchPolicy`
+
+```dart
+QueryBuilder<Query>(
+  fetchPolicy: FetchPolicy.cacheAndNetwork,
+  builder: (context, query, state) { ... },
+)
+```
+
+| Policy | First build | While the request is in flight | After it lands |
+| --- | --- | --- | --- |
+| `cacheFirst` (default) | reads the cache, fetches what is missing | skeletons for the missing fields | rebuilds with data |
+| `cacheAndNetwork` | reads the cache **and** refetches the whole selection | cached data on screen, `state.isLoading` true | rebuilds if anything changed |
+| `networkOnly` | ignores the cache: everything selected is fetched | skeletons (`state.isSkeleton`) even for cached fields | reads the cache from then on |
+
+`cacheAndNetwork` refetches **once**, when the widget's scope is created (the screen
+opens). Later rebuilds — a parent `setState`, a tap — read the cache like `cacheFirst`;
+otherwise every rebuild would be a request. It is the policy for "show what we have,
+refresh it": a detail screen opened from a list, a dashboard.
+
+`networkOnly` is for screens that must not show cached values first — a payment
+confirmation, a "current status" page. The response is written to the shared cache like any
+other, so the rest of the app benefits; only this scope refuses to read stale values until
+its own request has succeeded. If that request fails, the scope keeps its skeletons and
+`state.error` (it does not fall back to the cache).
+
+`SlingClient(fetchPolicy:)` sets the default for every scope; `client.resolve(body,
+fetchPolicy: FetchPolicy.networkOnly)` is the imperative "fetch this now, whatever the cache
+has".
+
+## `maxAge` — stale-while-revalidate
+
+```dart
+SlingClient<Query>(
+  endpoint: ...,
+  rootFactory: Query.root,
+  maxAge: const Duration(minutes: 5), // client-wide default
+);
+
+QueryBuilder<Query>(
+  maxAge: const Duration(seconds: 30), // this widget only
+  builder: (context, query, state) {
+    // state.isStale: rendering data older than maxAge while it is refetched
+  },
+)
+```
+
+Every response stamps the fields it writes with the time it landed — per dependency key,
+`Launch:launch-181.name`, the same granularity as rebuild notifications. When a build reads
+a field older than `maxAge` (or one that was never fetched from the server: a hydrated
+snapshot, an optimistic write), the widget **keeps rendering the cached value**,
+`state.isStale` turns true, and the whole selection is refetched in the background. When the
+response lands the widget rebuilds with fresh data and `isStale` goes back to false.
+
+Freshness is a property of the data, not of the widget: if the list refreshed
+`Launch:launch-181.name` a second ago, the detail screen opening now finds it fresh even
+though it never fetched anything itself. And because it is per field, a screen that reads
+one stale field alongside fresh ones revalidates its whole selection in one request.
+
+`maxAge` applies on top of any `fetchPolicy`. Without it (the default), cached data never
+expires: only `refetch()` gets fresh data.
+
+<Aside type="note">
+Stamps live in memory with the cache; `cache.snapshot` does not carry them. Data hydrated
+through `Cache(initial:)` therefore reads as stale under any `maxAge`, which is exactly what
+a persisted cache wants: render instantly, refresh in the background.
+</Aside>
+
+## `revalidate()` — the soft refetch
+
+`state.refetch()` always sends a request. `state.revalidate()` sends one only if something
+this widget read is older than its `maxAge`, and completes immediately otherwise — the
+right thing for "the app came back to the foreground" or "this tab is visible again", where
+a hard refetch on every event would be wasteful. Without a `maxAge` it is exactly
+`refetch()`.
+
+```dart
+// e.g. in an AppLifecycleListener.onResume
+state.revalidate();
+```
+
+## Errors
+
+A background refresh that fails — a `cacheAndNetwork` mount, a stale revalidation, a
+`refetch()` — keeps the cached data on screen and sets `state.error`, which is
+[sticky](/sling_gql/guides/loading-and-errors/#errors) like any other: rebuilds do not
+retry it, so a failing server cannot loop, and `refetch()` (or
+`SlingClient(retryFailedAfter:)`) clears it. `state.isStale` stays true meanwhile — the
+data is still old.

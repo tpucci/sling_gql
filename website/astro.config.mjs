@@ -38,6 +38,7 @@ export default defineConfig({
             { label: 'Batching & waterfalls', slug: 'guides/batching-and-waterfalls' },
             { label: 'Pagination', slug: 'guides/pagination' },
             { label: 'Caching', slug: 'guides/caching' },
+            { label: 'Fetch policies & freshness', slug: 'guides/fetch-policies' },
             { label: 'Mutations', slug: 'guides/mutations' },
             { label: 'Transport', slug: 'guides/transport' },
             { label: 'Testing', slug: 'guides/testing' },

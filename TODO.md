@@ -9,14 +9,14 @@ while building the normalized cache and mutations, and the roadmap (website
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · fine-grained rebuilds mostly done (#19, #20) ·
-subscriptions #30 · unions #31 · expiry/SWR #23 · dev experience #46, #47 ·
+~~expiry/SWR~~ · subscriptions #30 · unions #31 · dev experience #46, #47 ·
 `gql_link` #48.
 
-Status (2026-09-27): P0 and P1 done (#1–#16); example/docs sweep done
-(#34–#37, #41, #42); pub workspace + melos and pub.dev-ready packages
-(#43), CI + tag-triggered pub.dev publishing (#44). 24 items in **Done**.
-Suggested next picks: #23 (fetch policies), #19/#20 (per-row rebuilds), #32
-(public API surface, before more releases).
+Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
+#52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
+pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44). 26
+items in **Done**. Suggested next picks: #32 (public API surface, before more
+releases), #19/#20 (per-row rebuilds), #30 (subscriptions).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -45,9 +45,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P3 — runtime configurability & correctness
 
-23. **Runtime — Fetch policies.** `cache-first` only today; add per-scope
-    `network-only` / `cache-and-network` (fresh detail screen) and
-    `maxAge`/stale-while-revalidate (roadmap #2).
 24. **Runtime — `QueryBuilder` hardcodes `frameEndScheduler`**; expose the
     scheduler (and document when `microtaskScheduler` is right).
 25. **Runtime — `Normalization.keyField` and generator `--key-field` must be
@@ -106,9 +103,8 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     merging (Apollo `relayStylePagination`-style) so pages can live in one
     growing cache list instead of one entry per cursor (pairs with #5).
 51. **Runtime — Weakly held stale entries** (`WeakReference`/`Finalizer`) as
-    the eviction mechanism for #23's expiry instead of timers.
-52. **Runtime — Soft `refetch()`** that is a no-op when data is within
-    `maxAge` (part of #23).
+    an eviction mechanism for data past `maxAge` (#23 only revalidates, never
+    drops).
 53. **Runtime — Subscription widget** `SubscriptionBuilder<Subscription>`
     (records once, opens the SSE stream, writes each event through
     `writeResponse`) — the widget half of #30; generator must emit the
@@ -136,6 +132,7 @@ Kept for number stability; see git history for details.
 14. Runtime — List membership: `cacheScope.list((q) => q.me?.favorites).append/prepend/remove(e)`, `cacheScope.evict(e)`; journaled inside `optimistic:`. Example favourites update without refetch.
 15. Runtime — `mutateWith(..., refetchQueries: [...])`, forwarded by generated `client.mutate`.
 16. Test — `packages/sling_gql_test`: `MockGraphQLServer` (parses the printed document, resolves against maps/resolvers, answers under the document's aliases, `GraphQLError`, request log, `latency`), `pumpUntilSettled` on the new `SlingClient.isIdle`/`whenIdle`, `useRealNetwork()` (lifts the socket block and turns keep-alive off), `disposeAfterTest()`. Guide: `guides/testing`.
+23. Runtime — `FetchPolicy` (`cacheFirst`/`cacheAndNetwork`/`networkOnly`) on `QueryBuilder`, `createScope`, `resolve` and as `SlingClient` default; `maxAge` stale-while-revalidate on per-dep-key fetch stamps (`Cache.fetchedAt`, `writeResponse(at:)`), `QueryState.isStale`; background-fetch errors sticky like miss errors. Guide: `guides/fetch-policies`.
 34. Example — Printed-document variables named after the argument (`$first`, `$after`, `$first2` on clash).
 35. Example — Shared `ErrorView` widget.
 36. Example — `NetworkLog.add` guarded with `kDebugMode`.
@@ -144,6 +141,7 @@ Kept for number stability; see git history for details.
 42. Docs — "Rules of the road" block on getting-started.
 43. Repo — Pub workspace (root `pubspec.yaml`, `resolution: workspace`) + melos 7 scripts (`melos run test` = four gates, `analyze`, `format`, `generate`, `publish:dry-run`); `sling_gql` / `sling_gql_gen` 0.1.0 pub.dev-ready (LICENSE MIT, CHANGELOG, README, repository metadata, `dart pub publish --dry-run` clean).
 44. Repo — CI (`.github/workflows/ci.yml`): analyze, format, runtime, generator, generated-file-is-fresh, example against the mock API, website build, on push/PR. `publish.yml`: `melos version` (Conventional Commits) tags `<pkg>-vX.Y.Z`; pushing a tag publishes that package to pub.dev via OIDC (automated publishing enabled on pub.dev).
+52. Runtime — Soft refetch: `QueryScope.revalidate()` / `state.revalidate()`, a no-op within `maxAge`.
 
 ## Explicitly not planned
 

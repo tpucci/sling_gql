@@ -191,3 +191,7 @@ CupertinoSliverRefreshControl(onRefresh: state.refetch)
 
 Because all pages of a paginated list live in the same widget's selection, one pull
 refetches all loaded pages in **one** request.
+
+To refresh on open, or automatically after a while, see
+[Fetch policies & freshness](/sling_gql/guides/fetch-policies/) (`fetchPolicy:`, `maxAge`,
+`state.revalidate()`).

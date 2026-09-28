@@ -154,7 +154,8 @@ export const gqlSnippet = `query {
   | Mutations (`client.mutate`, `MutationBuilder`, optimistic + rollback) | <span class="pill pill-ok">done</span> |
   | Subscriptions (mock API already exposes them over SSE) | <span class="pill pill-next">next</span> |
   | Unions / interfaces (`$on`) | <span class="pill pill-no">not started</span> |
-  | Cache expiry, SWR, persistence | <span class="pill pill-no">not started</span> |
+  | Fetch policies, `maxAge` stale-while-revalidate | <span class="pill pill-ok">done</span> |
+  | Persistence adapters | <span class="pill pill-no">not started</span> |
 
   <div class="poc-banner">
     <strong>This is a feasibility study</strong>, built in a day to answer one question: <em>can

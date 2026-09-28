@@ -54,7 +54,8 @@ query {
 | Cursor pagination (one cache entry per `after`) | ✅ example |
 | Test helpers (`MockGraphQLServer`, `pumpUntilSettled`) | ✅ `packages/sling_gql_test` |
 | Subscriptions | ❌ not in this PoC |
-| SWR / expiry, persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
+| Fetch policies (`cacheAndNetwork`, `networkOnly`), `maxAge` stale-while-revalidate | ✅ per widget or client-wide, `state.isStale`, soft `revalidate()` |
+| Persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
 | Unions / interfaces (`$on`) | ❌ SpaceX schema has none |
 
 ## Layout
