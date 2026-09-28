@@ -166,7 +166,15 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 
 ## Conventions
 
-- Keep the runtime dependency-light (`http` only). No `gql`/`ferry` in the
+- **Two entry points.** `package:sling_gql/sling_gql.dart` is the app-facing
+  surface (client, widgets, `Accessor`/`Recorder`/`Arg` for generated code,
+  `Cache` interface, `CacheScope`); `package:sling_gql/internal.dart` exports
+  the building blocks (`NormalizedCache`, `Ref`, `missing`, `depKey`,
+  `CacheWrite`, `MutationScope`, `ListLocator`) with no stability promise.
+  Path-level `Cache.read/write/remove/writeResponse` are `@internal`
+  (`package:meta`). New public symbols go in the main library only if an app
+  would call them; everything else in `internal.dart`.
+- Keep the runtime dependency-light (`http` and `meta` only). No `gql`/`ferry` in the
   runtime for now — the point of the PoC is to see how small the core can be.
 - Every runtime behaviour change gets a test in `packages/sling_gql/test`.
   Never hit the network: the runtime tests use `MockClient` from

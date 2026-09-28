@@ -1,17 +1,14 @@
 /// sling_gql — "read the field, get the query": a GraphQL client for Flutter
 /// where the widget is the query. Proof of concept.
+///
+/// This is the app-facing surface: the client and its widgets, the base class
+/// and types generated code builds on, cache access. Building blocks the
+/// runtime is made of (the normalized store, refs, the `missing` sentinel,
+/// write journal entries) live in `package:sling_gql/internal.dart`.
 library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
-export 'src/cache/cache.dart'
-    show
-        Cache,
-        CacheWrite,
-        NormalizedCache,
-        Normalization,
-        Ref,
-        missing,
-        depKey;
+export 'src/cache/cache.dart' show Cache, Normalization;
 export 'src/client.dart'
     show
         SlingClient,
@@ -20,11 +17,12 @@ export 'src/client.dart'
         CacheScope,
         CacheList,
         QueryScope,
-        MutationScope,
         RootFactory,
         SlingSchema,
         WaterfallWarning,
-        Transport;
+        Transport,
+        FlushScheduler,
+        microtaskScheduler;
 export 'src/pagination.dart'
     show
         PaginationController,
@@ -43,4 +41,5 @@ export 'src/widgets.dart'
         MutationBuilder,
         MutationState,
         MutationWidgetBuilder,
-        Mutate;
+        Mutate,
+        frameEndScheduler;

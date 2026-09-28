@@ -14,9 +14,9 @@ Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ �
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
-pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44). 26
-items in **Done**. Suggested next picks: #32 (public API surface, before more
-releases), #19/#20 (per-row rebuilds), #30 (subscriptions).
+pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
+27 items in **Done**. Suggested next picks: #19/#20 (per-row rebuilds), #30
+(subscriptions), #24/#25/#28 (small runtime/gen fixes).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -64,9 +64,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     `launchScheduled`). Generator currently skips the Subscription root.
 31. **Runtime/Gen — Unions & interfaces (`$on`).** Add one to the mock schema
     first.
-32. **Runtime — Public API surface.** `sling_gql.dart` exports `depKey`,
-    `NormalizedCache`, `MutationScope`, `Recorder`; mark internals
-    `@internal` or move behind a `sling_gql/internal.dart`.
 33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
     two arg sets silently; consider 64-bit or include a length/checksum.
 
@@ -133,6 +130,7 @@ Kept for number stability; see git history for details.
 15. Runtime — `mutateWith(..., refetchQueries: [...])`, forwarded by generated `client.mutate`.
 16. Test — `packages/sling_gql_test`: `MockGraphQLServer` (parses the printed document, resolves against maps/resolvers, answers under the document's aliases, `GraphQLError`, request log, `latency`), `pumpUntilSettled` on the new `SlingClient.isIdle`/`whenIdle`, `useRealNetwork()` (lifts the socket block and turns keep-alive off), `disposeAfterTest()`. Guide: `guides/testing`.
 23. Runtime — `FetchPolicy` (`cacheFirst`/`cacheAndNetwork`/`networkOnly`) on `QueryBuilder`, `createScope`, `resolve` and as `SlingClient` default; `maxAge` stale-while-revalidate on per-dep-key fetch stamps (`Cache.fetchedAt`, `writeResponse(at:)`), `QueryState.isStale`; background-fetch errors sticky like miss errors. Guide: `guides/fetch-policies`.
+32. Runtime — `package:sling_gql/internal.dart` (`NormalizedCache`, `Ref`, `missing`, `depKey`, `CacheWrite`, `MutationScope`, `ListLocator`); `Cache.read/write/remove/writeResponse` `@internal`; `FlushScheduler`/`microtaskScheduler`/`frameEndScheduler` exported for `createScope`.
 34. Example — Printed-document variables named after the argument (`$first`, `$after`, `$first2` on clash).
 35. Example — Shared `ErrorView` widget.
 36. Example — `NetworkLog.add` guarded with `kDebugMode`.

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:meta/meta.dart';
+
 import '../selection.dart';
 import 'normalization.dart';
 import 'ref.dart';
@@ -37,6 +39,12 @@ class CacheWrite {
 /// persistence layer plugs into — they are deliberately kept out of this
 /// package.
 ///
+/// Apps touch it through `client.cache` for introspection and housekeeping
+/// ([entity], [evict], [gc], [clear], [snapshot], [onChange], [fetchedAt]);
+/// typed reads and writes go through `client.cacheScope`. The path-level
+/// [read] / [write] / [remove] / [writeResponse] are the accessors' and the
+/// client's business (`@internal`).
+///
 /// The only implementation today is [NormalizedCache]; `Cache()` returns one.
 abstract class Cache {
   factory Cache({Normalization normalization, Map<String, Object?>? initial}) =
@@ -50,14 +58,17 @@ abstract class Cache {
   /// [path] is a list of aliases (`String`) and list indices (`int`); it may
   /// start with a [Ref] to address an entity directly. When [deps] is given,
   /// every dependency key traversed is added to it.
+  @internal
   Object? read(String operation, List<Object> path, {Set<String>? deps});
 
   /// Writes an optimistic/manual value at a path, creating containers as
   /// needed. Returns the dependency keys touched.
+  @internal
   Set<String> write(String operation, List<Object> path, Object? value);
 
   /// Removes the value at [path] (a map field or a list element) so it reads
   /// as [missing] again. Returns the dependency keys touched.
+  @internal
   Set<String> remove(String operation, List<Object> path);
 
   /// Merges a GraphQL response `data` object. Objects the [Normalization]
@@ -65,6 +76,7 @@ abstract class Cache {
   /// merged inline. Returns the dependency keys touched (the ones whose
   /// value changed). When [at] is given, every key the response wrote 	tt
   /// changed or not 	tt is stamped with it (see [fetchedAt]).
+  @internal
   Set<String> writeResponse(
     String operation,
     Selection selection,

@@ -7,7 +7,8 @@ import { Aside, FileTree } from '@astrojs/starlight/components';
 
 <FileTree>
 - packages/sling_gql/lib/
-  - sling_gql.dart  public exports
+  - sling_gql.dart  app-facing exports
+  - internal.dart  NormalizedCache, Ref, missing, depKey, CacheWrite, MutationScope
   - src/
     - selection.dart  Selection tree, Arg, PrintedOperation
     - cache/
@@ -63,8 +64,11 @@ records every `entity.field` dependency it crosses into `deps`, and returns the 
 sentinel when a key is absent — distinct from a stored `null`. `writeResponse` normalizes
 identifiable objects into entities and merges the rest inline; `write` sets a single path
 for optimistic updates. Both return the dependency keys they touched. `Cache` is an
-interface with one implementation, `NormalizedCache`. Details in
-[Caching](/sling_gql/guides/caching/).
+interface with one implementation, `NormalizedCache`. Apps see the interface through
+`client.cache` (`entity`, `evict`, `gc`, `snapshot`, `onChange`, `fetchedAt`); the
+path-level `read`/`write`/`remove`/`writeResponse` are `@internal`, and `NormalizedCache`,
+`Ref`, `missing`, `depKey` come from `package:sling_gql/internal.dart` (no stability
+promise — for adapters and tests). Details in [Caching](/sling_gql/guides/caching/).
 
 ### 3. `Accessor` — what generated classes extend
 

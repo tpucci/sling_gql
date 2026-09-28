@@ -3,6 +3,10 @@ import 'selection.dart';
 
 /// The sink that accessors report to while a build is being recorded.
 ///
+/// Implemented by the runtime (`QueryScope`, `CacheScope`, the mutation
+/// recorder); generated code only passes one through to [Accessor]'s
+/// constructor. Apps never implement or call it.
+///
 /// There is exactly one recorder per operation per build scope (a widget
 /// build, a `prepare` call, …). It knows the operation type, holds the
 /// selection tree recorded so far, and is told about every cache miss.

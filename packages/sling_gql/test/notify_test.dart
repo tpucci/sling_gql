@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sling_gql/internal.dart';
 import 'package:sling_gql/sling_gql.dart';
 
 import 'support/test_schema.dart';

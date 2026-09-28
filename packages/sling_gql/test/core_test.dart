@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:sling_gql/internal.dart';
 import 'package:sling_gql/sling_gql.dart';
 
 // --- Hand-written "generated" code for a tiny schema -------------------------
