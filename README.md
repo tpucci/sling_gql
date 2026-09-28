@@ -69,14 +69,19 @@ example/                 iOS-only Flutter app talking to the mock API
 
 ```sh
 asdf install                                   # flutter + nodejs from .tool-versions
+dart pub global activate melos
+melos bootstrap                                # pub workspace: one `pub get` for all packages
 
-cd mock-api && npm install && npm start        # http://localhost:4000/graphql (GraphiQL)
+melos run test                                 # runtime + generator + example (mock server auto-started) + website
+melos run test:runtime                         # or one gate at a time
 
-cd packages/sling_gql && flutter pub get && flutter test
-cd ../../example && flutter pub get
-flutter test                                   # widget tests against the running mock API
-flutter run -d <ios-simulator>
+cd mock-api && npm install && npm start        # http://localhost:4000/graphql (GraphiQL), for `flutter run`
+cd example && flutter run -d <ios-simulator>
 ```
+
+The packages are on pub.dev:
+[`sling_gql`](https://pub.dev/packages/sling_gql) (runtime) and
+[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator).
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab
@@ -89,8 +94,7 @@ Regenerate the example's schema classes after editing `mock-api/schema.graphql`:
 
 ```sh
 cd mock-api && npm run introspect              # → example/graphql/schema.json
-cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
-  --schema graphql/schema.json --out lib/generated/schema.dart
+cd .. && melos run generate                    # → example/lib/generated/schema.dart
 ```
 
 ## How it works

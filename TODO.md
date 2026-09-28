@@ -12,10 +12,11 @@ Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ �
 subscriptions #30 · unions #31 · expiry/SWR #23 · dev experience #46, #47 ·
 `gql_link` #48.
 
-Status (2026-09-25): P0 done (#1–#6); P1 done except #16; example/docs
-sweep done (#34–#36, #41, #42). 20 items in **Done**. Suggested next picks:
-#16 (test helpers), #23 (fetch policies) and #19/#20 (per-row rebuilds), or
-#43/#44 (workspace + CI) before the codebase grows further.
+Status (2026-09-26): P0 done (#1–#6); P1 done except #16; example/docs
+sweep done (#34–#36, #41, #42); pub workspace + melos and pub.dev-ready
+packages (#43). 21 items in **Done**. Suggested next picks: #44 (CI on top of
+`melos run test`), #16 (test helpers), #23 (fetch policies) and #19/#20
+(per-row rebuilds).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -95,12 +96,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P5 — docs & repo hygiene
 
-43. **Repo — No workspace/melos**: three pubspecs, three test commands, no
-    versioning or publish plan. Add a pub workspace (Dart 3.5+) and a single
-    `make test`/script that runs all four gates (runtime, generator, example
-    with the mock server, website build).
 44. **Repo — CI** runs only the website deploy; add the four gates from #43
-    (the example test needs the mock server started in the job).
+    (`melos run test`; the example gate starts the mock server itself via
+    `scripts/with-mock-api.mjs`). Optionally a tag-triggered pub.dev
+    automated-publishing job once the first manual publish is done.
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
@@ -155,6 +154,7 @@ Kept for number stability; see git history for details.
 36. Example — `NetworkLog.add` guarded with `kDebugMode`.
 41. Docs — "queries only" phrasing swept.
 42. Docs — "Rules of the road" block on getting-started.
+43. Repo — Pub workspace (root `pubspec.yaml`, `resolution: workspace`) + melos 7 scripts (`melos run test` = four gates, `analyze`, `format`, `generate`, `publish:dry-run`); `sling_gql` / `sling_gql_gen` 0.1.0 pub.dev-ready (LICENSE MIT, CHANGELOG, README, repository metadata, `dart pub publish --dry-run` clean).
 
 ## Explicitly not planned
 

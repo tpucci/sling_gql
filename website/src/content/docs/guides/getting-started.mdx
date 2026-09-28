@@ -6,29 +6,26 @@ description: Add sling_gql to a Flutter app, generate typed accessors from your 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Proof of concept">
-sling_gql is not on pub.dev. It supports **queries** (with a normalized cache and a
+sling_gql is a 0.x proof of concept. It supports **queries** (with a normalized cache and a
 pagination helper), **mutations**, and a single `transport` hook for auth/retry/logging —
-but not subscriptions or unions/interfaces yet. You depend on it straight from the Git
-repository. Everything below works against any GraphQL endpoint that allows introspection.
+but not subscriptions or unions/interfaces yet, and APIs will change between minor
+versions. Everything below works against any GraphQL endpoint that allows introspection.
 </Aside>
 
 <Steps>
 
 1. **Add the runtime and the generator.**
 
-   ```yaml title="pubspec.yaml"
-   dependencies:
-     sling_gql:
-       git:
-         url: https://github.com/tpucci/sling_gql
-         path: packages/sling_gql
-
-   dev_dependencies:
-     sling_gql_gen:
-       git:
-         url: https://github.com/tpucci/sling_gql
-         path: packages/sling_gql_gen
+   ```sh
+   flutter pub add sling_gql
+   flutter pub add --dev sling_gql_gen
    ```
+
+   Both are on pub.dev ([`sling_gql`](https://pub.dev/packages/sling_gql),
+   [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen)) and released in lockstep.
+   To track `main` instead, use a `git:` dependency with
+   `url: https://github.com/tpucci/sling_gql` and `path: packages/sling_gql`
+   (resp. `packages/sling_gql_gen`).
 
 2. **Generate the typed accessors from your endpoint.**
 

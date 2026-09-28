@@ -25,6 +25,8 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
    ```sh
    git clone https://github.com/tpucci/sling_gql && cd sling_gql
    asdf install
+   dart pub global activate melos
+   melos bootstrap                            # pub workspace: one `pub get` for all packages
    ```
 
 2. **Start the mock API.** Space-themed, ~180 launches, cursor and offset pagination,
@@ -38,9 +40,11 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 3. **Run the tests.**
 
    ```sh
-   cd packages/sling_gql && flutter test        # runtime, pure Dart + widget tests
-   cd ../sling_gql_gen  && dart test            # generator
-   cd ../../example     && flutter test         # e2e against the running mock API
+   melos run test                               # all four gates below
+   melos run test:runtime                       # runtime, pure Dart + widget tests
+   melos run test:gen                           # generator
+   melos run test:example                       # e2e; starts the mock API itself if needed
+   melos run test:website                       # docs build
    ```
 
    The example test asserts **exact request counts** after each interaction. It is the one
@@ -59,8 +63,7 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
    ```sh
    cd mock-api && npm run introspect          # → example/graphql/schema.json
-   cd ../example && dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
-     --schema graphql/schema.json --out lib/generated/schema.dart
+   cd .. && melos run generate                # example/lib/generated/schema.dart
    ```
 
 6. **Work on the website.**

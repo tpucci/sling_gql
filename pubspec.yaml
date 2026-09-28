@@ -1,0 +1,104 @@
+name: sling_gql_workspace
+description: Pub workspace for the sling_gql monorepo (runtime, generator, example).
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - packages/sling_gql
+  - packages/sling_gql_gen
+  - example
+
+dev_dependencies:
+  melos: ^7.4.0
+
+melos:
+  repository: https://github.com/tpucci/sling_gql
+
+  ignore:
+    - sling_gql_workspace
+
+  command:
+    version:
+      linkToCommits: true
+      workspaceChangelog: false
+      # Both published packages move in lockstep; the example is private.
+      updateGitTagRefs: true
+      changelogCommitBodies:
+        include: false
+    publish:
+      hooks:
+        pre: melos run test:packages
+
+  scripts:
+    analyze:
+      description: dart analyze every package.
+      run: dart analyze --fatal-infos .
+      exec:
+        concurrency: 1
+      packageFilters:
+        ignore: [sling_gql_workspace]
+
+    format:
+      description: Check formatting in every package.
+      run: dart format --output=none --set-exit-if-changed .
+      exec:
+        concurrency: 1
+      packageFilters:
+        ignore: [sling_gql_workspace]
+
+    test:runtime:
+      description: Runtime package tests.
+      run: flutter test
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql
+
+    test:gen:
+      description: Generator package tests.
+      run: dart test
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql_gen
+
+    test:packages:
+      description: Runtime + generator tests (no mock server needed).
+      run: melos run test:runtime && melos run test:gen
+
+    test:example:
+      description: Example widget tests; starts the mock server for the run.
+      run: node $MELOS_ROOT_PATH/scripts/with-mock-api.mjs flutter test
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql_example
+
+    test:website:
+      description: Build the docs site.
+      run: cd website && npm ci --no-audit --no-fund && npm run build
+
+    test:
+      description: All four gates (runtime, generator, example, website).
+      run: >-
+        melos run test:runtime &&
+        melos run test:gen &&
+        melos run test:example &&
+        melos run test:website
+
+    generate:
+      description: Regenerate example/lib/generated/schema.dart from the introspection snapshot.
+      run: >-
+        dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart
+        --schema graphql/schema.json --out lib/generated/schema.dart
+        --scalar DateTime=DateTime
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql_example
+
+    publish:dry-run:
+      description: Dry-run pub.dev publish for the public packages.
+      run: melos publish --dry-run --yes

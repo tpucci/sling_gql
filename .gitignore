@@ -21,3 +21,7 @@ example/ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
 .pixel/
 .DS_Store
 node_modules/
+
+# pub workspace: only the root lockfile is meaningful (and it's for the workspace, not published)
+packages/*/pubspec.lock
+example/pubspec.lock

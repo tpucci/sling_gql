@@ -17,11 +17,26 @@ on the code.
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
   pass before committing content.
-- Three Dart packages, no melos/workspace yet:
+- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the three
+  packages (`workspace:`), each has `resolution: workspace`; only the root
+  `pubspec.lock` exists (per-package lockfiles are gitignored). Run
+  `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
+  config and scripts live in the root `pubspec.yaml` under `melos:`.
+  Gates: `melos run test` (all four: runtime, generator, example with the mock
+  server auto-started by `scripts/with-mock-api.mjs`, website build), or
+  `test:runtime` / `test:gen` / `test:example` / `test:website` individually;
+  `melos run analyze`, `melos run format`, `melos run generate`. Add
+  `--no-select` when running non-interactively.
   - `packages/sling_gql` — the runtime (Flutter package). Tests: `flutter test`.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.
   - `example` — Flutter app, **iOS only** (`flutter create --platforms=ios`).
     Do not add other platforms.
+- **Publishing.** `sling_gql` and `sling_gql_gen` are published to pub.dev in
+  lockstep (same version, MIT). Each has its own `README.md`, `CHANGELOG.md`,
+  `LICENSE` (copy of the root one). Before a release: bump both versions +
+  changelogs (`melos version` or by hand), `melos run publish:dry-run`, then
+  `melos publish --no-dry-run`. Code must be `dart format`ed (pub.dev scores
+  it; `melos run format` checks).
 - The example talks to `http://localhost:4000/graphql` (iOS simulator shares
   the host network). Its introspection is snapshotted in
   `example/graphql/schema.json`.

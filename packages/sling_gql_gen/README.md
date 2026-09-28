@@ -1,19 +1,24 @@
 # sling_gql_gen
 
 A Dart CLI code generator: turns a GraphQL introspection JSON document into
-`sling_gql`-compatible typed `Accessor` classes (see `packages/sling_gql`).
+typed `Accessor` classes for the [`sling_gql`](https://pub.dev/packages/sling_gql)
+runtime. Docs: https://tpucci.github.io/sling_gql/
 
 ## Usage
 
-From the `example/` directory (verified against `example/graphql/schema.json`,
-the SpaceX API introspection result):
+Add it as a dev dependency of your Flutter app and run it against your
+schema's introspection JSON:
 
 ```sh
-cd example
-dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
+flutter pub add --dev sling_gql_gen
+dart run sling_gql_gen \
   --schema graphql/schema.json \
   --out lib/generated/schema.dart
 ```
+
+(Inside this repository, the example app runs the same command as
+`dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart …`, or
+`melos run generate`.)
 
 This writes `lib/generated/schema.dart` and formats it with `dart format`
 (a formatting failure is logged but does not fail the run). The generated

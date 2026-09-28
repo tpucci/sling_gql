@@ -1,7 +1,16 @@
 name: sling_gql
 description: GraphQL client for Flutter where the widget is the query — read a field, get the query. Proof of concept.
-version: 0.0.1
-publish_to: none
+version: 0.1.0
+repository: https://github.com/tpucci/sling_gql
+homepage: https://tpucci.github.io/sling_gql/
+issue_tracker: https://github.com/tpucci/sling_gql/issues
+topics:
+  - graphql
+  - client
+  - cache
+  - codegen
+
+resolution: workspace
 
 environment:
   sdk: ^3.13.0
