@@ -69,7 +69,9 @@ query {
    ```
 
 4. Read fields in `build()` with `QueryBuilder`; mutate with
-   `MutationBuilder` or `client.mutate((m) => m.toggleFavorite(id: id)?.favorite)`.
+   `MutationBuilder` or `client.mutate((m) => m.toggleFavorite(id: id)?.favorite)`;
+   subscribe with `SubscriptionBuilder` or
+   `client.subscribe((s) => s.launchStatusChanged?..status)`.
 
 5. Test with [`sling_gql_test`](https://pub.dev/packages/sling_gql_test):
    `MockGraphQLServer` answers the recorded documents from plain maps,
@@ -91,8 +93,11 @@ query {
 - Fetch policies per widget (`cacheFirst`, `cacheAndNetwork`, `networkOnly`)
   and `maxAge` stale-while-revalidate with `state.isStale` / `revalidate()`.
 - Cursor pagination helpers, `CacheScope.list` for list membership.
+- Subscriptions over Server-Sent Events (`client.subscribe`,
+  `SubscriptionBuilder`), each event normalized into the cache;
+  `subscriptionTransport:` for auth or another protocol.
 
-Not yet: subscriptions, unions/interfaces.
+Not yet: unions/interfaces.
 
 ## Rules of thumb
 

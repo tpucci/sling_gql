@@ -26,16 +26,25 @@ class SlingException implements Exception {
 /// Builds the root accessor of an operation for a given recorder.
 typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
 
-/// The generator's single per-schema convenience: bundles the query and
-/// mutation root factories so app code never has to name `Mutation.root` by
-/// hand — `SlingScope(schema: slingSchema, ...)` resolves both `QueryBuilder`
-/// (via the client's `rootFactory`) and `MutationBuilder` (via
-/// `SlingScope.mutationRootOf`) from it.
+/// The generator's single per-schema convenience: bundles the query,
+/// mutation and subscription root factories so app code never has to name
+/// `Mutation.root` by hand — `SlingScope(schema: slingSchema, ...)` resolves
+/// `QueryBuilder` (via the client's `rootFactory`), `MutationBuilder` (via
+/// `SlingScope.mutationRootOf`) and `SubscriptionBuilder` (via
+/// `SlingScope.subscriptionRootOf`) from it.
 class SlingSchema<Q extends Accessor, M extends Accessor> {
-  const SlingSchema({required this.query, required this.mutation});
+  const SlingSchema({
+    required this.query,
+    required this.mutation,
+    this.subscription,
+  });
 
   final RootFactory<Q> query;
   final RootFactory<M> mutation;
+
+  /// The generated `Subscription.root`, when the schema has a subscription
+  /// type.
+  final RootFactory<Accessor>? subscription;
 }
 
 /// True when asserts are enabled (debug builds and tests).
@@ -671,6 +680,93 @@ class CacheList<R extends Accessor> {
   }
 }
 
+/// Where a [ListRule] inserts an entity that newly belongs to a list.
+enum ListPosition { prepend, append }
+
+/// Keeps cached lists of entities consistent with the entities themselves:
+/// *"`launches(filter:)` contains a launch iff its status matches the
+/// filter"*, *"`me.favorites` contains a launch iff `launch.favorite`"*.
+///
+/// A response, a subscription event or an optimistic setter only writes the
+/// entity (`Launch:<id>.status`); the filtered lists that should gain or
+/// lose it are separate cache entries nobody told. With a rule, every time
+/// an entity of [typename] changes, the client re-evaluates [belongs] for
+/// every cached list under a [field] node it has sent (it remembers each
+/// alias's arguments — the "Success" segment you visited earlier included)
+/// and adds or removes the reference. Lists that are not cached are left
+/// alone; edits go through the normal write path, so dependants rebuild and
+/// an edit made while a mutation's `optimistic` callback runs is rolled
+/// back with it.
+///
+/// ```dart
+/// SlingClient<Query>(
+///   listRules: [
+///     ListRule<Launch>(
+///       field: 'launches', items: 'nodes',        // a connection
+///       typename: 'Launch', ctor: Launch.new,
+///       belongs: (args, launch) {
+///         final status = (args['filter'] as Map?)?['status'];
+///         return status == null || launch.status?.graphqlName == status;
+///       },
+///       position: ListPosition.prepend,
+///     ),
+///     ListRule<Launch>(
+///       field: 'favorites', typename: 'Launch', ctor: Launch.new,
+///       belongs: (_, launch) => launch.favorite == true,
+///     ),
+///   ],
+/// )
+/// ```
+///
+/// [args] are the field's arguments as sent (JSON values: input objects are
+/// maps, enums their GraphQL name). [belongs] reads the entity through a
+/// non-fetching accessor: a field it needs that is not cached reads `null`
+/// — only decide on fields every reader of the list selects.
+///
+/// **Query responses only remove.** A response's lists are the server's
+/// word, and with pagination each page is one list: the 20 launches of page
+/// two "belong" to `launches(first: 20)` as much as page one's do, yet must
+/// not be added to it. So entities written by a query response can leave
+/// lists they no longer belong to, but never join one. Insertions happen for
+/// what the app or the server *pushes*: mutation responses, subscription
+/// events, optimistic setters and `CacheScope` writes. Membership is
+/// set-like; order beyond [position] and `totalCount`-style siblings are
+/// not maintained — refetch when you need the server's view.
+class ListRule<E extends Accessor> {
+  const ListRule({
+    required this.field,
+    this.items,
+    required this.typename,
+    required this.ctor,
+    required this.belongs,
+    this.position = ListPosition.append,
+  });
+
+  /// Field name (not alias) of the node holding the list, anywhere in a
+  /// document: `launches`, `favorites`.
+  final String field;
+
+  /// For connection-shaped fields, the sub-field holding the list
+  /// (`nodes`); `null` when [field] is the list itself.
+  final String? items;
+
+  /// `__typename` of the entities the list holds.
+  final String typename;
+
+  /// The generated constructor tear-off, `Launch.new`.
+  final E Function(Recorder, Selection, List<Object>) ctor;
+
+  /// Whether [entity] belongs in the list selected with [args].
+  final bool Function(Map<String, Object?> args, E entity) belongs;
+
+  final ListPosition position;
+
+  /// [belongs] with the entity typed; called by the client on the accessor
+  /// [ctor] built (so the cast always holds).
+  bool evaluate(Map<String, Object?> args, Accessor entity) =>
+      belongs(args, entity as E);
+}
+
 /// Sends one HTTP request and returns its response. The single extension
 /// point for auth headers / token refresh, retries, timeouts and logging:
 ///
@@ -691,6 +787,355 @@ class CacheList<R extends Accessor> {
 /// through it. An `http.Request` can be sent once: copy it before retrying.
 typedef Transport = Future<http.Response> Function(http.Request request);
 
+/// Opens one subscription and returns its results as they arrive: each
+/// element is one GraphQL execution result (`{data, errors?}`), the stream
+/// ends when the server completes the subscription, and a transport failure
+/// is a stream error. The subscription is closed by cancelling the
+/// subscription to the stream.
+///
+/// The request is a finalized POST like a query's, with
+/// `accept: text/event-stream` and [SlingClient.headers] applied. The default
+/// ([sseSubscriptionTransport]) speaks GraphQL over Server-Sent Events in
+/// "distinct connections" mode (one HTTP request per subscription, what
+/// graphql-yoga, Apollo Server and Hot Chocolate serve on the regular
+/// endpoint). Wrap it to add auth, or replace it to use another protocol
+/// (`graphql-ws`) — the client only ever sees decoded results:
+///
+/// ```dart
+/// SlingClient<Query>(
+///   endpoint: uri,
+///   rootFactory: Query.root,
+///   subscriptionTransport: (request) {
+///     request.headers['authorization'] = 'Bearer $token';
+///     return sseSubscriptionTransport(request);
+///   },
+/// );
+/// ```
+typedef SubscriptionTransport = Stream<Map<String, Object?>> Function(
+  http.Request request,
+);
+
+/// The default [SubscriptionTransport]: sends [request] with [client] (or a
+/// fresh `http.Client` closed with the stream) and decodes the
+/// `text/event-stream` body. `next` events (and unnamed `data:` lines) carry
+/// one JSON execution result each; `complete` ends the stream.
+Stream<Map<String, Object?>> sseSubscriptionTransport(
+  http.Request request, {
+  http.Client? client,
+}) {
+  final owned = client == null;
+  final http.Client c = client ?? http.Client();
+  late StreamController<Map<String, Object?>> controller;
+  StreamSubscription<String>? lines;
+
+  Future<void> close() async {
+    await lines?.cancel();
+    lines = null;
+    if (owned) c.close();
+  }
+
+  controller = StreamController<Map<String, Object?>>(
+    onListen: () async {
+      final http.StreamedResponse response;
+      try {
+        response = await c.send(request);
+      } catch (e, st) {
+        if (!controller.isClosed) {
+          controller.addError(e, st);
+          await controller.close();
+        }
+        await close();
+        return;
+      }
+      if (controller.isClosed) {
+        // Cancelled while connecting.
+        await close();
+        return;
+      }
+      if (response.statusCode >= 400) {
+        controller.addError(
+          SlingException(
+            'HTTP ${response.statusCode}',
+            statusCode: response.statusCode,
+          ),
+        );
+        await controller.close();
+        await close();
+        return;
+      }
+      var event = '';
+      final data = StringBuffer();
+      var hasData = false;
+      void dispatch() {
+        final name = event;
+        final payload = data.toString();
+        final had = hasData;
+        event = '';
+        data.clear();
+        hasData = false;
+        if (name == 'complete') {
+          lines?.cancel();
+          lines = null;
+          controller.close();
+          return;
+        }
+        if (name != '' && name != 'next') return; // ping, unknown events
+        if (!had || payload.trim().isEmpty) return;
+        final json = jsonDecode(payload);
+        if (json is Map<String, Object?>) controller.add(json);
+      }
+
+      lines = response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+            (line) {
+              if (controller.isClosed) return;
+              if (line.isEmpty) {
+                dispatch();
+              } else if (line.startsWith(':')) {
+                // comment / keep-alive
+              } else if (line.startsWith('event:')) {
+                event = line.substring(6).trim();
+              } else if (line.startsWith('data:')) {
+                var value = line.substring(5);
+                if (value.startsWith(' ')) value = value.substring(1);
+                if (hasData) data.write('\n');
+                data.write(value);
+                hasData = true;
+              }
+            },
+            onError: (Object e, StackTrace st) {
+              if (!controller.isClosed) controller.addError(e, st);
+            },
+            onDone: () {
+              dispatch();
+              if (!controller.isClosed) controller.close();
+              close();
+            },
+            cancelOnError: true,
+          );
+    },
+    onCancel: close,
+  );
+  return controller.stream;
+}
+
+/// Recorder for one [SlingClient.subscribeWith] call. The body runs once to
+/// record the selection (misses are expected and never fetch); the same
+/// scope is then used to compute each event's value from the cache.
+class SubscriptionScope implements Recorder {
+  SubscriptionScope(this.client);
+
+  final SlingClient<Accessor> client;
+
+  @override
+  String get operation => 'subscription';
+
+  @override
+  final Selection root = Selection.root('subscription');
+
+  @override
+  Cache get cache => client.cache;
+
+  @override
+  final Set<String> deps = {};
+
+  @override
+  void onMiss(Selection leaf) {}
+
+  @override
+  void onWrite(CacheWrite write) => client._onWrite(write);
+}
+
+/// A live subscription opened by [SlingClient.subscribeWith] (generated code:
+/// `client.subscribe(...)`).
+///
+/// [stream] yields the value the body computes from the cache after each
+/// event was written to it; partial GraphQL errors are stream errors that do
+/// **not** end the stream (the fields that resolved are still written). A
+/// server `complete` ends it. A transport failure (the connection dropped,
+/// the server is down) is a stream error and, with a [retryAfter], the
+/// connection is reopened after that delay — again and again until it
+/// holds — while the stream stays open ([isReconnecting] meanwhile);
+/// without one it ends the stream. [reconnect] retries at once. Cancel the
+/// stream subscription — or call [cancel] — to close the connection;
+/// nothing keeps it open otherwise.
+class SlingSubscription<T> {
+  SlingSubscription._(
+    this._client,
+    this._scope,
+    this._compute,
+    this.operation, {
+    required this.retryAfter,
+  }) {
+    // Sync: values are added from the transport's own async events, so
+    // listeners see them in the same turn as the cache write and the scopes'
+    // notifications.
+    _controller = StreamController<T>(
+      onListen: _open,
+      onCancel: _close,
+      sync: true,
+    );
+  }
+
+  final SlingClient<Accessor> _client;
+  final SubscriptionScope _scope;
+
+  /// Runs the body against the scope: the event's value, read from the cache.
+  final T Function() _compute;
+
+  /// The printed document and variables the subscription was opened with.
+  final PrintedOperation operation;
+
+  /// Delay before reopening the connection after a transport failure;
+  /// `null` (the default) ends the stream instead. See
+  /// [SlingClient.subscriptionRetryAfter].
+  final Duration? retryAfter;
+
+  late final StreamController<T> _controller;
+  StreamSubscription<Map<String, Object?>>? _upstream;
+  Timer? _retry;
+  bool _closed = false;
+  bool _listened = false;
+  int _eventCount = 0;
+
+  /// The connection dropped and a retry is pending (see [retryAfter]).
+  bool get isReconnecting => _retry != null;
+
+  /// Called when [isConnected] / [isReconnecting] change (the connection
+  /// opened, dropped, or was reopened) — what a widget rebuilds on.
+  void Function()? onStatusChanged;
+
+  /// Each event's value, computed from the cache (see [SlingSubscription]).
+  /// Single-subscription: the connection opens on `listen`.
+  Stream<T> get stream => _controller.stream;
+
+  /// True from `listen` until the stream ended or [cancel] was called
+  /// (including while [isReconnecting]).
+  bool get isActive => _listened && !_closed;
+
+  /// Connection currently open (events can arrive).
+  bool get isConnected => _upstream != null && !_closed;
+
+  /// Events received so far.
+  int get eventCount => _eventCount;
+
+  /// Closes the connection and the stream.
+  Future<void> cancel() => _close();
+
+  /// Reopens the connection now if it dropped (a retry button); a no-op
+  /// while connected or after [cancel].
+  void reconnect() {
+    if (_closed || !_listened || _upstream != null) return;
+    _retry?.cancel();
+    _retry = null;
+    _open();
+  }
+
+  void _open() {
+    if (_closed) return;
+    _listened = true;
+    _client._subscriptions.add(this);
+    _client.onOperation?.call(operation);
+    final request = _client._request(operation)
+      ..headers['accept'] = 'text/event-stream';
+    Stream<Map<String, Object?>> results;
+    try {
+      results = _client.subscriptionTransport(request);
+    } catch (e, st) {
+      // A transport failing synchronously (a mock rejecting the document)
+      // is a stream error like an asynchronous one.
+      results = Stream.error(e, st);
+    }
+    _upstream = results.listen(
+      _onResult,
+      onError: (Object e, StackTrace st) {
+        if (!_controller.isClosed) _controller.addError(e, st);
+        _dropped();
+      },
+      onDone: _close,
+      cancelOnError: true,
+    );
+    onStatusChanged?.call();
+  }
+
+  /// The connection failed: schedule a reopen, or end the stream.
+  void _dropped() {
+    if (_closed) return;
+    final upstream = _upstream;
+    _upstream = null;
+    upstream?.cancel();
+    final after = retryAfter;
+    if (after == null) {
+      _close();
+      return;
+    }
+    _retry = Timer(after, () {
+      _retry = null;
+      _open();
+    });
+    onStatusChanged?.call();
+  }
+
+  void _onResult(Map<String, Object?> json) {
+    if (_closed) return;
+    _eventCount++;
+    final errors =
+        (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
+    final data = json['data'] as Map<String, Object?>?;
+    if (data == null) {
+      _controller.addError(
+        SlingException(
+          errors.isEmpty
+              ? 'Empty event'
+              : errors.map((e) => e['message']).join('\n'),
+          graphqlErrors: errors,
+        ),
+      );
+      return;
+    }
+    for (final e in errors) {
+      SlingClient._prune(data, e['path']);
+    }
+    final touched = _client.cache.writeResponse(
+      'subscription',
+      _scope.root,
+      data,
+      at: _client._now(),
+    );
+    _client._notify(touched);
+    if (errors.isNotEmpty) {
+      _controller.addError(
+        SlingException(
+          errors.map((e) => e['message']).join('\n'),
+          graphqlErrors: errors,
+        ),
+      );
+    }
+    _controller.add(_compute());
+  }
+
+  Future<void> _close() {
+    if (_closed) return Future.value();
+    _closed = true;
+    _retry?.cancel();
+    _retry = null;
+    final up = _upstream;
+    _upstream = null;
+    _client._subscriptions.remove(this);
+    // The payloads live on in the entities they referenced; the root fields
+    // would only pin them.
+    final touched = <String>{};
+    for (final alias in _scope.root.childAliases) {
+      touched.addAll(_client.cache.remove('subscription', [alias]));
+    }
+    _client._notify(touched);
+    final done = _controller.isClosed ? null : _controller.close();
+    return Future.wait([?up?.cancel(), ?done]);
+  }
+}
+
 /// Batches selections into a single GraphQL document per microtask, fetches
 /// them over HTTP, writes results into the cache and notifies scopes.
 class SlingClient<Q extends Accessor> {
@@ -700,6 +1145,7 @@ class SlingClient<Q extends Accessor> {
     Cache? cache,
     http.Client? httpClient,
     Transport? transport,
+    SubscriptionTransport? subscriptionTransport,
     this.headers = const {},
     this.onOperation,
     bool? warnOnWaterfall,
@@ -707,13 +1153,18 @@ class SlingClient<Q extends Accessor> {
     this.retryFailedAfter,
     this.fetchPolicy = FetchPolicy.cacheFirst,
     this.maxAge,
+    Iterable<ListRule<Accessor>> listRules = const [],
+    this.subscriptionRetryAfter,
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
   }) : cache = cache ?? Cache(),
+       _listRules = List.of(listRules),
        _http = httpClient ?? http.Client(),
        // ignore: prefer_initializing_formals
        _transport = transport,
+       // ignore: prefer_initializing_formals
+       _subscriptionTransport = subscriptionTransport,
        warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
        onWaterfall = onWaterfall ?? _printWaterfall,
        // ignore: prefer_initializing_formals
@@ -734,6 +1185,58 @@ class SlingClient<Q extends Accessor> {
 
   Future<http.Response> _sendWithHttpClient(http.Request request) async =>
       http.Response.fromStream(await _http.send(request));
+
+  final SubscriptionTransport? _subscriptionTransport;
+
+  /// The [SubscriptionTransport] every subscription goes through; GraphQL
+  /// over SSE on [httpClient] ([sseSubscriptionTransport]) unless one was
+  /// passed in.
+  SubscriptionTransport get subscriptionTransport =>
+      _subscriptionTransport ??
+      (request) => sseSubscriptionTransport(request, client: _http);
+
+  final Set<SlingSubscription<Object?>> _subscriptions = {};
+
+  /// Subscriptions currently open (listened to and not yet closed).
+  int get activeSubscriptions => _subscriptions.length;
+
+  /// Opens a subscription. [body] runs once, now, to *record* the selection
+  /// (every field read becomes part of the document; nothing is fetched),
+  /// then once per event, after the event was written to the cache, to
+  /// compute the value the returned stream yields:
+  ///
+  /// ```dart
+  /// final sub = client.subscribeWith(
+  ///   Subscription.root,
+  ///   (s) => s.launchStatusChanged?..status..name,
+  /// );
+  /// sub.stream.listen((launch) => print('${launch?.name}: ${launch?.status}'));
+  /// ```
+  ///
+  /// Every event is normalized into the shared cache like a query response
+  /// and notifies the scopes reading the touched entities — the launch
+  /// above updates in every list row and detail screen showing it,
+  /// whether or not anyone listens to the stream's values. The connection
+  /// opens on `listen` and closes when the stream subscription is cancelled
+  /// (or [SlingSubscription.cancel]). Generated code exposes this as
+  /// `client.subscribe(...)` with the schema's `Subscription` type bound;
+  /// `SubscriptionBuilder` is the widget form.
+  SlingSubscription<T> subscribeWith<S extends Accessor, T>(
+    RootFactory<S> root,
+    T Function(S subscription) body, {
+    Duration? retryAfter,
+  }) {
+    final scope = SubscriptionScope(this);
+    body(root(scope));
+    final op = PrintedOperation.from(scope.root);
+    return SlingSubscription<T>._(
+      this,
+      scope,
+      () => body(root(scope)),
+      op,
+      retryAfter: retryAfter ?? subscriptionRetryAfter,
+    );
+  }
 
   /// Debug hook: called with every document sent to the endpoint.
   final void Function(PrintedOperation op)? onOperation;
@@ -764,6 +1267,109 @@ class SlingClient<Q extends Accessor> {
 
   /// Clock used by [retryFailedAfter] and [maxAge]; overridable for tests.
   final DateTime Function() _now;
+
+  /// Default for [subscribeWith]'s `retryAfter`: how long a subscription
+  /// waits before reopening a dropped connection (server restarted, network
+  /// blip). `null` (the default) means a dropped connection ends the
+  /// stream; `SubscriptionBuilder` then shows `isActive == false` until it
+  /// is remounted. A few seconds is right for most apps; the retry repeats
+  /// until the connection holds.
+  final Duration? subscriptionRetryAfter;
+
+  final List<ListRule<Accessor>> _listRules;
+
+  /// Rules keeping cached lists in sync with their entities (see
+  /// [ListRule]). Add more with [addListRule].
+  List<ListRule<Accessor>> get listRules => List.unmodifiable(_listRules);
+
+  void addListRule(ListRule<Accessor> rule) => _listRules.add(rule);
+
+  /// Every list node sent so far that a rule cares about, by field name:
+  /// alias path of the list → the node's arguments. Filled from each
+  /// document as it goes out, so lists cached from screens no longer on
+  /// screen are still reachable.
+  final Map<String, Map<String, (List<String>, Map<String, Object?>)>>
+  _knownLists = {};
+
+  void _rememberLists(Selection root) {
+    if (_listRules.isEmpty) return;
+    void walk(Selection node) {
+      for (final c in node.children) {
+        for (final rule in _listRules) {
+          if (rule.field != c.field) continue;
+          final path = c.aliasPath;
+          if (rule.items != null) path.add(rule.items!);
+          _knownLists.putIfAbsent(rule.field, () => {})[path.join('/')] = (
+            path,
+            {for (final e in c.args.entries) e.key: e.value.value},
+          );
+        }
+        walk(c);
+      }
+    }
+
+    walk(root);
+  }
+
+  bool _applyingRules = false;
+
+  /// Re-evaluates the list rules for every entity among [touched]
+  /// (`Launch:launch-1.status` → `Launch:launch-1`). Returns the keys the
+  /// resulting list edits touched.
+  Set<String> _applyListRules(
+    String operation,
+    Set<String> touched, {
+    required bool insert,
+  }) {
+    if (_listRules.isEmpty || _applyingRules) return const {};
+    _applyingRules = true;
+    try {
+      final entities = <String>{};
+      for (final key in touched) {
+        final dot = key.lastIndexOf('.');
+        if (dot > 0) entities.add(key.substring(0, dot));
+      }
+      final out = <String>{};
+      final scope = CacheScope<Q>(this);
+      for (final rule in _listRules) {
+        final lists = _knownLists[rule.field];
+        if (lists == null) continue;
+        for (final key in entities) {
+          if (!key.startsWith('${rule.typename}:')) continue;
+          final entity = cache.entity(key);
+          if (entity == null) continue;
+          final id = entity[cache.normalization.keyField];
+          if (id == null) continue;
+          final accessor = rule.ctor(scope, scope.root, [Ref(key)]);
+          final ref = Ref(key);
+          for (final (path, args) in lists.values) {
+            final value = cache.read(operation, path);
+            if (value is! List) continue;
+            final items = value.cast<Object?>();
+            final has = items.contains(ref);
+            final wants = rule.evaluate(args, accessor);
+            if (has == wants || (wants && !insert)) continue;
+            final next = !wants
+                ? [
+                    for (final e in items)
+                      if (e != ref) e,
+                  ]
+                : rule.position == ListPosition.prepend
+                ? [ref, ...items]
+                : [...items, ref];
+            final written = cache.write(operation, path, next);
+            _journal?.add(
+              CacheWrite(operation, path, List<Object?>.of(items), written),
+            );
+            out.addAll(written);
+          }
+        }
+      }
+      return out;
+    } finally {
+      _applyingRules = false;
+    }
+  }
 
   /// True when any of [deps] was last fetched longer than [maxAge] ago, or
   /// never fetched from the server.
@@ -1054,6 +1660,7 @@ class SlingClient<Q extends Accessor> {
     }
 
     _inflight = tree;
+    _rememberLists(tree);
     _inflightScopes.addAll(scopes);
     for (final s in scopes) {
       final warning = s._requestSent();
@@ -1091,7 +1698,7 @@ class SlingClient<Q extends Accessor> {
         s._changedByClient();
       }
     } else {
-      _notify(touched, always: waiters);
+      _notify(touched, always: waiters, insert: false);
     }
     _checkIdle();
   }
@@ -1104,7 +1711,17 @@ class SlingClient<Q extends Accessor> {
   ///
   /// Iterates [touched] (a handful of keys per write) and probes each scope's
   /// deps, rather than walking every scope's deps (~1k keys for a list screen).
-  void _notify(Set<String> touched, {Set<QueryScope<Q>> always = const {}}) {
+  /// [insert] is false for query responses: list rules then only remove
+  /// (see [ListRule]).
+  void _notify(
+    Set<String> touched, {
+    Set<QueryScope<Q>> always = const {},
+    bool insert = true,
+  }) {
+    if (_listRules.isNotEmpty) {
+      final edits = _applyListRules('query', touched, insert: insert);
+      if (edits.isNotEmpty) touched = touched.union(edits);
+    }
     for (final scope in _scopes.toList()) {
       if (always.contains(scope) || touched.any(scope.deps.contains)) {
         scope._changedByClient();
@@ -1154,13 +1771,14 @@ class SlingClient<Q extends Accessor> {
     if (node is List && last is int && last < node.length) node[last] = null;
   }
 
+  http.Request _request(PrintedOperation op) => http.Request('POST', endpoint)
+    ..headers.addAll({'content-type': 'application/json', ...headers})
+    ..body = jsonEncode({'query': op.document, 'variables': op.variables});
+
   Future<(Map<String, Object?>, List<Map<String, Object?>>)> _post(
     PrintedOperation op,
   ) async {
-    final request = http.Request('POST', endpoint)
-      ..headers.addAll({'content-type': 'application/json', ...headers})
-      ..body = jsonEncode({'query': op.document, 'variables': op.variables});
-    final response = await transport(request);
+    final response = await transport(_request(op));
     if (response.statusCode >= 400) {
       throw SlingException(
         'HTTP ${response.statusCode}',
@@ -1180,5 +1798,11 @@ class SlingClient<Q extends Accessor> {
     return (data, errors);
   }
 
-  void dispose() => _http.close();
+  /// Closes every open subscription and the HTTP client.
+  void dispose() {
+    for (final s in _subscriptions.toList()) {
+      s.cancel();
+    }
+    _http.close();
+  }
 }

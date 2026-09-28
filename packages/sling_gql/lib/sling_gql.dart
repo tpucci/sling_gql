@@ -16,11 +16,16 @@ export 'src/client.dart'
         FetchPolicy,
         CacheScope,
         CacheList,
+        ListRule,
+        ListPosition,
         QueryScope,
         RootFactory,
         SlingSchema,
         WaterfallWarning,
         Transport,
+        SubscriptionTransport,
+        sseSubscriptionTransport,
+        SlingSubscription,
         FlushScheduler,
         microtaskScheduler;
 export 'src/pagination.dart'
@@ -42,4 +47,7 @@ export 'src/widgets.dart'
         MutationState,
         MutationWidgetBuilder,
         Mutate,
+        SubscriptionBuilder,
+        SubscriptionState,
+        SubscriptionWidgetBuilder,
         frameEndScheduler;

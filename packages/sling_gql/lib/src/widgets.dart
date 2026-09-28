@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -6,10 +8,11 @@ import 'client.dart';
 
 /// Provides a [SlingClient] to the widget tree.
 ///
-/// [MutationBuilder] resolves its root from here when it isn't given an
-/// explicit `root:` — pass either [mutationRoot] directly (the generated
-/// `Mutation.root` constructor) or [schema] (the generated `slingSchema`
-/// constant, which also carries the query root); passing both is an error.
+/// [MutationBuilder] and [SubscriptionBuilder] resolve their roots from here
+/// when they aren't given an explicit `root:` — pass either [mutationRoot]
+/// directly (the generated `Mutation.root` constructor) or [schema] (the
+/// generated `slingSchema` constant, which also carries the query and
+/// subscription roots); passing both is an error.
 class SlingScope<Q extends Accessor> extends StatelessWidget {
   const SlingScope({
     super.key,
@@ -72,10 +75,32 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
     return root as RootFactory<M>;
   }
 
+  /// The subscription root provided by the nearest [SlingScope]'s [schema].
+  /// Used by [SubscriptionBuilder] when it isn't given an explicit `root:`.
+  static RootFactory<S> subscriptionRootOf<S extends Accessor>(
+    BuildContext context,
+  ) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_InheritedClient>();
+    assert(scope != null, 'No SlingScope found above this widget');
+    final root = scope!.subscriptionRoot;
+    assert(
+      root != null && root is RootFactory<S>,
+      root == null
+          ? 'SubscriptionBuilder<$S> has no root: and the nearest SlingScope '
+                'was not given a schema: with a subscription root — pass one '
+                'of the two.'
+          : 'SlingScope above provides a subscription root for a different '
+                'type than $S — check schema: matches SubscriptionBuilder<$S>.',
+    );
+    return root as RootFactory<S>;
+  }
+
   @override
   Widget build(BuildContext context) => _InheritedClient(
     client: client,
     mutationRoot: mutationRoot ?? schema?.mutation,
+    subscriptionRoot: schema?.subscription,
     child: child,
   );
 }
@@ -84,15 +109,19 @@ class _InheritedClient extends InheritedWidget {
   const _InheritedClient({
     required this.client,
     this.mutationRoot,
+    this.subscriptionRoot,
     required super.child,
   });
 
   final SlingClient<Accessor> client;
   final RootFactory<Accessor>? mutationRoot;
+  final RootFactory<Accessor>? subscriptionRoot;
 
   @override
   bool updateShouldNotify(_InheritedClient oldWidget) =>
-      client != oldWidget.client || mutationRoot != oldWidget.mutationRoot;
+      client != oldWidget.client ||
+      mutationRoot != oldWidget.mutationRoot ||
+      subscriptionRoot != oldWidget.subscriptionRoot;
 }
 
 /// Flushes at the end of the current (or next) frame, after layout, so that
@@ -351,4 +380,197 @@ class _MutationBuilderState<M extends Accessor>
   @override
   Widget build(BuildContext context) =>
       widget.builder(context, _mutate, MutationState._(_loading, _error));
+}
+
+/// Status of a [SubscriptionBuilder]'s connection.
+class SubscriptionState {
+  const SubscriptionState._({
+    required this.isActive,
+    required this.isConnected,
+    required this.isReconnecting,
+    required this.eventCount,
+    required this.error,
+    required this.retry,
+  });
+
+  /// The subscription is alive: connected, or waiting to reconnect. False
+  /// before the first frame, after a server `complete`, and after a
+  /// transport failure without a `retryAfter`.
+  final bool isActive;
+
+  /// The connection is open: events can arrive right now.
+  final bool isConnected;
+
+  /// The connection dropped and a reopen is scheduled (`retryAfter`).
+  final bool isReconnecting;
+
+  /// Events received so far; `0` until the first one lands.
+  final int eventCount;
+
+  /// The last error — a partial GraphQL error on an event, or the transport
+  /// failure that dropped the connection; cleared by the next event.
+  final Object? error;
+
+  /// Reopens a dropped connection now (a retry button). A no-op while
+  /// connected.
+  final void Function() retry;
+
+  /// At least one event has been written to the cache.
+  bool get hasEvent => eventCount > 0;
+}
+
+typedef SubscriptionWidgetBuilder<S extends Accessor> = Widget Function(
+  BuildContext context,
+  S? subscription,
+  SubscriptionState state,
+);
+
+/// Keeps a subscription open while mounted. [select] runs once to record
+/// the selection (read every field you want in the document, like `prepare`
+/// on a [QueryBuilder]); the stream opens on mount and every event is
+/// normalized into the shared cache like a query response — the
+/// [QueryBuilder]s showing the same entities rebuild on their own.
+///
+/// [builder] runs on mount and after each event, with `subscription` bound
+/// to the cache (`null` before the first event): read the event's fields
+/// through it (`subscription?.launchStatusChanged?.status`) or ignore it and
+/// just return the child when the cache write is all you want.
+///
+/// ```dart
+/// SubscriptionBuilder<Subscription>(
+///   select: (s) => s.launchStatusChanged?..status..name,
+///   builder: (context, s, state) => Row(children: [
+///     if (state.isActive) const LiveDot(),
+///     Text(s?.launchStatusChanged?.name ?? 'waiting…'),
+///   ]),
+/// )
+/// ```
+///
+/// [onEvent] runs on each event, before the rebuild and outside `build`:
+/// the place for side effects such as a list-membership edit
+/// (`client.cacheScope.list((q) => q.launches()?.nodes).prepend(launch)`)
+/// or a snackbar.
+///
+/// The connection opens at the end of the first frame (like a query's
+/// flush), so [SubscriptionState.isActive] is false during that build. A
+/// dropped connection is reopened after [retryAfter] (default:
+/// `SlingClient.subscriptionRetryAfter`) — [SubscriptionState.retry] does
+/// it at once — or ends the subscription when there is none.
+///
+/// The root is resolved from the nearest [SlingScope]'s `schema:` unless
+/// [root] is given. Changing [select] does not reopen the subscription;
+/// use a [Key] to get a new one.
+class SubscriptionBuilder<S extends Accessor> extends StatefulWidget {
+  const SubscriptionBuilder({
+    super.key,
+    this.root,
+    required this.select,
+    required this.builder,
+    this.onEvent,
+    this.retryAfter,
+  });
+
+  /// Delay before reopening a dropped connection; defaults to
+  /// `SlingClient.subscriptionRetryAfter`. Read when the subscription is
+  /// created.
+  final Duration? retryAfter;
+
+  /// The generated `Subscription.root` constructor. Optional: when omitted,
+  /// it is resolved from the nearest [SlingScope] via
+  /// [SlingScope.subscriptionRootOf].
+  final RootFactory<S>? root;
+
+  /// Records the document: every field read here is selected.
+  final void Function(S subscription) select;
+
+  final SubscriptionWidgetBuilder<S> builder;
+
+  /// Called with the root accessor after each event was written to the
+  /// cache, before this widget rebuilds.
+  final void Function(S subscription)? onEvent;
+
+  @override
+  State<SubscriptionBuilder<S>> createState() => _SubscriptionBuilderState<S>();
+}
+
+class _SubscriptionBuilderState<S extends Accessor>
+    extends State<SubscriptionBuilder<S>> {
+  SlingClient<Accessor>? _client;
+  SlingSubscription<S>? _subscription;
+  StreamSubscription<S>? _listener;
+  S? _latest;
+  bool _active = false;
+  Object? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final client = SlingScope.clientOf(context);
+    if (client != _client) {
+      _close();
+      _client = client;
+      final root = widget.root ?? SlingScope.subscriptionRootOf<S>(context);
+      final sub = client.subscribeWith<S, S>(root, (s) {
+        widget.select(s);
+        return s;
+      }, retryAfter: widget.retryAfter);
+      _subscription = sub;
+      sub.onStatusChanged = () {
+        if (mounted) setState(() {});
+      };
+      // Opening a connection is a side effect: not during build.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _subscription != sub) return;
+        _listener = sub.stream.listen(
+          (s) {
+            widget.onEvent?.call(s);
+            if (!mounted) return;
+            setState(() {
+              _latest = s;
+              _error = null;
+            });
+          },
+          onError: (Object e) {
+            if (mounted) setState(() => _error = e);
+          },
+          onDone: () {
+            if (mounted) setState(() => _active = false);
+          },
+        );
+        _active = true; // onStatusChanged rebuilt us
+      });
+    }
+  }
+
+  void _close() {
+    _listener?.cancel();
+    _listener = null;
+    _subscription = null;
+    _latest = null;
+    _active = false;
+    _error = null;
+  }
+
+  @override
+  void dispose() {
+    _close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(
+    context,
+    _latest,
+    SubscriptionState._(
+      isActive: _active && (_subscription?.isActive ?? false),
+      isConnected: _subscription?.isConnected ?? false,
+      isReconnecting: _subscription?.isReconnecting ?? false,
+      eventCount: _subscription?.eventCount ?? 0,
+      error: _error,
+      retry: () {
+        _subscription?.reconnect();
+        if (mounted) setState(() {});
+      },
+    ),
+  );
 }

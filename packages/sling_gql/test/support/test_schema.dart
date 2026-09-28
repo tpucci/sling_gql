@@ -10,6 +10,7 @@ import 'package:sling_gql/sling_gql.dart';
 // type Query    { me: User!  user(id: ID!): User }
 // type User     { id: ID!  name: String!  age: Int  friends(limit: Int): [User!]! }
 // type Mutation { rename(id: ID!, name: String!): User! }
+// type Subscription { userChanged: User!  userRenamed(id: ID!): User! }
 
 class Query extends Accessor {
   Query(super.recorder, super.selection, super.path);
@@ -48,6 +49,19 @@ class Mutation extends Accessor {
   );
 }
 
+class Subscription extends Accessor {
+  Subscription(super.recorder, super.selection, super.path);
+  Subscription.root(Recorder r) : super(r, r.root, const []);
+
+  User? get userChanged => object('userChanged', User.new, keyed: true);
+  User? userRenamed({required String id}) => object(
+    'userRenamed',
+    User.new,
+    args: {'id': Arg('ID!', id)},
+    keyed: true,
+  );
+}
+
 /// What the generator emits for typed, non-fetching cache access.
 extension SlingCacheAccess on CacheScope<Query> {
   User? user(String id) => entity('User', id, User.new);
@@ -57,6 +71,7 @@ extension SlingCacheAccess on CacheScope<Query> {
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
+  subscription: Subscription.root,
 );
 
 /// `me` with two friends, as the mock endpoint would answer.
