@@ -40,6 +40,29 @@ fields and objects without `__typename` fail the test loudly. Throw
 `GraphQLError('…')` from a resolver for an `errors[]` entry with a path.
 `latency:` delays responses on the fake clock.
 
+### Subscriptions
+
+`subscription:` fields are `Stream`s (or resolvers returning one); each value
+is projected to the document's selection and delivered to the client as one
+event, through `server.subscriptionTransport` (wired by `server.client`):
+
+```dart
+final status = StreamController<Map<String, Object?>>();
+final server = MockGraphQLServer(
+  query: {...},
+  subscription: {'launchStatusChanged': status.stream},
+);
+
+await tester.pumpWidget(...); // a SubscriptionBuilder<Subscription> somewhere
+expect(server.openSubscriptions, 1);
+status.add({'__typename': 'Launch', 'id': 'launch-1', 'status': 'SUCCESS'});
+await tester.pump(Duration.zero); // deliver the event, rebuild
+```
+
+Closing the stream completes the subscription; a stream error ends it with a
+transport error. `server.openSubscriptions` counts the ones still open —
+assert it is `0` once the widget is gone.
+
 ## `pumpUntilSettled`
 
 `tester.pumpUntilSettled(client)` pumps until the client has no request in

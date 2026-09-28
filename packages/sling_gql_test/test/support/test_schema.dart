@@ -43,9 +43,23 @@ class Mutation extends Accessor {
   );
 }
 
+class Subscription extends Accessor {
+  Subscription(super.recorder, super.selection, super.path);
+  Subscription.root(Recorder r) : super(r, r.root, const []);
+
+  User? get userChanged => object('userChanged', User.new, keyed: true);
+  User? userRenamed({required String id}) => object(
+    'userRenamed',
+    User.new,
+    args: {'id': Arg('ID!', id)},
+    keyed: true,
+  );
+}
+
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
+  subscription: Subscription.root,
 );
 
 Map<String, Object?> user(String id, String name, {int? age}) => {

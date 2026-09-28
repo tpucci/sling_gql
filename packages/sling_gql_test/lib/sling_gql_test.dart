@@ -3,7 +3,8 @@
 /// - [MockGraphQLServer]: an in-memory server that answers the client's own
 ///   documents from plain Dart data (values or resolvers), so tests never
 ///   compute aliases or regex the query. `server.client(Query.root)` gives a
-///   wired `SlingClient`, `server.requests` the log.
+///   wired `SlingClient`, `server.requests` the log; `subscription:` fields
+///   are `Stream`s the client's subscriptions receive as events.
 /// - [pumpUntilSettled] / `tester.pumpUntilSettled(client)`: pump until no
 ///   request is pending and the last frame caused none.
 /// - [useRealNetwork], [disposeAfterTest]: the folklore of `flutter test`

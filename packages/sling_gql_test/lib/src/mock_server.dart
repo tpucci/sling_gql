@@ -34,7 +34,7 @@ class MockRequest {
   final Map<String, Object?> variables;
   final ParsedOperation operation;
 
-  /// `query` or `mutation`.
+  /// `query`, `mutation` or `subscription`.
   String get type => operation.type;
 
   /// Root field names selected (`me`, `launches`, …), aliases ignored.
@@ -74,6 +74,10 @@ class MockRequest {
 ///   mutation: {
 ///     'toggleFavorite': (args) { ...mutate state...; return launch; },
 ///   },
+///   subscription: {
+///     'launchStatusChanged': statusChanges.stream,   // a Stream of values
+///     'userRenamed': (args) => renames(args['id']),   // or a resolver to one
+///   },
 /// );
 /// final client = server.client(Query.root);
 /// ```
@@ -92,9 +96,11 @@ class MockGraphQLServer {
   MockGraphQLServer({
     Map<String, Object?> query = const {},
     Map<String, Object?> mutation = const {},
+    Map<String, Object?> subscription = const {},
     this.latency = Duration.zero,
   }) : query = Map.of(query),
-       mutation = Map.of(mutation);
+       mutation = Map.of(mutation),
+       subscription = Map.of(subscription);
 
   /// Root query fields: values or [Resolver]s. Mutable, so a test can change
   /// what the server answers mid-way.
@@ -102,6 +108,17 @@ class MockGraphQLServer {
 
   /// Root mutation fields, same shape as [query].
   final Map<String, Object?> mutation;
+
+  /// Root subscription fields: a `Stream` of values (each projected to the
+  /// selection like a query result, so objects need `__typename`), or a
+  /// [Resolver] returning one. A stream error ends the subscription with a
+  /// transport error; the stream closing completes it.
+  final Map<String, Object?> subscription;
+
+  /// Subscriptions currently open (listened to and not yet cancelled or
+  /// completed) — assert `0` after a `SubscriptionBuilder` unmounts.
+  int get openSubscriptions => _openSubscriptions;
+  int _openSubscriptions = 0;
 
   /// Delay applied to every response.
   Duration latency;
@@ -118,6 +135,16 @@ class MockGraphQLServer {
 
   /// A [Transport] that routes every request to this server.
   Transport get transport => handle;
+
+  /// A [SubscriptionTransport] that opens subscriptions on this server;
+  /// pass it as `SlingClient(subscriptionTransport:)`.
+  SubscriptionTransport get subscriptionTransport => (request) {
+    final json = jsonDecode(request.body) as Map<String, Object?>;
+    return subscribe(
+      json['query'] as String,
+      (json['variables'] as Map?)?.cast<String, Object?>() ?? const {},
+    );
+  };
 
   /// A `SlingClient` wired to this server, disposed at the end of the
   /// current test (`addTearDown`). [endpoint] is nominal: nothing is sent
@@ -136,6 +163,7 @@ class MockGraphQLServer {
       endpoint: endpoint ?? Uri.parse('http://mock/graphql'),
       rootFactory: rootFactory,
       httpClient: httpClient,
+      subscriptionTransport: subscriptionTransport,
       cache: cache,
       headers: headers,
       onOperation: onOperation,
@@ -177,6 +205,9 @@ class MockGraphQLServer {
     final roots = switch (op.type) {
       'query' => query,
       'mutation' => mutation,
+      'subscription' => throw UnsupportedError(
+        'MockGraphQLServer.execute: subscriptions go through subscribe()',
+      ),
       final t => throw UnsupportedError('MockGraphQLServer: $t operations'),
     };
     final errors = <Map<String, Object?>>[];
@@ -193,6 +224,97 @@ class MockGraphQLServer {
       ], errors);
     }
     return {'data': data, if (errors.isNotEmpty) 'errors': errors};
+  }
+
+  /// Opens the subscription [document] and returns its execution results
+  /// (`{data, errors?}`), one per value of the field's stream. Records the
+  /// request like [execute].
+  Stream<Map<String, Object?>> subscribe(
+    String document, [
+    Map<String, Object?> variables = const {},
+  ]) {
+    final op = parseOperation(document, variables);
+    requests.add(MockRequest(document, variables, op));
+    if (op.type != 'subscription') {
+      throw UnsupportedError(
+        'MockGraphQLServer.subscribe: a ${op.type} document; use execute()',
+      );
+    }
+    if (op.fields.length != 1) {
+      throw StateError(
+        'MockGraphQLServer: a subscription selects exactly one root field, '
+        'got ${op.fields.map((f) => f.name).join(', ')}',
+      );
+    }
+    final field = op.fields.single;
+    if (!subscription.containsKey(field.name)) {
+      throw StateError(
+        'MockGraphQLServer: no subscription field "${field.name}" — add it '
+        'to MockGraphQLServer(subscription: {...})',
+      );
+    }
+    late StreamController<Map<String, Object?>> out;
+    StreamSubscription<Object?>? upstream;
+    out = StreamController(
+      onListen: () async {
+        _openSubscriptions++;
+        if (latency > Duration.zero) await Future<void>.delayed(latency);
+        final Stream<Object?> source;
+        try {
+          final value = await _invoke(subscription[field.name], field.args);
+          if (value is! Stream) {
+            throw StateError(
+              'MockGraphQLServer: subscription field "${field.name}" must '
+              'be a Stream or a resolver returning one, got '
+              '${value.runtimeType}',
+            );
+          }
+          source = value;
+        } catch (e, st) {
+          out.addError(e, st);
+          await out.close();
+          return;
+        }
+        Future<Map<String, Object?>> project(Object? value) async {
+          final errors = <Map<String, Object?>>[];
+          Object? data;
+          try {
+            data = await _project(value, field, [field.alias], errors);
+          } on GraphQLError catch (e) {
+            errors.add({
+              'message': e.message,
+              'path': [field.alias],
+              if (e.extensions != null) 'extensions': e.extensions,
+            });
+          }
+          return {
+            'data': {field.alias: data},
+            if (errors.isNotEmpty) 'errors': errors,
+          };
+        }
+
+        // asyncMap keeps results in order and holds `done` until the last
+        // value was projected.
+        upstream = source
+            .asyncMap(project)
+            .listen(
+              (result) {
+                if (!out.isClosed) out.add(result);
+              },
+              onError: (Object e, StackTrace st) {
+                if (!out.isClosed) out.addError(e, st);
+              },
+              onDone: () {
+                if (!out.isClosed) out.close();
+              },
+            );
+      },
+      onCancel: () {
+        _openSubscriptions--;
+        return upstream?.cancel();
+      },
+    );
+    return out.stream;
   }
 
   Future<Object?> _resolve(
