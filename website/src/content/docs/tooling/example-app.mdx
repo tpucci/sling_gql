@@ -181,6 +181,24 @@ asked for (`details`, `flightNumber`, the rocket's specs, payloads, crew) — th
 test asserts `date`/`status` are absent from it. See [Caching](/sling_gql/guides/caching/).
 </Aside>
 
+## Mission control
+
+The **+** button on the Launches tab opens `ScheduleLaunchScreen`: a form whose pickers
+are an ordinary `QueryBuilder` (`rockets`, `launchpads`, one request), a random mission
+name (one in five is doomed — the mock fails a launch whose name contains "fail"), and a
+`MutationBuilder` running `scheduleLaunch`. The input is built *once*, outside the body
+(see [Mutations](/sling_gql/guides/mutations/)). On success it replaces itself with the
+launch's detail screen.
+
+From there the server does the rest: the mock runs a launch sequence, `SCHEDULED →
+IN_FLIGHT → SUCCESS | FAILURE`, publishing `launchStatusChanged` at each step. The detail
+screen's status icon, the list row behind it and the "Live" banner all follow — they read
+the same `Launch:<id>` entity the events are written into. The segments follow too:
+`lib/list_rules.dart` declares that `launches(filter: {status})` holds a launch iff the
+status matches (and `me.favorites` iff `launch.favorite`), and the client moves the launch
+between the cached lists as its status changes. `NetworkLog` shows the two open
+subscriptions separately from the requests, of which there are none after the mutation.
+
 ## The favourite heart (mutation)
 
 The heart next to the launch name is a `MutationBuilder<Mutation>`:
@@ -279,6 +297,24 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
 - **1 more request for the detail screen.** Opening a launch triggers
   `prepare`, which selects everything the screen needs in one shot.
 - **0 requests to expand payloads.** `prepare` paid for them up front.
+
+### Test 3 — subscriptions over SSE
+
+A status change made by a plain `http.post` — outside the app's client, so the mutation
+response never reaches its cache — updates the first row's icon and the "Live" banner with
+**0 requests**: the `launchStatusChanged` event did it. The seed data is restored in a
+tear-down.
+
+### Test 4 — mission control
+
+Caches the "Scheduled" and "Success" segments, then schedules "Test Pigeon" from the form
+(**1 request** for the rocket/launchpad pickers, **1** for the mutation, **1** for the
+detail screen it lands on). Then waits, in real time, for `IN_FLIGHT` and `SUCCESS` to
+appear on the detail screen — **0 requests** — and goes back: the launch is on top of
+"All" (added by the `launches` rule on the `launchScheduled` event), on top of "Success",
+and absent from "Scheduled" — still **0 requests**, both segments were cached and the
+[list rules](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities)
+moved it.
 
 ### Test 2 — Me tab, Success segment
 

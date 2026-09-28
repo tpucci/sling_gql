@@ -86,9 +86,16 @@ expect(server.requests, hasLength(1), reason: 'header + list batched');
 expect(server.lastRequest.selects('launches.nodes.rocket.name'), isTrue);
 ```
 
-`server.httpClient` and `server.transport` plug into a client you construct
-yourself (`SlingClient(httpClient: server.httpClient)`), for instance to test a
-custom [transport](/sling_gql/guides/transport/) in front of it.
+`server.httpClient`, `server.transport` and `server.subscriptionTransport` plug
+into a client you construct yourself (`SlingClient(httpClient:
+server.httpClient)`), for instance to test a custom
+[transport](/sling_gql/guides/transport/) in front of it.
+
+`subscription:` fields are `Stream`s (or resolvers returning one). Each value
+is projected to the document's selection and delivered as one event;
+closing the stream completes the subscription. `server.openSubscriptions`
+counts the ones still open — assert `0` after the widget is gone. See
+[Subscriptions](/sling_gql/guides/subscriptions/#testing).
 
 <Aside type="note">
 The parser handles what the client prints — one operation, aliases,

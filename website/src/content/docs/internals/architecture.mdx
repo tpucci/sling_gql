@@ -16,8 +16,8 @@ import { Aside, FileTree } from '@astrojs/starlight/components';
       - normalization.dart  identity rule (`__typename:id`), lookups
       - ref.dart  `Ref`, `missing` sentinel
     - accessor.dart  Accessor base class, Recorder interface
-    - client.dart  SlingClient, QueryScope, FlushScheduler
-    - widgets.dart  SlingScope, QueryBuilder, QueryState, frameEndScheduler
+    - client.dart  SlingClient, QueryScope, MutationScope, SubscriptionScope, transports
+    - widgets.dart  SlingScope, QueryBuilder, MutationBuilder, SubscriptionBuilder
 </FileTree>
 
 About 900 lines, one dependency (`package:http`). Generated code depends only on
@@ -130,6 +130,16 @@ runs `body` once against a `MutationScope` to record the selection, POSTs it alo
 the response through the same `writeResponse` as queries, and runs `body` again to compute
 the return value. Optimistic writes made through generated setters are journaled as
 `CacheWrite`s (path + previous value) while `optimistic` runs and undone on failure.
+
+`SubscriptionBuilder<S>` runs `select` once against a `SubscriptionScope` (via
+`client.subscribeWith`) to record the document, listens to the resulting
+`SlingSubscription.stream` in a post-frame callback, and rebuilds with each value. The
+client sends one POST per subscription with `accept: text/event-stream` through
+`SlingClient.subscriptionTransport` (default `sseSubscriptionTransport`, a small SSE
+decoder over `http.Client.send`), and treats each event exactly like a response:
+prune partial errors, `writeResponse` under `ROOT_SUBSCRIPTION`, notify the scopes whose
+deps were touched, run the body again for the stream value. Cancelling the stream closes
+the connection and drops the root fields.
 
 ## Generated code contract
 

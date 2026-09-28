@@ -9,14 +9,14 @@ while building the normalized cache and mutations, and the roadmap (website
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · fine-grained rebuilds mostly done (#19, #20) ·
-~~expiry/SWR~~ · subscriptions #30 · unions #31 · dev experience #46, #47 ·
+~~expiry/SWR~~ · ~~subscriptions~~ · unions #31 · dev experience #46, #47 ·
 `gql_link` #48.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
-27 items in **Done**. Suggested next picks: #19/#20 (per-row rebuilds), #30
-(subscriptions), #24/#25/#28 (small runtime/gen fixes).
+29 items in **Done**. Suggested next picks: #19/#20 (per-row rebuilds), #31
+(unions), #24/#25/#28 (small runtime/gen fixes).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -60,8 +60,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     the last result.
 29. **Runtime — Partial mutation errors** write the resolved fields then
     reject; document the semantics or make it a policy.
-30. **Runtime — Subscriptions** (SSE; mock exposes `launchStatusChanged`,
-    `launchScheduled`). Generator currently skips the Subscription root.
 31. **Runtime/Gen — Unions & interfaces (`$on`).** Add one to the mock schema
     first.
 33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
@@ -99,13 +97,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 50. **Runtime — Type policies**: custom merge per field and connection
     merging (Apollo `relayStylePagination`-style) so pages can live in one
     growing cache list instead of one entry per cursor (pairs with #5).
+    Membership half done: `ListRule` (#55). Left: merge policies / position.
 51. **Runtime — Weakly held stale entries** (`WeakReference`/`Finalizer`) as
     an eviction mechanism for data past `maxAge` (#23 only revalidates, never
     drops).
-53. **Runtime — Subscription widget** `SubscriptionBuilder<Subscription>`
-    (records once, opens the SSE stream, writes each event through
-    `writeResponse`) — the widget half of #30; generator must emit the
-    Subscription root.
 54. **Perf — List-index granularity for inline lists** (today: the whole
     entity field). Remaining half of "fine-grained rebuilds".
 
@@ -140,6 +135,10 @@ Kept for number stability; see git history for details.
 43. Repo — Pub workspace (root `pubspec.yaml`, `resolution: workspace`) + melos 7 scripts (`melos run test` = four gates, `analyze`, `format`, `generate`, `publish:dry-run`); `sling_gql` / `sling_gql_gen` 0.1.0 pub.dev-ready (LICENSE MIT, CHANGELOG, README, repository metadata, `dart pub publish --dry-run` clean).
 44. Repo — CI (`.github/workflows/ci.yml`): analyze, format, runtime, generator, generated-file-is-fresh, example against the mock API, website build, on push/PR. `publish.yml`: `melos version` (Conventional Commits) tags `<pkg>-vX.Y.Z`; pushing a tag publishes that package to pub.dev via OIDC (automated publishing enabled on pub.dev).
 52. Runtime — Soft refetch: `QueryScope.revalidate()` / `state.revalidate()`, a no-op within `maxAge`.
+30. Runtime/Gen — Subscriptions: `SlingClient.subscribeWith` / generated `client.subscribe`, `SlingSubscription` (stream, cancel), `SubscriptionScope`, `SubscriptionTransport` with `sseSubscriptionTransport` default (GraphQL over SSE, distinct connections); generator emits the `Subscription` root, `SlingSubscriptions`, `slingSchema.subscription`; `MockGraphQLServer(subscription:)`; example "Live" banner + e2e test against yoga.
+56. Runtime — Subscription reconnection: `SlingClient(subscriptionRetryAfter:)` / `subscribe(retryAfter:)`, `SlingSubscription.isConnected`/`isReconnecting`/`reconnect()`, `SubscriptionState.retry()`; example banner shows "reconnecting… (tap to retry now)".
+55. Runtime — `ListRule` / `SlingClient(listRules:)`: cached lists follow their entities (`belongs(args, entity)` per remembered alias; responses only remove; journaled in `optimistic`). Example `list_rules.dart` + mission-control flow (`scheduleLaunch` form, mock launch sequence `SEQUENCE_MS`, `IN_FLIGHT` status).
+53. Runtime — `SubscriptionBuilder<Subscription>` (`select` records once, opens post-frame, `SubscriptionState`), root from `SlingScope(schema:)` via `subscriptionRootOf`.
 
 ## Explicitly not planned
 

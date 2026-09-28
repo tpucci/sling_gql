@@ -170,8 +170,23 @@ mutation succeeded, not in `optimistic`.
 Each argument set is its own cache entry. `launches(first: 20)` and
 `launches(first: 20, after: "…")` are two pages, and `launches(filter: {favorite: true})` is
 yet another list — an edit applies to exactly the one you name, and a sibling `totalCount` is
-not adjusted. For paginated or filtered lists (where the row's *position* or the filter's
-membership is the server's call), [`refetchQueries`](#refetchqueries) remains the right tool.
+not adjusted. When membership is a function of the entity (`favorites` ⇔ `launch.favorite`,
+`launches(filter:)` ⇔ `launch.status`), a [list rule](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities)
+does this for every cached instance, for mutations and subscriptions alike. For paginated
+lists where the row's *position* is the server's call, [`refetchQueries`](#refetchqueries)
+remains the right tool.
+</Aside>
+
+<Aside type="caution" title="Build your arguments outside the body">
+The body runs twice and its arguments are the cache key. An argument computed *inside* it
+— `DateTime.now()`, `Random`, a fresh UUID — differs between the two runs, so the second
+run reads a different alias, finds nothing, and `mutate` returns `null` although the
+mutation succeeded. Compute the input once, then pass it in:
+
+```dart
+final input = ScheduleLaunchInput(name: name, date: DateTime.now());
+final id = await client.mutate((m) => m.scheduleLaunch(input: input)?.id);
+```
 </Aside>
 
 ## What is in the example

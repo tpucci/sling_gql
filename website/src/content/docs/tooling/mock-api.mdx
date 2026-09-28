@@ -42,6 +42,7 @@ reaches the same `localhost:4000` unchanged.
 | --- | --- | --- |
 | `PORT` | `4000` | HTTP port, bound on `0.0.0.0`. |
 | `LATENCY_MS` | `400` | Artificial delay awaited once per HTTP request (not per field). |
+| `SEQUENCE_MS` | `4000` | Launch sequence step after `scheduleLaunch` (`IN_FLIGHT`, then `SUCCESS`/`FAILURE`). |
 
 Turn latency up to actually *see* skeleton placeholders instead of a flash;
 turn it down (`LATENCY_MS=0`) to make widget tests fast.
@@ -183,9 +184,11 @@ regardless of what a client asks for. Cursors are base64-encoded offsets
 
 `toggleFavorite` is what the example's detail-screen heart calls (see
 [Mutations](/sling_gql/guides/mutations/)); favourites live in the server's memory, so they
-persist across app restarts until the server restarts. Subscriptions are wired up in the
-schema and resolvers but not yet consumed by the runtime (see
-[Roadmap](/sling_gql/internals/roadmap/)):
+persist across app restarts until the server restarts. Subscriptions are served over
+Server-Sent Events on the same endpoint (POST with `accept: text/event-stream`, which is
+what the runtime sends — see [Subscriptions](/sling_gql/guides/subscriptions/)); the
+example's list screen keeps `launchStatusChanged` open, so running `updateLaunchStatus`
+in GraphiQL updates its rows:
 
 ```graphql
 mutation {
@@ -203,6 +206,13 @@ The other two mutations are `scheduleLaunch(input: ScheduleLaunchInput!)` and
 `updateLaunchStatus(id: ID!, status: LaunchStatus!)`; the other subscription
 is `launchStatusChanged`. Both mutations that change a launch also publish to
 the matching subscription topic through graphql-yoga's `createPubSub`.
+
+`scheduleLaunch` also starts a **launch sequence** the server runs by itself:
+the launch goes `IN_FLIGHT` after `SEQUENCE_MS` (default 4000 ms), then
+`SUCCESS` — or `FAILURE` if its name contains "fail" — after another
+`SEQUENCE_MS`, each step published on `launchStatusChanged`. That is what the
+example's mission-control flow watches; its tests run the server with
+`SEQUENCE_MS=700`.
 
 ## The dataset
 

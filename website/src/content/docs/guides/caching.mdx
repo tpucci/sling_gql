@@ -182,6 +182,57 @@ entity, drops it from every list that referenced it, and blanks object fields th
 it so they read as `missing` and get re-fetched on the next build. The typed form also
 notifies every scope that read one of those fields.
 
+## List rules: lists that follow their entities
+
+`cacheScope.list` is imperative: *you* know which list changed. Often the list is a
+function of the entity — `launches(filter: {status})` holds a launch iff its status
+matches, `me.favorites` holds a launch iff `launch.favorite` — and then a rule can do
+it, whichever way the entity changed (a mutation response, an optimistic setter, a
+[subscription](/sling_gql/guides/subscriptions/) event):
+
+```dart
+SlingClient<Query>(
+  listRules: [
+    ListRule<Launch>(
+      field: 'launches', items: 'nodes',        // a connection: the list is under `nodes`
+      typename: 'Launch', ctor: Launch.new,
+      belongs: (args, launch) {
+        final status = (args['filter'] as Map?)?['status'];
+        return status == null || launch.status?.graphqlName == status;
+      },
+      position: ListPosition.prepend,
+    ),
+    ListRule<Launch>(
+      field: 'favorites', typename: 'Launch', ctor: Launch.new,
+      belongs: (_, launch) => launch.favorite == true,
+    ),
+  ],
+)
+```
+
+Whenever a `Launch` entity is written, the client re-evaluates `belongs` for every cached
+list under a `launches` / `favorites` node it has sent — it remembers each alias's
+arguments, so the "Success" segment you visited earlier counts even though nothing is
+showing it — and adds or removes the reference. Lists that were never fetched are left
+alone. Edits go through the write path: dependants rebuild, and inside `optimistic` they
+are journaled and rolled back with the mutation.
+
+Two rules of the rules:
+
+- **Query responses only remove.** With pagination each page is one list, and the launches
+  of page two "belong" to `launches(first: 20)` as much as page one's do — yet must not be
+  added to it. So a response can make an entity *leave* lists it no longer belongs to
+  (the cached "Scheduled" segment loses a launch a fresh response shows as `SUCCESS`), but
+  entities only *join* lists on what the app or the server pushes: mutation responses,
+  subscription events, setters. A response's own lists are the server's word.
+- **Decide on fields every reader selects.** `belongs` reads through a non-fetching
+  accessor: a field that is not cached reads `null`, and a rule on it would evict the
+  entity. `status` is on every row; `upcoming` is not.
+
+Membership is set-like; the position of a joining entity is `prepend`/`append`, and
+`totalCount`-style siblings are not maintained. The mission-control flow of the
+[example app](/sling_gql/tooling/example-app/#mission-control) runs on two such rules.
+
 ## Notification: per entity field
 
 Every read records the **dependency keys** it traversed — `ROOT_QUERY.launches_1qouruf`,

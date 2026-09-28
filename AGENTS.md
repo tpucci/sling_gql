@@ -1,7 +1,7 @@
 # AGENTS.md — sling_gql
 
 GQty-style GraphQL client for Flutter, **proof of concept** (queries,
-normalized cache, mutations; no subscriptions yet).
+normalized cache, mutations, subscriptions over SSE).
 Read `README.md` first for the user-facing picture; this file is for working
 on the code.
 
@@ -80,8 +80,8 @@ on the code.
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
-| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch). |
-| `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `frameEndScheduler`. |
+| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch). |
+| `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `frameEndScheduler`. |
 
 Design decisions worth knowing before changing things:
 
@@ -105,6 +105,27 @@ Design decisions worth knowing before changing things:
   how the list row updates when the detail screen toggles a favourite. Root
   fields under `ROOT_MUTATION` are removed afterwards (they would pin entities).
   Mutations are sent immediately and alone, never batched with queries.
+- **Subscriptions are one POST each** (`accept: text/event-stream`), through
+  `SlingClient.subscriptionTransport` (default: `sseSubscriptionTransport`,
+  GraphQL-over-SSE "distinct connections" — what yoga serves on `/graphql`).
+  `subscribeWith` runs the body once on a `SubscriptionScope` to record, opens
+  on `listen`, and for each event prunes partial errors, `writeResponse`s
+  under `ROOT_SUBSCRIPTION`, `_notify`s, then runs the body again for the
+  stream value. The root fields are removed on close. Not part of `isIdle`.
+  A transport error with `retryAfter` (default
+  `SlingClient.subscriptionRetryAfter`) schedules `_open` again instead of
+  closing (`isReconnecting`, `reconnect()`, `onStatusChanged` for the
+  widget); a server `complete` always closes.
+  Test helpers: `MockGraphQLServer(subscription: {field: Stream})` +
+  `openSubscriptions`.
+- **List rules** (`SlingClient(listRules:)`, `ListRule<E>`): `_rememberLists`
+  records (alias path, args) of every node matching a rule's `field` from
+  each *query* document at flush; `_notify` first runs `_applyListRules`
+  over the touched entities of the rule's typename, evaluating `belongs`
+  per remembered list and rewriting it (journaled while `_journal` is set).
+  `insert: false` for query responses — pages must not absorb each other —
+  so responses only remove. The example's `lib/list_rules.dart` replaces
+  hand-written membership edits.
 - **Optimistic writes are journaled.** `Accessor.write` reports a `CacheWrite`
   (path, previous value, touched keys) via `Recorder.onWrite`; while a
   mutation's `optimistic` callback runs, the client collects them and undoes
@@ -148,7 +169,9 @@ helper signatures, update the generator **and** that test in the same change.
 
 The generator emits the `Mutation` root (with `.root`) and an
 `extension SlingMutations on SlingClient<Query>` providing `client.mutate(...)`,
-so no wiring is needed in app code. Subscription roots are still skipped.
+and likewise the `Subscription` root with `extension SlingSubscriptions`
+providing `client.subscribe(...)`; `slingSchema` carries all three roots, so no
+wiring is needed in app code.
 
 The generator decides which types are *keyed* (have a scalar `--key-field`,
 default `id`) and which fields are *lookups* (single `id` argument returning a

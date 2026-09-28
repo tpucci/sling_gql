@@ -1,0 +1,190 @@
+---
+title: Subscriptions
+description: client.subscribe and SubscriptionBuilder — record the selection by reading it, open a Server-Sent Events stream, let every event flow into the normalized cache.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## The same idea, on a stream
+
+A subscription in sling_gql is a function that **reads** the fields it wants
+from each event:
+
+```dart
+final sub = client.subscribe((s) => s.launchStatusChanged?..name..status);
+sub.stream.listen((launch) => print('${launch?.name}: ${launch?.status}'));
+```
+
+`client.subscribe` is an extension the generator emits for your schema (it
+binds the `Subscription` root type); the runtime primitive is
+`client.subscribeWith(Subscription.root, body)`.
+
+<Steps>
+
+1. **Record.** The body runs once, now, against an empty recorder. Every field
+   it touches is added to the selection; nothing is fetched on a miss.
+   The example above records:
+
+   ```graphql
+   subscription {
+     launchStatusChanged { __typename id name status }
+   }
+   ```
+
+2. **Open.** The connection opens when something listens to `sub.stream`
+   — nothing is sent before that — as one POST with
+   `accept: text/event-stream` (see [Transport](#transport)).
+
+3. **Write and notify.** Each event goes through the exact same
+   `writeResponse` as a query response: `Launch:<id>` is merged, and every
+   `QueryBuilder` that read `Launch:<id>.status` rebuilds. The list row, the
+   detail screen, the Me tab — none of them know a subscription exists.
+
+4. **Compute.** The body runs again, against the cache, and the stream
+   yields its result. The value is a live view, like any accessor: read it
+   when it arrives.
+
+</Steps>
+
+Cancel the stream subscription (or call `sub.cancel()`) to close the
+connection; `client.dispose()` closes every open one. Partial GraphQL
+errors on an event are stream errors that do **not** end the stream (the
+fields that resolved are still written); a server `complete` ends it.
+
+A **dropped connection** (the server restarted, the network blipped) is a
+stream error too. With `SlingClient(subscriptionRetryAfter: Duration(seconds: 3))`
+— or `retryAfter:` on one `subscribe` call — the client reopens it after the
+delay, again and again until it holds, and the stream stays open
+(`sub.isReconnecting` meanwhile, `sub.reconnect()` to retry now). Without
+one, the stream ends.
+
+## `SubscriptionBuilder`
+
+The widget form keeps a subscription open while it is mounted:
+
+```dart
+SubscriptionBuilder<Subscription>(
+  select: (s) => s.launchStatusChanged?..name..status,
+  builder: (context, subscription, state) {
+    final launch = subscription?.launchStatusChanged;
+    return Row(children: [
+      Icon(CupertinoIcons.circle_fill,
+          color: state.isActive ? CupertinoColors.activeGreen : CupertinoColors.systemGrey),
+      Text(launch == null ? 'waiting…' : '${launch.name} → ${launch.status?.graphqlName}'),
+    ]);
+  },
+)
+```
+
+- `select` records the document, once. Read every field you want in it,
+  like `prepare` on a `QueryBuilder` — the document cannot grow after the
+  stream opened.
+- `builder` runs on mount and after each event. `subscription` is the root
+  accessor bound to the cache (`null` before the first event); read the event
+  through it, or ignore it and return your child when the cache write is all
+  you want.
+- `state.isConnected` (events can arrive now), `state.isReconnecting` (the
+  connection dropped, a reopen is scheduled), `state.isActive` (either),
+  `state.eventCount` / `hasEvent`, `state.error` (a partial error or the
+  failure that dropped the connection, cleared by the next event), and
+  `state.retry()` for a "reconnect now" tap.
+
+The connection opens at the end of the first frame — opening a socket is a
+side effect, not something a `build` should do — and closes in `dispose`.
+The root is resolved from `SlingScope(schema: slingSchema)`; pass `root:
+Subscription.root` to override.
+
+<Aside type="tip" title="You rarely need the builder's value">
+The point of a subscription in a normalized cache is the *write*. The
+example app's list screen has a one-line "Live" banner subscribed to
+`launchStatusChanged` and `launchScheduled`; the row icons update because
+they read the same `Launch:<id>` entity, not because the banner tells them
+anything. Tap **+**, schedule a launch, and watch the server fly it.
+</Aside>
+
+## Lists: `launchScheduled` adds a row, `SUCCESS` moves it
+
+An event writes an entity. Which *lists* should gain or lose it — the "Scheduled"
+segment, the "Success" segment, `me.favorites` — is not in the event. Declare it once as
+a [list rule](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities) and
+the client applies it to every cached list on every event:
+
+```dart
+ListRule<Launch>(
+  field: 'launches', items: 'nodes', typename: 'Launch', ctor: Launch.new,
+  belongs: (args, launch) {
+    final status = (args['filter'] as Map?)?['status'];
+    return status == null || launch.status?.graphqlName == status;
+  },
+  position: ListPosition.prepend,
+)
+```
+
+With it, a `launchScheduled` event puts the new launch on top of "All" and "Scheduled";
+the `IN_FLIGHT` event takes it out of "Scheduled"; `SUCCESS` puts it on top of "Success"
+— no request, and no code in the widgets. For one-off reactions, `SubscriptionBuilder`'s
+`onEvent` runs with each event outside `build` (a snackbar, a `cacheScope.list` edit).
+
+## Transport
+
+The default transport speaks **GraphQL over Server-Sent Events** in
+"distinct connections" mode: one POST per subscription, on the regular
+endpoint, with `accept: text/event-stream`; `next` events carry one
+execution result each, `complete` ends the stream. That is what
+graphql-yoga (the [mock API](/sling_gql/tooling/mock-api/)), Apollo Server
+and Hot Chocolate serve out of the box.
+
+`SlingClient(subscriptionTransport:)` replaces it. Wrap the default to add
+auth, or use another protocol entirely — the client only sees decoded
+results:
+
+```dart
+SlingClient<Query>(
+  endpoint: uri,
+  rootFactory: Query.root,
+  subscriptionTransport: (request) {
+    request.headers['authorization'] = 'Bearer $token';
+    return sseSubscriptionTransport(request);
+  },
+)
+```
+
+A `SubscriptionTransport` is `Stream<Map<String, Object?>> Function(http.Request)`:
+each element is `{data, errors?}`, the stream ends on completion, an error is
+a transport failure. A `graphql-ws` adapter is one such function; it is not in
+the runtime (which stays `http`-only).
+
+## Testing
+
+`MockGraphQLServer(subscription: {...})` takes `Stream`s (or resolvers
+returning one) and delivers each value, projected to the document's
+selection, as an event — see [Testing](/sling_gql/guides/testing/).
+
+```dart
+final status = StreamController<Map<String, Object?>>();
+final server = MockGraphQLServer(
+  query: {...},
+  subscription: {'launchStatusChanged': status.stream},
+);
+await tester.pumpWidget(...);
+expect(server.openSubscriptions, 1);
+status.add({'__typename': 'Launch', 'id': 'launch-1', 'status': 'SUCCESS'});
+await tester.pump(Duration.zero);
+```
+
+## The mock's launch sequence
+
+`scheduleLaunch` on the [mock API](/sling_gql/tooling/mock-api/) starts a sequence the
+server runs on its own: `IN_FLIGHT` after `SEQUENCE_MS` (4 s), then `SUCCESS` — or
+`FAILURE` when the name contains "fail" — after another, each published on
+`launchStatusChanged`. The example's tests run the server with `SEQUENCE_MS=700`.
+
+## What it is not
+
+- **Not batched, not cached as a query.** The last event stays readable under
+  `ROOT_SUBSCRIPTION` while the subscription is open and is dropped when it
+  closes; the entities it wrote stay.
+- **No backoff.** Reconnection is a fixed `retryAfter`, repeated; exponential
+  backoff or "only when online" belong in a custom transport.
+- **Not counted by `client.isIdle`.** An open subscription is not "work in
+  progress", so `pumpUntilSettled` does not wait on it.

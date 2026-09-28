@@ -278,9 +278,6 @@ go looking for why `type$` or `$typename` is spelled that way.
 
 ## What's not supported yet
 
-- **Mutation and subscription root types are skipped entirely** — the
-  generator only emits accessors for the query side; see
-  [Roadmap](/sling_gql/internals/roadmap/) for when that changes.
 - **Unions and interfaces** (`$on`) aren't emitted — the generator
   only walks `OBJECT`, `ENUM` and `INPUT_OBJECT` kinds. The mock API's
   schema doesn't have any yet either.

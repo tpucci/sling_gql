@@ -29,11 +29,14 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    [Caching](/sling_gql/guides/caching/). Left for later: connection-aware type policies so
    paginated/filtered lists update without `refetchQueries`.
 
-3. **Subscriptions**
+3. **Subscriptions** — done
 
-   The mock API serves `launchStatusChanged` and `launchScheduled` over SSE. A
-   `SubscriptionBuilder<Subscription>` records a selection once, opens the stream, and
-   writes each event into the cache.
+   `client.subscribe((s) => s.launchStatusChanged?..status)` and
+   `SubscriptionBuilder<Subscription>` record a selection once, open a GraphQL-over-SSE
+   stream (`SlingClient(subscriptionTransport:)` to swap the protocol), and write each
+   event through the same `writeResponse` as a query — see
+   [Subscriptions](/sling_gql/guides/subscriptions/). `MockGraphQLServer(subscription:)`
+   takes `Stream`s. Left for later: reconnection policies, a `graphql-ws` transport.
 
 4. **Unions and interfaces (`$on`)**
 
