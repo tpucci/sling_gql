@@ -31,14 +31,29 @@ on the code.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.
   - `example` — Flutter app, **iOS only** (`flutter create --platforms=ios`).
     Do not add other platforms.
-- **Publishing.** `sling_gql` and `sling_gql_gen` are published to pub.dev in
-  lockstep (same version, MIT). Each has its own `README.md`, `CHANGELOG.md`,
-  `LICENSE` (copy of the root one). Before a release: bump both versions +
-  changelogs (`melos version` or by hand), `melos run publish:dry-run`, commit,
-  then push a `vX.Y.Z` tag: `.github/workflows/publish.yml` checks both
-  pubspec versions equal the tag and publishes via pub.dev automated
-  publishing (OIDC, no secrets). Code must be `dart format`ed (pub.dev scores
-  it; `melos run format` checks).
+- **Commit messages are Conventional Commits** -- `melos version` derives
+  bumps and changelogs from them. Scope by package or area:
+  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `docs(website): ...`,
+  `chore(repo): ...`, `test(example): ...`. Only commits touching a package's
+  files bump that package; `feat` -> minor (pre-1.0 as well, melos default),
+  `fix`/`perf`/`refactor` -> patch, `BREAKING CHANGE:` footer or `!` -> major.
+  Never hand-edit versions or `CHANGELOG.md` files.
+- **Publishing** (`sling_gql`, `sling_gql_gen`; MIT; each with its own
+  `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
+  independent. Release from a clean, up-to-date `main`:
+
+  ```sh
+  melos run publish:dry-run          # pub.dev validation of both packages
+  melos version                      # bump + CHANGELOG + commit + tags <pkg>-vX.Y.Z
+  git push --follow-tags
+  ```
+
+  `.github/workflows/publish.yml` runs once per `<pkg>-vX.Y.Z` tag, checks the
+  tag matches that package's `pubspec.yaml`, and publishes via pub.dev
+  automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
+  `sling_gql_gen-v{{version}}`, no secrets). Manual escape hatch:
+  `melos version <package> <patch|minor|major|x.y.z>`. Code must be
+  `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
   `example/lib/generated/schema.dart` unchanged, example tests against the

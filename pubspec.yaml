@@ -20,11 +20,18 @@ melos:
     - sling_gql_workspace
 
   command:
+    # `melos version`: Conventional Commits since each package's last
+    # `<pkg>-vX.Y.Z` tag -> bump + CHANGELOG.md + one commit + per-package
+    # tags. Pushing those tags triggers .github/workflows/publish.yml.
     version:
+      branch: main
       linkToCommits: true
       workspaceChangelog: false
-      # Both published packages move in lockstep; the example is private.
       updateGitTagRefs: true
+      message: |
+        chore(release): publish packages
+
+        {new_package_versions}
       changelogCommitBodies:
         include: false
     publish:

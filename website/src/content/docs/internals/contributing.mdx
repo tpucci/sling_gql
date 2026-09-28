@@ -76,9 +76,17 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
 7. **CI and releases.** Every push and pull request runs the four gates above
    (`.github/workflows/ci.yml`), plus analyze, format and a check that the example's
-   generated file is up to date. Pushing a `vX.Y.Z` tag publishes `sling_gql` and
-   `sling_gql_gen` to pub.dev (`publish.yml`, pub.dev automated publishing; both
-   `pubspec.yaml` versions must equal the tag).
+   generated file is up to date.
+
+   Commits follow [Conventional Commits](https://www.conventionalcommits.org/) scoped by
+   package (`feat(sling_gql): …`, `fix(sling_gql_gen): …`, `docs(website): …`), because
+   releases are cut by melos from them:
+
+   ```sh
+   melos run publish:dry-run   # pub.dev validation
+   melos version               # bump + CHANGELOG + commit + `<pkg>-vX.Y.Z` tags
+   git push --follow-tags      # publish.yml publishes each tagged package to pub.dev
+   ```
 
 </Steps>
 
