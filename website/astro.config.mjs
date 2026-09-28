@@ -40,6 +40,7 @@ export default defineConfig({
             { label: 'Caching', slug: 'guides/caching' },
             { label: 'Mutations', slug: 'guides/mutations' },
             { label: 'Transport', slug: 'guides/transport' },
+            { label: 'Testing', slug: 'guides/testing' },
           ],
         },
         {

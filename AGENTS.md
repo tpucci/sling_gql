@@ -17,28 +17,34 @@ on the code.
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
   pass before committing content.
-- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the three
+- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the four
   packages (`workspace:`), each has `resolution: workspace`; only the root
   `pubspec.lock` exists (per-package lockfiles are gitignored). Run
   `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
   config and scripts live in the root `pubspec.yaml` under `melos:`.
-  Gates: `melos run test` (all four: runtime, generator, example with the mock
-  server auto-started by `scripts/with-mock-api.mjs`, website build), or
-  `test:runtime` / `test:gen` / `test:example` / `test:website` individually;
-  `melos run analyze`, `melos run format`, `melos run generate`. Add
-  `--no-select` when running non-interactively.
+  Gates: `melos run test` (all four: runtime + test helpers, generator,
+  example with the mock server auto-started by `scripts/with-mock-api.mjs`,
+  website build), or `test:runtime` / `test:gen` / `test:example` /
+  `test:website` individually; `melos run analyze`, `melos run format`,
+  `melos run generate`. Add `--no-select` when running non-interactively.
   - `packages/sling_gql` — the runtime (Flutter package). Tests: `flutter test`.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.
+  - `packages/sling_gql_test` — test helpers (Flutter package, depends on
+    `flutter_test`): `MockGraphQLServer` (parses the printed document,
+    resolves it against maps/resolvers, answers under the right aliases),
+    `pumpUntilSettled` (on `SlingClient.isIdle`/`whenIdle`),
+    `useRealNetwork`, `disposeAfterTest`. Tests: `flutter test`. Prefer it
+    over hand-rolled `MockClient` + alias regexes in new tests.
   - `example` — Flutter app, **iOS only** (`flutter create --platforms=ios`).
     Do not add other platforms.
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
-  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `docs(website): ...`,
+  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,
   `chore(repo): ...`, `test(example): ...`. Only commits touching a package's
   files bump that package; `feat` -> minor (pre-1.0 as well, melos default),
   `fix`/`perf`/`refactor` -> patch, `BREAKING CHANGE:` footer or `!` -> major.
   Never hand-edit versions or `CHANGELOG.md` files.
-- **Publishing** (`sling_gql`, `sling_gql_gen`; MIT; each with its own
+- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`; MIT; each with its own
   `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
   independent. Release from a clean, up-to-date `main`:
 
@@ -51,7 +57,8 @@ on the code.
   `.github/workflows/publish.yml` runs once per `<pkg>-vX.Y.Z` tag, checks the
   tag matches that package's `pubspec.yaml`, and publishes via pub.dev
   automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
-  `sling_gql_gen-v{{version}}`, no secrets). Manual escape hatch:
+  `sling_gql_gen-v{{version}}` / `sling_gql_test-v{{version}}`, no secrets;
+  the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
   `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos
   reads commits from; before them the history is not conventional. Code must be
@@ -152,7 +159,11 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
 - Keep the runtime dependency-light (`http` only). No `gql`/`ferry` in the
   runtime for now — the point of the PoC is to see how small the core can be.
 - Every runtime behaviour change gets a test in `packages/sling_gql/test`.
-  Prefer `MockClient` from `package:http/testing.dart` over hitting the network.
+  Never hit the network: the runtime tests use `MockClient` from
+  `package:http/testing.dart` (see `test/support/test_schema.dart`); app-level
+  tests use `sling_gql_test`'s `MockGraphQLServer`. The example's
+  `app_test.dart` is the one end-to-end test against the real mock API
+  (`useRealNetwork()` + `tester.pumpUntilSettled(client)`).
 - Generated file `example/lib/generated/schema.dart` is committed; never edit
   it by hand.
 - In example widgets, **read every field you will need at the top of `build`**

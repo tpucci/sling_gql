@@ -52,6 +52,7 @@ query {
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
 | `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ |
 | Cursor pagination (one cache entry per `after`) | ✅ example |
+| Test helpers (`MockGraphQLServer`, `pumpUntilSettled`) | ✅ `packages/sling_gql_test` |
 | Subscriptions | ❌ not in this PoC |
 | SWR / expiry, persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
 | Unions / interfaces (`$on`) | ❌ SpaceX schema has none |
@@ -61,6 +62,7 @@ query {
 ```
 packages/sling_gql/      runtime: Accessor, Selection, Cache, SlingClient, QueryBuilder
 packages/sling_gql_gen/  CLI: introspection JSON → Dart accessor classes
+packages/sling_gql_test/ test helpers: in-memory GraphQL server, pumpUntilSettled
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
 example/                 iOS-only Flutter app talking to the mock API
 ```
@@ -80,8 +82,9 @@ cd example && flutter run -d <ios-simulator>
 ```
 
 The packages are on pub.dev:
-[`sling_gql`](https://pub.dev/packages/sling_gql) (runtime) and
-[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator).
+[`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),
+[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator) and
+[`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers).
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

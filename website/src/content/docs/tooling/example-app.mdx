@@ -259,8 +259,10 @@ that shows a string calls `SkeletonText` and lets the accessor's
 ## The end-to-end tests
 
 `test/app_test.dart` runs against the **real** mock API (`cd mock-api && npm
-start` first — `flutter test` blocks HTTP by default, so the test opts back
-in with `HttpOverrides.global = null`). It pumps the real `SlingApp` widget.
+start` first, or `melos run test:example` which starts it for you —
+`flutter test` blocks HTTP by default, so the test opts back in with
+`useRealNetwork()` from [`sling_gql_test`](/sling_gql/guides/testing/)). It
+pumps the real `SlingApp` widget.
 
 ### Test 1 — Launches tab, pagination, detail, mutation
 
@@ -289,7 +291,9 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
 - Every row in the Success segment shows the success icon.
 
 <Aside type="note">
-`settle()` in the tests polls with a 100ms delay up to 50 times rather than
-`pumpAndSettle()`, because the tests hit a real HTTP server with real
-`LATENCY_MS` latency — there's no fixed number of frames to pump.
+The tests wait with `tester.pumpUntilSettled(client)` rather than
+`pumpAndSettle()`: they hit a real HTTP server with real `LATENCY_MS`
+latency, so there is no fixed number of frames to pump. The helper pumps
+until the client has no request pending and the last frame caused none —
+see [Testing](/sling_gql/guides/testing/).
 </Aside>

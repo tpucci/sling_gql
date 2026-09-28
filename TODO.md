@@ -12,23 +12,15 @@ Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ �
 subscriptions #30 · unions #31 · expiry/SWR #23 · dev experience #46, #47 ·
 `gql_link` #48.
 
-Status (2026-09-26): P0 done (#1–#6); P1 done except #16; example/docs
-sweep done (#34–#36, #41, #42); pub workspace + melos and pub.dev-ready
-packages (#43), CI + tag-triggered pub.dev publishing (#44). 22 items in
-**Done**. Suggested next picks: #16 (test helpers), #23 (fetch policies) and
-#19/#20 (per-row rebuilds).
+Status (2026-09-27): P0 and P1 done (#1–#16); example/docs sweep done
+(#34–#37, #41, #42); pub workspace + melos and pub.dev-ready packages
+(#43), CI + tag-triggered pub.dev publishing (#44). 24 items in **Done**.
+Suggested next picks: #23 (fetch policies), #19/#20 (per-row rebuilds), #32
+(public API surface, before more releases).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
-
-## P1 — DX rough edges seen in the example
-
-16. **Test — `sling_gql_test` helpers.** `pumpUntilSettled(tester, client)`,
-    a schema-aware in-memory server/`MockClient` builder, and the folklore
-    (`HttpOverrides.global = null`, `pump(Duration)` for transitions,
-    `client.dispose()` for keep-alive timers) wrapped so app tests don't
-    rediscover it.
 
 ## P2 — performance follow-ups (measured: 506 ns/read, 38× raw maps)
 
@@ -83,8 +75,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-37. **Example — `settle()` test helper polls with fixed 100 ms sleeps**; replace
-    with a client-level "no scope loading" future once #16 exists.
 38. **Example — Show more of the API**: `client.resolve()` (imperative
     prefetch) is never used or documented in the example; `Normalization`
     config, `cache.snapshot`, `onChange` likewise.
@@ -145,9 +135,11 @@ Kept for number stability; see git history for details.
 13. Gen — `--scalar Name=DartType[:converter]` (`DateTime` built in); example uses it.
 14. Runtime — List membership: `cacheScope.list((q) => q.me?.favorites).append/prepend/remove(e)`, `cacheScope.evict(e)`; journaled inside `optimistic:`. Example favourites update without refetch.
 15. Runtime — `mutateWith(..., refetchQueries: [...])`, forwarded by generated `client.mutate`.
+16. Test — `packages/sling_gql_test`: `MockGraphQLServer` (parses the printed document, resolves against maps/resolvers, answers under the document's aliases, `GraphQLError`, request log, `latency`), `pumpUntilSettled` on the new `SlingClient.isIdle`/`whenIdle`, `useRealNetwork()` (lifts the socket block and turns keep-alive off), `disposeAfterTest()`. Guide: `guides/testing`.
 34. Example — Printed-document variables named after the argument (`$first`, `$after`, `$first2` on clash).
 35. Example — Shared `ErrorView` widget.
 36. Example — `NetworkLog.add` guarded with `kDebugMode`.
+37. Example — `settle()` is `tester.pumpUntilSettled(client)` + one pump for page transitions; no `runAsync` polling, no `client.dispose()` in test bodies.
 41. Docs — "queries only" phrasing swept.
 42. Docs — "Rules of the road" block on getting-started.
 43. Repo — Pub workspace (root `pubspec.yaml`, `resolution: workspace`) + melos 7 scripts (`melos run test` = four gates, `analyze`, `format`, `generate`, `publish:dry-run`); `sling_gql` / `sling_gql_gen` 0.1.0 pub.dev-ready (LICENSE MIT, CHANGELOG, README, repository metadata, `dart pub publish --dry-run` clean).

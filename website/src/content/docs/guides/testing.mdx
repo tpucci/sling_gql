@@ -1,0 +1,159 @@
+---
+title: Testing
+description: sling_gql_test — an in-memory GraphQL server that answers the client's own documents from plain Dart data, and pumpUntilSettled for widget tests.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Testing a screen built on sling_gql means answering the document it records.
+That document has hashed aliases (`launches_1qouruf: launches(first: $first)`)
+and variables, so hand-writing responses, or regex-ing the alias out of the
+query, gets old fast. `sling_gql_test` removes that layer:
+
+```sh
+flutter pub add --dev sling_gql_test
+```
+
+## `MockGraphQLServer`
+
+An in-memory server that parses the document the client sends and resolves it
+against plain Dart data. Values are maps with `__typename` (that is what the
+normalized cache keys on), lists, scalars — or **resolvers**, functions that
+receive the field's arguments (variables already substituted):
+
+```dart
+import 'package:sling_gql_test/sling_gql_test.dart';
+
+final launches = {
+  'launch-181': {
+    '__typename': 'Launch',
+    'id': 'launch-181',
+    'name': 'Starlink 6-45',
+    'favorite': false,
+    'rocket': {'__typename': 'Rocket', 'id': 'falcon9', 'name': 'Falcon 9'},
+  },
+};
+
+final server = MockGraphQLServer(
+  query: {
+    'me': {'__typename': 'User', 'id': 'me', 'name': 'Mira Vance'},
+    'launch': (args) => launches[args['id']],
+    'launches': (args) => {
+      '__typename': 'LaunchConnection',
+      'nodes': launches.values.take(args['first'] as int).toList(),
+      'pageInfo': {'__typename': 'PageInfo', 'hasNextPage': false, 'endCursor': null},
+      'totalCount': launches.length,
+    },
+  },
+  mutation: {
+    'toggleFavorite': (args) {
+      final launch = launches[args['launchId']]!;
+      launch['favorite'] = !(launch['favorite'] as bool);
+      return launch;
+    },
+  },
+);
+
+final client = server.client(Query.root); // disposed at the end of the test
+```
+
+The response contains exactly what was selected, under the aliases the
+document used. Nothing to compute on your side; change the maps between
+requests and the next response reflects it.
+
+What the server checks for you, loudly (a `StateError`, not a silent `null`):
+
+- a root field the document selects that is not in `query:` / `mutation:`;
+- a sub-field selected on an object that does not have it;
+- a selected object without `__typename`.
+
+Throw `GraphQLError('message')` from a resolver to produce an `errors[]`
+entry with the right `path` — the field resolves to `null`, siblings still
+resolve, and the client's partial-error handling kicks in. Any other exception
+propagates and fails the test.
+
+`DateTime` values are sent as ISO-8601 strings; enums are the GraphQL names
+(`'SUCCESS'`). Resolvers may return a `Future`; `latency:` delays every
+response (on the fake clock in `testWidgets`).
+
+`server.requests` is the log: `lastRequest.type`, `.rootFields`,
+`.selects('launches.nodes.name')`, `.document`, `.variables` — the same
+assertions the [example app tests](/sling_gql/tooling/example-app/) make on
+request counts and documents.
+
+```dart
+expect(server.requests, hasLength(1), reason: 'header + list batched');
+expect(server.lastRequest.selects('launches.nodes.rocket.name'), isTrue);
+```
+
+`server.httpClient` and `server.transport` plug into a client you construct
+yourself (`SlingClient(httpClient: server.httpClient)`), for instance to test a
+custom [transport](/sling_gql/guides/transport/) in front of it.
+
+<Aside type="note">
+The parser handles what the client prints — one operation, aliases,
+arguments as variables or literals, nested selections — and hand-written
+documents of the same shape. No fragments or directives.
+</Aside>
+
+## `pumpUntilSettled`
+
+`pumpAndSettle()` stops when no frame is scheduled, which is before the
+response has landed. `tester.pumpUntilSettled(client)` pumps until the client
+has **nothing in flight and the last frame caused no new request**: every
+`QueryBuilder` on screen has its data (or its error) and has rebuilt with it.
+Mutations count too.
+
+```dart
+testWidgets('list shows the first page', (tester) async {
+  await tester.pumpWidget(
+    SlingScope<Query>(client: client, schema: slingSchema, child: const SlingApp()),
+  );
+  expect(find.byType(SkeletonBox), findsWidgets);
+
+  await tester.pumpUntilSettled(client);
+  expect(find.text('Starlink 6-45'), findsOneWidget);
+  expect(server.requests, hasLength(1));
+});
+```
+
+Each round pumps a frame, advances the fake clock by `step` (50 ms: server
+`latency`, page transitions), and — only if the client is still busy — lets
+real async work run for up to `step` so a real HTTP request can complete.
+After `timeout` (10 s) it fails the test with a message that says which
+situation you are in: a request that never completed, or a frame that causes
+a new request every time.
+
+A waterfall (a field read inside an `if` on fetched data) is followed to the
+end: the helper waits for the second round trip too. Check
+`server.requests.length` to catch it.
+
+Under the hood this is `SlingClient.isIdle` / `whenIdle`, which you can use
+in plain `test()`s as well.
+
+## Against a real server
+
+The [example app](/sling_gql/tooling/example-app/) tests run against the
+bundled mock API over HTTP. `flutter test` blocks sockets by default;
+`useRealNetwork()` at the top of `main()` lifts that for the file, and turns
+keep-alive off so an idle connection's timer is not reported as pending at
+the end of every `testWidgets` — the reason tests used to end with
+`client.dispose()`.
+
+```dart
+void main() {
+  useRealNetwork();
+
+  testWidgets('...', (tester) async {
+    final client = SlingClient<Query>(
+      endpoint: Uri.parse('http://localhost:4000/graphql'),
+      rootFactory: Query.root,
+    );
+    await tester.pumpWidget(...);
+    await tester.pumpUntilSettled(client);
+  });
+}
+```
+
+`disposeAfterTest(client)` registers `client.dispose()` as a tear-down and
+returns the client, for plain `test()`s that hold a real `http.Client`.
