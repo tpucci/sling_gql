@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sling_gql/sling_gql.dart';
@@ -7,21 +5,27 @@ import 'package:sling_gql_example/app.dart';
 import 'package:sling_gql_example/generated/schema.dart';
 import 'package:sling_gql_example/network_log.dart';
 import 'package:sling_gql_example/widgets/launch_row.dart';
+import 'package:sling_gql_test/sling_gql_test.dart';
 
-/// Runs against the real mock API: `cd mock-api && npm start` first.
-/// (`flutter test` blocks HTTP by default; we opt out with HttpOverrides.)
+/// Runs against the real mock API: `cd mock-api && npm start` first
+/// (`melos run test:example` starts it for you). `useRealNetwork()` lifts
+/// the HTTP block `flutter test` installs.
 void main() {
-  setUpAll(() => HttpOverrides.global = null);
+  useRealNetwork();
 
   late NetworkLog log;
   late SlingClient<Query> client;
 
   setUp(() {
     log = NetworkLog();
-    client = SlingClient<Query>(
-      endpoint: Uri.parse('http://localhost:4000/graphql'),
-      rootFactory: Query.root,
-      onOperation: log.add,
+    // Disposed after each test: keep-alive connections would otherwise be
+    // reported as pending timers by the test binding.
+    client = disposeAfterTest(
+      SlingClient<Query>(
+        endpoint: Uri.parse('http://localhost:4000/graphql'),
+        rootFactory: Query.root,
+        onOperation: log.add,
+      ),
     );
   });
 
@@ -38,18 +42,10 @@ void main() {
     await tester.pump();
   }
 
+  /// Waits for every request to land and the UI to rebuild with it, then
+  /// finishes any page transition.
   Future<void> settle(WidgetTester tester) async {
-    // Real network: poll until no scope is loading anymore. Pumping with a
-    // duration also advances the fake clock so page transitions complete.
-    for (var i = 0; i < 50; i++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pump(const Duration(milliseconds: 100));
-      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty) {
-        break;
-      }
-    }
+    await tester.pumpUntilSettled(client);
     await tester.pump(const Duration(milliseconds: 500));
   }
 
@@ -184,10 +180,7 @@ void main() {
         findsOneWidget,
         reason: 'optimistic write shows before the response',
       );
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 800)),
-      );
-      await tester.pump();
+      await tester.pumpUntilSettled(client);
 
       expect(log.entries, hasLength(4), reason: 'one mutation request');
       final mutation = log.entries.first.document;
@@ -222,10 +215,6 @@ void main() {
         wasFavorite ? findsNothing : findsOneWidget,
       );
       expect(log.entries, hasLength(4));
-
-      // Close keep-alive connections: their 15 s idle timer would otherwise be
-      // reported as pending by the test binding.
-      client.dispose();
     },
   );
 
@@ -278,22 +267,7 @@ void main() {
           wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
         );
         await tester.tap(heart);
-        await tester.pump();
-        final button = find.ancestor(
-          of: find.byIcon(
-            wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill,
-          ),
-          matching: find.byType(CupertinoButton),
-        );
-        for (var i = 0; i < 50; i++) {
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 50)),
-          );
-          await tester.pump();
-          if (tester.widget<CupertinoButton>(button.first).onPressed != null) {
-            break;
-          }
-        }
+        await tester.pumpUntilSettled(client);
         return wasFavorite;
       }
 
@@ -330,8 +304,6 @@ void main() {
       expect(shownCount(), favoritesBefore);
       expect(meRowNamed, wasFavorite ? findsOneWidget : findsNothing);
       expect(log.entries, hasLength(5));
-
-      client.dispose();
     },
   );
 
@@ -422,8 +394,6 @@ void main() {
         hasLength(requestsBeforeAll),
         reason: 'switching back to All is served from cache, no request',
       );
-
-      client.dispose();
     },
   );
 }

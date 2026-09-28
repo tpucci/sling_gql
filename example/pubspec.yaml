@@ -20,6 +20,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  sling_gql_test:
+    path: ../packages/sling_gql_test
 
 flutter:
   uses-material-design: true
