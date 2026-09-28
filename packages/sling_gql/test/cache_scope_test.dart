@@ -23,17 +23,20 @@ void main() {
     sent.clear();
   });
 
-  test('entity by id: generated typed accessor over Launch:<id>-style keys', () async {
-    final bob = client.cacheScope.user('a');
+  test(
+    'entity by id: generated typed accessor over Launch:<id>-style keys',
+    () async {
+      final bob = client.cacheScope.user('a');
 
-    expect(bob, isNotNull);
-    expect(bob!.path, [const Ref('User:a')]);
-    expect(bob.name, 'Bob');
-    expect(bob.isSkeleton, isFalse);
-    expect(client.cacheScope.user('1')?.name, 'Ada');
-    await pumpEventQueue();
-    expect(sent, isEmpty);
-  });
+      expect(bob, isNotNull);
+      expect(bob!.path, [const Ref('User:a')]);
+      expect(bob.name, 'Bob');
+      expect(bob.isSkeleton, isFalse);
+      expect(client.cacheScope.user('1')?.name, 'Ada');
+      await pumpEventQueue();
+      expect(sent, isEmpty);
+    },
+  );
 
   test('unknown id → null (not a skeleton), and no request', () async {
     expect(client.cacheScope.user('nope'), isNull);
@@ -80,24 +83,27 @@ void main() {
     expect(changes, 0);
   });
 
-  test('writes in an optimistic callback are journaled and rolled back', () async {
-    final failing = SlingClient<Query>(
-      endpoint: testEndpoint,
-      rootFactory: Query.root,
-      cache: client.cache,
-      httpClient: MockClient((_) async => http.Response('boom', 500)),
-    );
+  test(
+    'writes in an optimistic callback are journaled and rolled back',
+    () async {
+      final failing = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        cache: client.cache,
+        httpClient: MockClient((_) async => http.Response('boom', 500)),
+      );
 
-    final result = failing.mutateWith(
-      Mutation.root,
-      (m) => m.rename(id: 'a', name: 'Bo')?.name,
-      optimistic: () => failing.cacheScope.user('a')!.name = 'Bo',
-    );
-    expect(failing.cacheScope.user('a')!.name, 'Bo', reason: 'optimistic');
-    await expectLater(result, throwsA(isA<SlingException>()));
+      final result = failing.mutateWith(
+        Mutation.root,
+        (m) => m.rename(id: 'a', name: 'Bo')?.name,
+        optimistic: () => failing.cacheScope.user('a')!.name = 'Bo',
+      );
+      expect(failing.cacheScope.user('a')!.name, 'Bo', reason: 'optimistic');
+      await expectLater(result, throwsA(isA<SlingException>()));
 
-    expect(failing.cacheScope.user('a')!.name, 'Bob', reason: 'rolled back');
-  });
+      expect(failing.cacheScope.user('a')!.name, 'Bob', reason: 'rolled back');
+    },
+  );
 
   test('with Normalization.none there are no entities to address', () async {
     final plain = SlingClient<Query>(

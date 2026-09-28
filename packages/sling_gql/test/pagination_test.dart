@@ -17,8 +17,11 @@ class Query extends Accessor {
   Query(super.recorder, super.selection, super.path);
   Query.root(Recorder r) : super(r, r.root, const []);
 
-  UserConnection? users({String? after}) =>
-      object('users', UserConnection.new, args: {'after': Arg('String', after)});
+  UserConnection? users({String? after}) => object(
+    'users',
+    UserConnection.new,
+    args: {'after': Arg('String', after)},
+  );
 }
 
 class UserConnection extends Accessor {
@@ -54,9 +57,14 @@ Map<String, Object?> _page(String? after) {
   return {
     '__typename': 'UserConnection',
     'nodes': [
-      for (final n in names) {'__typename': 'User', 'id': n.toLowerCase(), 'name': n},
+      for (final n in names)
+        {'__typename': 'User', 'id': n.toLowerCase(), 'name': n},
     ],
-    'pageInfo': {'__typename': 'PageInfo', 'hasNextPage': hasNext, 'endCursor': endCursor},
+    'pageInfo': {
+      '__typename': 'PageInfo',
+      'hasNextPage': hasNext,
+      'endCursor': endCursor,
+    },
     'totalCount': 4,
   };
 }
@@ -67,7 +75,9 @@ Map<String, Object?> _handler(String document, Map vars) {
   if (RegExp(r'^  users \{', multiLine: true).hasMatch(document)) {
     data['users'] = _page(null);
   }
-  for (final m in RegExp(r'(users_\w+): users\(after: \$(\w+)\)').allMatches(document)) {
+  for (final m in RegExp(
+    r'(users_\w+): users\(after: \$(\w+)\)',
+  ).allMatches(document)) {
     data[m.group(1)!] = _page(vars[m.group(2)!] as String);
   }
   return data;
@@ -81,7 +91,10 @@ class Harness {
       onOperation: sent.add,
       httpClient: MockClient((req) async {
         final body = jsonDecode(req.body) as Map;
-        final data = _handler(body['query'] as String, body['variables'] as Map);
+        final data = _handler(
+          body['query'] as String,
+          body['variables'] as Map,
+        );
         return http.Response(jsonEncode({'data': data}), 200);
       }),
     );
@@ -94,41 +107,47 @@ class Harness {
   late PaginatedState<User> state;
 
   Widget app({PaginationController? controller}) => SlingScope<Query>(
-        client: client,
-        child: Directionality(
-          textDirection: TextDirection.ltr,
-          child: PaginatedQueryBuilder<Query, User>(
-            controller: controller,
-            page: (query, after) {
-              final page = query.users(after: after);
-              return ConnectionPage(
-                nodes: page?.nodes,
-                hasNextPage: page?.pageInfo?.hasNextPage,
-                endCursor: page?.pageInfo?.endCursor,
-                totalCount: page?.totalCount,
-              );
-            },
-            builder: (context, state) {
-              this.state = state;
-              return Column(
-                children: [for (final u in state.items) Text(u.name ?? '…')],
-              );
-            },
-          ),
-        ),
-      );
+    client: client,
+    child: Directionality(
+      textDirection: TextDirection.ltr,
+      child: PaginatedQueryBuilder<Query, User>(
+        controller: controller,
+        page: (query, after) {
+          final page = query.users(after: after);
+          return ConnectionPage(
+            nodes: page?.nodes,
+            hasNextPage: page?.pageInfo?.hasNextPage,
+            endCursor: page?.pageInfo?.endCursor,
+            totalCount: page?.totalCount,
+          );
+        },
+        builder: (context, state) {
+          this.state = state;
+          return Column(
+            children: [for (final u in state.items) Text(u.name ?? '…')],
+          );
+        },
+      ),
+    ),
+  );
 
   List<String?> get names => [for (final u in state.items) u.name];
 }
 
 void main() {
-  testWidgets('first page: one request; skeleton while loading', (tester) async {
+  testWidgets('first page: one request; skeleton while loading', (
+    tester,
+  ) async {
     final h = Harness();
     await tester.pumpWidget(h.app());
 
     // The MockClient answers within the same fake-async turn, so only the
     // build-time facts of the first run are observable here.
-    expect(h.state.items, hasLength(1), reason: 'skeleton list has one element');
+    expect(
+      h.state.items,
+      hasLength(1),
+      reason: 'skeleton list has one element',
+    );
     expect(h.state.hasMissingData, isTrue);
     expect(h.state.hasMore, isFalse, reason: 'unknown until fetched');
     await tester.pump();
@@ -154,7 +173,11 @@ void main() {
     final doc = h.sent.last.document;
     expect(doc, contains('users(after: \$after)'));
     expect(h.sent.last.variables, {'after': 'c2'});
-    expect(doc, isNot(contains('  users {')), reason: 'page one comes from cache');
+    expect(
+      doc,
+      isNot(contains('  users {')),
+      reason: 'page one comes from cache',
+    );
     expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
     expect(h.state.hasMore, isFalse);
 
@@ -163,7 +186,9 @@ void main() {
     expect(h.sent, hasLength(2), reason: 'no next page: loadMore is a no-op');
   });
 
-  testWidgets('reset goes back to the first page without a request', (tester) async {
+  testWidgets('reset goes back to the first page without a request', (
+    tester,
+  ) async {
     final h = Harness();
     final controller = PaginationController();
     await tester.pumpWidget(h.app(controller: controller));
@@ -182,7 +207,9 @@ void main() {
     expect(h.state.hasMore, isTrue);
   });
 
-  testWidgets('refetch replays every loaded page in one request', (tester) async {
+  testWidgets('refetch replays every loaded page in one request', (
+    tester,
+  ) async {
     final h = Harness();
     await tester.pumpWidget(h.app());
     await tester.pump();

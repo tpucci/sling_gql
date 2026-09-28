@@ -33,7 +33,11 @@ bool isKnownScalar(String graphqlScalarName) {
 }
 
 /// Custom scalars known to be serialized as ISO strings on this API.
-const Set<String> _stringlikeCustomScalars = {'Date', 'DateTime', 'timestamptz'};
+const Set<String> _stringlikeCustomScalars = {
+  'Date',
+  'DateTime',
+  'timestamptz',
+};
 
 /// A `--scalar Name=DartType[:converterExpr]` mapping: reads/writes the
 /// GraphQL scalar [graphqlName] as [dartType] instead of the [scalarDartType]
@@ -77,7 +81,9 @@ class ScalarMapping {
       throw FormatException('--scalar $raw: DartType must not be empty');
     }
     if (converter != null && converter.isEmpty) {
-      throw FormatException('--scalar $raw: converterExpr must not be empty if given');
+      throw FormatException(
+        '--scalar $raw: converterExpr must not be empty if given',
+      );
     }
     if (converter == null && dartType != 'DateTime') {
       throw FormatException(
@@ -89,14 +95,17 @@ class ScalarMapping {
   }
 
   /// A `T Function(String)` tear-off expression for the generated getter.
-  String get parseExpr => converter != null ? '$converter.parse' : 'DateTime.parse';
+  String get parseExpr =>
+      converter != null ? '$converter.parse' : 'DateTime.parse';
 
   /// The wire-form (String) expression for a value of [dartType] held in
   /// [dartExpr], or `null` if the emitted code already established
   /// [dartExpr] cannot be null (`nonNull: true`).
   String serializeCall(String dartExpr, {required bool nonNull}) {
     if (converter == null) {
-      return nonNull ? '$dartExpr.toIso8601String()' : '$dartExpr?.toIso8601String()';
+      return nonNull
+          ? '$dartExpr.toIso8601String()'
+          : '$dartExpr?.toIso8601String()';
     }
     final call = '$converter.serialize($dartExpr)';
     return nonNull ? call : '($dartExpr == null ? null : $call)';
@@ -108,7 +117,7 @@ class ScalarMapping {
 /// any scalar without an explicit mapping.
 class ScalarRegistry {
   ScalarRegistry(Iterable<ScalarMapping> mappings)
-      : _byName = {for (final m in mappings) m.graphqlName: m};
+    : _byName = {for (final m in mappings) m.graphqlName: m};
 
   /// No `--scalar` flags: every scalar uses the [scalarDartType] default.
   static final ScalarRegistry empty = ScalarRegistry(const []);
@@ -119,9 +128,11 @@ class ScalarRegistry {
   ScalarMapping? operator [](String graphqlName) => _byName[graphqlName];
 
   /// The Dart type [graphqlName] is read/written as.
-  String dartType(String graphqlName) => _byName[graphqlName]?.dartType ?? scalarDartType(graphqlName);
+  String dartType(String graphqlName) =>
+      _byName[graphqlName]?.dartType ?? scalarDartType(graphqlName);
 
   /// True when [graphqlName] has an explicit `--scalar` mapping or is one of
   /// the built-in/known-string scalars (see [isKnownScalar]).
-  bool isKnown(String graphqlName) => _byName.containsKey(graphqlName) || isKnownScalar(graphqlName);
+  bool isKnown(String graphqlName) =>
+      _byName.containsKey(graphqlName) || isKnownScalar(graphqlName);
 }

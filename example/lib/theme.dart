@@ -43,9 +43,9 @@ const kAvatarGradient = LinearGradient(
 
 /// Dark Cupertino theme for the whole app.
 CupertinoThemeData slingTheme() => const CupertinoThemeData(
-      brightness: Brightness.dark,
-      primaryColor: kColorAccent,
-      scaffoldBackgroundColor: kColorBackground,
-      barBackgroundColor: kColorBarBackground,
-      textTheme: CupertinoTextThemeData(primaryColor: kColorTextPrimary),
-    );
+  brightness: Brightness.dark,
+  primaryColor: kColorAccent,
+  scaffoldBackgroundColor: kColorBackground,
+  barBackgroundColor: kColorBarBackground,
+  textTheme: CupertinoTextThemeData(primaryColor: kColorTextPrimary),
+);

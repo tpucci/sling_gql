@@ -56,12 +56,22 @@ String argValueExpression(
   final unwrapped = ref.withoutTopNonNull;
   if (unwrapped.kind == 'LIST') {
     final elementRef = unwrapped.ofType!;
-    final wire = _wireExpression('e', elementRef.named, nonNull: elementRef.isNonNull, registry: registry);
+    final wire = _wireExpression(
+      'e',
+      elementRef.named,
+      nonNull: elementRef.isNonNull,
+      registry: registry,
+    );
     if (wire == null) return dartExpr;
     final listAccessor = nonNull ? '.' : '?.';
     return '$dartExpr${listAccessor}map((e) => $wire).toList()';
   }
-  final wire = _wireExpression(dartExpr, unwrapped.named, nonNull: nonNull, registry: registry);
+  final wire = _wireExpression(
+    dartExpr,
+    unwrapped.named,
+    nonNull: nonNull,
+    registry: registry,
+  );
   return wire ?? dartExpr;
 }
 

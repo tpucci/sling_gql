@@ -13,15 +13,21 @@ Future<void> settle(QueryScope<Query> scope) async {
 }
 
 void main() {
-  test('sticky forever by default: a repeated miss never re-sends the failed document',
-      () async {
+  test('sticky forever by default: a repeated miss never re-sends the failed document', () async {
     var calls = 0;
     final client = SlingClient<Query>(
       endpoint: testEndpoint,
       rootFactory: Query.root,
       httpClient: MockClient((req) async {
         calls++;
-        return http.Response(jsonEncode({'errors': [{'message': 'boom'}]}), 200);
+        return http.Response(
+          jsonEncode({
+            'errors': [
+              {'message': 'boom'},
+            ],
+          }),
+          200,
+        );
       }),
     );
 
@@ -39,8 +45,7 @@ void main() {
     expect(calls, 1);
   });
 
-  test('retryFailedAfter: a miss retries the document once the cooldown has elapsed',
-      () async {
+  test('retryFailedAfter: a miss retries the document once the cooldown has elapsed', () async {
     var now = DateTime(2024, 1, 1);
     var calls = 0;
     final client = SlingClient<Query>(
@@ -51,7 +56,14 @@ void main() {
       httpClient: MockClient((req) async {
         calls++;
         if (calls == 1) {
-          return http.Response(jsonEncode({'errors': [{'message': 'boom'}]}), 200);
+          return http.Response(
+            jsonEncode({
+              'errors': [
+                {'message': 'boom'},
+              ],
+            }),
+            200,
+          );
         }
         return http.Response(
           jsonEncode({

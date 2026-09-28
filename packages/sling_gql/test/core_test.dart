@@ -38,10 +38,15 @@ class User extends Accessor {
   set status(UserStatus? v) => write('status', v?.graphqlName);
   // `--scalar DateTime=DateTime`: read/written through the built-in
   // DateTime.parse / toIso8601String converter via Accessor.scalarAs.
-  DateTime? get createdAt => scalarAs<DateTime, String>('createdAt', DateTime.parse);
+  DateTime? get createdAt =>
+      scalarAs<DateTime, String>('createdAt', DateTime.parse);
   set createdAt(DateTime? v) => write('createdAt', v?.toIso8601String());
-  List<User> friends({int? limit}) =>
-      list('friends', User.new, args: {'limit': Arg('Int', limit)}, keyed: true)!;
+  List<User> friends({int? limit}) => list(
+    'friends',
+    User.new,
+    args: {'limit': Arg('Int', limit)},
+    keyed: true,
+  )!;
 }
 
 class Mutation extends Accessor {
@@ -49,24 +54,28 @@ class Mutation extends Accessor {
   Mutation.root(Recorder r) : super(r, r.root, const []);
 
   User? rename({required String id, required String name}) => object(
-        'rename',
-        User.new,
-        args: {'id': Arg('ID!', id), 'name': Arg('String!', name)},
-        keyed: true,
-      );
+    'rename',
+    User.new,
+    args: {'id': Arg('ID!', id), 'name': Arg('String!', name)},
+    keyed: true,
+  );
   bool? deleteUser({required String id}) =>
       scalar<bool>('deleteUser', args: {'id': Arg('ID!', id)});
   User? setStatus({required String id, required UserStatus status}) => object(
-        'setStatus',
-        User.new,
-        args: {'id': Arg('ID!', id), 'status': Arg('UserStatus!', status.toGraphQL())},
-        keyed: true,
-      );
+    'setStatus',
+    User.new,
+    args: {
+      'id': Arg('ID!', id),
+      'status': Arg('UserStatus!', status.toGraphQL()),
+    },
+    keyed: true,
+  );
 }
 
 enum UserStatus {
   active('ACTIVE'),
   inactive('INACTIVE'),
+
   /// A wire value this client does not know (forward compatibility).
   unknown('');
 
@@ -82,7 +91,11 @@ enum UserStatus {
   /// The wire value to send as an argument; [unknown] has none.
   String toGraphQL() {
     if (this == unknown) {
-      throw ArgumentError.value(this, 'UserStatus', 'unknown cannot be sent as an argument');
+      throw ArgumentError.value(
+        this,
+        'UserStatus',
+        'unknown cannot be sent as an argument',
+      );
     }
     return graphqlName;
   }
@@ -94,14 +107,21 @@ extension on SlingClient<Query> {
     T Function(Mutation m) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
-  }) =>
-      mutateWith(Mutation.root, body, optimistic: optimistic, refetchQueries: refetchQueries);
+  }) => mutateWith(
+    Mutation.root,
+    body,
+    optimistic: optimistic,
+    refetchQueries: refetchQueries,
+  );
 }
 
 /// What the generator emits so apps never name roots by hand: pass to
 /// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` resolves its
 /// root without a `root:` argument.
-const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);
+const slingSchema = SlingSchema<Query, Mutation>(
+  query: Query.root,
+  mutation: Mutation.root,
+);
 
 /// What the generator emits for typed, non-fetching cache access: one
 /// method per keyed type (`CacheScope.entity`).
@@ -135,9 +155,11 @@ void main() {
   _mutationTests();
 
   test('reading fields records a selection and prints a document', () async {
-    final h = Harness((q, v) => {
-          'me': {'__typename': 'User', 'id': '1', 'name': 'Ada', 'age': 36},
-        });
+    final h = Harness(
+      (q, v) => {
+        'me': {'__typename': 'User', 'id': '1', 'name': 'Ada', 'age': 36},
+      },
+    );
 
     final name = await h.client.resolve((q) => q.me.name);
 
@@ -159,7 +181,11 @@ query {
 
     final out = scope.run((q) {
       final me = q.me;
-      return (me.isSkeleton, me.name, me.friends(limit: 3).map((f) => f.name).toList());
+      return (
+        me.isSkeleton,
+        me.name,
+        me.friends(limit: 3).map((f) => f.name).toList(),
+      );
     });
 
     expect(out.$1, isTrue);
@@ -170,15 +196,17 @@ query {
   });
 
   test('arguments become variables and aliases; cache keys follow', () async {
-    final h = Harness((q, v) => {
-          'me': {
-            '__typename': 'User',
-            'friends_1n0h7gq': [
-              {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
-              {'__typename': 'User', 'id': 'b', 'name': 'Cy'},
-            ],
-          },
-        });
+    final h = Harness(
+      (q, v) => {
+        'me': {
+          '__typename': 'User',
+          'friends_1n0h7gq': [
+            {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
+            {'__typename': 'User', 'id': 'b', 'name': 'Cy'},
+          ],
+        },
+      },
+    );
 
     final names = await h.client.resolve(
       (q) => q.me.friends(limit: 2).map((f) => f.name).toList(),
@@ -188,20 +216,27 @@ query {
     expect(op.variables, {'limit': 2});
     expect(op.document, contains('friends(limit: \$limit)'));
     // Cache key = alias = field + hash(args)
-    final alias = RegExp(r'(friends_\w+): friends').firstMatch(op.document)!.group(1);
+    final alias = RegExp(r'(friends_\w+): friends')
+        .firstMatch(op.document)!
+        .group(1);
     expect(alias, 'friends_1n0h7gq');
     expect(names, ['Bob', 'Cy']);
   });
 
-  test('enum fields: wire string mapped on read, unknown for new values, miss when absent',
-      () async {
-    final h = Harness((q, v) => {
-          'me': {'__typename': 'User', 'id': '1', 'status': 'ACTIVE'},
-        });
+  test('enum fields: wire string mapped on read, unknown for new values, miss when absent', () async {
+    final h = Harness(
+      (q, v) => {
+        'me': {'__typename': 'User', 'id': '1', 'status': 'ACTIVE'},
+      },
+    );
     final scope = h.client.createScope(onChanged: () {});
 
     expect(scope.run((q) => q.me.status), isNull);
-    expect(scope.hasMissingData, isTrue, reason: 'enum read records a miss like a scalar');
+    expect(
+      scope.hasMissingData,
+      isTrue,
+      reason: 'enum read records a miss like a scalar',
+    );
     await scope.whenSettled;
 
     expect(scope.run((q) => q.me.status), UserStatus.active);
@@ -215,19 +250,24 @@ query {
     expect(h.client.cache.read('query', ['me', 'status']), 'INACTIVE');
   });
 
-  test('custom scalar (DateTime): wire ISO string mapped on read, serialized on write',
-      () async {
-    final h = Harness((q, v) => {
-          'me': {
-            '__typename': 'User',
-            'id': '1',
-            'createdAt': '2024-01-02T03:04:05.000Z',
-          },
-        });
+  test('custom scalar (DateTime): wire ISO string mapped on read, serialized on write', () async {
+    final h = Harness(
+      (q, v) => {
+        'me': {
+          '__typename': 'User',
+          'id': '1',
+          'createdAt': '2024-01-02T03:04:05.000Z',
+        },
+      },
+    );
     final scope = h.client.createScope(onChanged: () {});
 
     expect(scope.run((q) => q.me.createdAt), isNull);
-    expect(scope.hasMissingData, isTrue, reason: 'custom scalar read records a miss like a scalar');
+    expect(
+      scope.hasMissingData,
+      isTrue,
+      reason: 'custom scalar read records a miss like a scalar',
+    );
     await scope.whenSettled;
 
     final createdAt = scope.run((q) => q.me.createdAt);
@@ -237,7 +277,10 @@ query {
 
     final written = DateTime.utc(2025, 6, 7, 8, 9, 10);
     scope.run((q) => q.me.createdAt = written);
-    expect(h.client.cache.read('query', ['me', 'createdAt']), written.toIso8601String());
+    expect(
+      h.client.cache.read('query', ['me', 'createdAt']),
+      written.toIso8601String(),
+    );
   });
 
   test('enum arguments are sent as their wire name; unknown throws', () async {
@@ -254,7 +297,9 @@ query {
     expect(h.sent.single.variables, {'id': '1', 'status': 'INACTIVE'});
 
     expect(
-      () => h.client.mutate((m) => m.setStatus(id: '1', status: UserStatus.unknown)),
+      () => h.client.mutate(
+        (m) => m.setStatus(id: '1', status: UserStatus.unknown),
+      ),
       throwsArgumentError,
     );
   });
@@ -270,9 +315,11 @@ query {
   });
 
   test('optimistic write updates cache and is visible on next read', () async {
-    final h = Harness((q, v) => {
-          'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
-        });
+    final h = Harness(
+      (q, v) => {
+        'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
+      },
+    );
     await h.client.resolve((q) => q.me.name);
 
     final scope = h.client.createScope(onChanged: () {});
@@ -281,25 +328,27 @@ query {
     expect(h.sent, hasLength(1), reason: 'no refetch after optimistic write');
   });
 
-  test('partial responses merge: two selections on the same object accumulate',
-      () async {
-    var call = 0;
-    final h = Harness((q, v) {
-      call++;
-      return {
-        'me': call == 1
-            ? {'__typename': 'User', 'name': 'Ada'}
-            : {'__typename': 'User', 'age': 36},
-      };
-    });
-    await h.client.resolve((q) => q.me.name);
-    await h.client.resolve((q) => q.me.age);
+  test(
+    'partial responses merge: two selections on the same object accumulate',
+    () async {
+      var call = 0;
+      final h = Harness((q, v) {
+        call++;
+        return {
+          'me': call == 1
+              ? {'__typename': 'User', 'name': 'Ada'}
+              : {'__typename': 'User', 'age': 36},
+        };
+      });
+      await h.client.resolve((q) => q.me.name);
+      await h.client.resolve((q) => q.me.age);
 
-    final scope = h.client.createScope(onChanged: () {});
-    final both = scope.run((q) => (q.me.name, q.me.age));
-    expect(both, ('Ada', 36));
-    expect(scope.hasMissingData, isFalse);
-  });
+      final scope = h.client.createScope(onChanged: () {});
+      final both = scope.run((q) => (q.me.name, q.me.age));
+      expect(both, ('Ada', 36));
+      expect(scope.hasMissingData, isFalse);
+    },
+  );
 
   test('error is sticky until refetch (no retry loop)', () async {
     var calls = 0;
@@ -308,15 +357,24 @@ query {
       rootFactory: Query.root,
       httpClient: MockClient((req) async {
         calls++;
-        return http.Response(jsonEncode({'errors': [{'message': 'boom'}]}), 200);
+        return http.Response(
+          jsonEncode({
+            'errors': [
+              {'message': 'boom'},
+            ],
+          }),
+          200,
+        );
       }),
     );
     var rebuilds = 0;
     late QueryScope<Query> scope;
-    scope = client.createScope(onChanged: () {
-      rebuilds++;
-      scope.run((q) => q.me.name); // simulate widget rebuild
-    });
+    scope = client.createScope(
+      onChanged: () {
+        rebuilds++;
+        scope.run((q) => q.me.name); // simulate widget rebuild
+      },
+    );
     scope.run((q) => q.me.name);
     await scope.whenSettled;
     await Future<void>.delayed(Duration.zero);
@@ -344,94 +402,121 @@ query (\$limit: Int) {
 }''');
   });
 
-  testWidgets('lazily built sliver children join the same request', (tester) async {
-    final h = Harness((q, v) => {
-          'me': {
-            '__typename': 'User',
-            'name': 'Ada',
-            'friends': [
-              for (var i = 0; i < 30; i++) {'__typename': 'User', 'id': '$i', 'name': 'F$i'},
-            ],
-          },
-        });
-    await tester.pumpWidget(SlingScope<Query>(
-      client: h.client,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: QueryBuilder<Query>(
-          builder: (_, q, s) {
-            final friends = q.me.friends();
-            return CustomScrollView(slivers: [
-              SliverToBoxAdapter(child: Text(q.me.name ?? '\u2026')),
-              SliverList.builder(
-                itemCount: friends.length,
-                itemBuilder: (_, i) => _FriendTile(friends[i]),
-              ),
-            ]);
-          },
+  testWidgets('lazily built sliver children join the same request', (
+    tester,
+  ) async {
+    final h = Harness(
+      (q, v) => {
+        'me': {
+          '__typename': 'User',
+          'name': 'Ada',
+          'friends': [
+            for (var i = 0; i < 30; i++)
+              {'__typename': 'User', 'id': '$i', 'name': 'F$i'},
+          ],
+        },
+      },
+    );
+    await tester.pumpWidget(
+      SlingScope<Query>(
+        client: h.client,
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: QueryBuilder<Query>(
+            builder: (_, q, s) {
+              final friends = q.me.friends();
+              return CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(child: Text(q.me.name ?? '\u2026')),
+                  SliverList.builder(
+                    itemCount: friends.length,
+                    itemBuilder: (_, i) => _FriendTile(friends[i]),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     expect(h.sent, hasLength(1));
-    expect(h.sent.single.document, contains('friends {\n      __typename\n      id\n      name'));
+    expect(
+      h.sent.single.document,
+      contains('friends {\n      __typename\n      id\n      name'),
+    );
     expect(find.text('F0'), findsOneWidget);
   });
 
-  test('partial errors: resolved fields cached, errored paths stay missing',
-      () async {
-    final client = SlingClient<Query>(
-      endpoint: Uri.parse('http://test/graphql'),
-      rootFactory: Query.root,
-      httpClient: MockClient((req) async => http.Response(
+  test(
+    'partial errors: resolved fields cached, errored paths stay missing',
+    () async {
+      final client = SlingClient<Query>(
+        endpoint: Uri.parse('http://test/graphql'),
+        rootFactory: Query.root,
+        httpClient: MockClient(
+          (req) async => http.Response(
             jsonEncode({
               'data': {
                 'me': {'__typename': 'User', 'name': 'Ada', 'age': null},
               },
               'errors': [
-                {'message': 'upstream down', 'path': ['me', 'age']},
+                {
+                  'message': 'upstream down',
+                  'path': ['me', 'age'],
+                },
               ],
             }),
             200,
-          )),
-    );
-    final scope = client.createScope(onChanged: () {});
-    scope.run((q) => (q.me.name, q.me.age));
-    await scope.whenSettled;
+          ),
+        ),
+      );
+      final scope = client.createScope(onChanged: () {});
+      scope.run((q) => (q.me.name, q.me.age));
+      await scope.whenSettled;
 
-    expect(scope.error, isA<SlingException>());
-    expect((scope.error as SlingException).graphqlErrors, hasLength(1));
-    expect(client.cache.read('query', ['me', 'name']), 'Ada');
-    expect(client.cache.read('query', ['me', 'age']), missing);
-  });
+      expect(scope.error, isA<SlingException>());
+      expect((scope.error as SlingException).graphqlErrors, hasLength(1));
+      expect(client.cache.read('query', ['me', 'name']), 'Ada');
+      expect(client.cache.read('query', ['me', 'age']), missing);
+    },
+  );
 
   testWidgets('two widgets in one frame → one batched request', (tester) async {
-    final h = Harness((q, v) => {
-          'me': {
-            '__typename': 'User',
-            'name': 'Ada',
-            'friends': [
-              {'__typename': 'User', 'id': 'x', 'name': 'Bob'},
-            ],
-          },
-        });
+    final h = Harness(
+      (q, v) => {
+        'me': {
+          '__typename': 'User',
+          'name': 'Ada',
+          'friends': [
+            {'__typename': 'User', 'id': 'x', 'name': 'Bob'},
+          ],
+        },
+      },
+    );
 
-    await tester.pumpWidget(SlingScope<Query>(
-      client: h.client,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: Column(children: [
-          QueryBuilder<Query>(
-            builder: (_, q, s) => Text(q.me.name ?? 'loading'),
+    await tester.pumpWidget(
+      SlingScope<Query>(
+        client: h.client,
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: [
+              QueryBuilder<Query>(
+                builder: (_, q, s) => Text(q.me.name ?? 'loading'),
+              ),
+              QueryBuilder<Query>(
+                builder: (_, q, s) => Column(
+                  children: [
+                    for (final f in q.me.friends()) Text(f.name ?? '…'),
+                  ],
+                ),
+              ),
+            ],
           ),
-          QueryBuilder<Query>(
-            builder: (_, q, s) => Column(
-              children: [for (final f in q.me.friends()) Text(f.name ?? '…')],
-            ),
-          ),
-        ]),
+        ),
       ),
-    ));
+    );
 
     expect(find.text('loading'), findsOneWidget);
     expect(find.text('…'), findsOneWidget);
@@ -465,9 +550,11 @@ class _FriendTile extends StatelessWidget {
 }
 
 void _childWidgetTests() {
-  testWidgets('accessors passed to child widgets are fetched in the same batch',
-      (tester) async {
-    final h = Harness((q, v) => {
+  testWidgets(
+    'accessors passed to child widgets are fetched in the same batch',
+    (tester) async {
+      final h = Harness(
+        (q, v) => {
           'me': {
             '__typename': 'User',
             'friends': [
@@ -475,133 +562,178 @@ void _childWidgetTests() {
               {'__typename': 'User', 'name': 'Cy'},
             ],
           },
-        });
+        },
+      );
 
-    await tester.pumpWidget(SlingScope<Query>(
-      client: h.client,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: QueryBuilder<Query>(
-          // The builder itself reads no scalar: only the child widgets do.
-          builder: (_, q, s) => Column(
-            children: [for (final f in q.me.friends()) _FriendTile(f)],
+      await tester.pumpWidget(
+        SlingScope<Query>(
+          client: h.client,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: QueryBuilder<Query>(
+              // The builder itself reads no scalar: only the child widgets do.
+              builder: (_, q, s) => Column(
+                children: [for (final f in q.me.friends()) _FriendTile(f)],
+              ),
+            ),
           ),
         ),
-      ),
-    ));
+      );
 
-    expect(find.text('…'), findsOneWidget);
-    await tester.pump();
+      expect(find.text('…'), findsOneWidget);
+      await tester.pump();
 
-    expect(h.sent, hasLength(1));
-    expect(h.sent.single.document, contains('friends {\n      __typename\n      id\n      name'));
-    expect(find.text('Bob'), findsOneWidget);
-    expect(find.text('Cy'), findsOneWidget);
-  });
+      expect(h.sent, hasLength(1));
+      expect(
+        h.sent.single.document,
+        contains('friends {\n      __typename\n      id\n      name'),
+      );
+      expect(find.text('Bob'), findsOneWidget);
+      expect(find.text('Cy'), findsOneWidget);
+    },
+  );
 }
 
 // --- Mutations ------------------------------------------------------------------
 
 void _mutationTests() {
   Map<String, Object?> meWithFriends() => {
-        'me': {
-          '__typename': 'User',
-          'id': '1',
-          'friends': [
-            {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
-          ],
-        },
-      };
+    'me': {
+      '__typename': 'User',
+      'id': '1',
+      'friends': [
+        {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
+      ],
+    },
+  };
 
   /// Mock server: queries return [meWithFriends]; `rename` echoes its args.
   Harness harness({bool failMutation = false}) => Harness((q, v) {
-        if (!q.startsWith('mutation')) return meWithFriends();
-        if (failMutation) throw StateError('mutation refused');
-        final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
-        return {
-          alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']},
-        };
-      });
-
-  test('mutate records the selection, sends it alone, returns the value', () async {
-    final h = harness();
-    await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
-
-    final name = await h.client.mutate((m) => m.rename(id: 'a', name: 'Robert')?.name);
-
-    expect(name, 'Robert');
-    expect(h.sent, hasLength(2));
-    final op = h.sent.last;
-    expect(op.document, contains('mutation (\$id: ID!, \$name: String!) {'));
-    expect(op.document, contains(': rename(id: \$id, name: \$name) {\n    __typename\n    id\n    name\n  }'));
-    expect(op.variables, {'id': 'a', 'name': 'Robert'});
+    if (!q.startsWith('mutation')) return meWithFriends();
+    if (failMutation) throw StateError('mutation refused');
+    final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
+    return {
+      alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']},
+    };
   });
 
-  test('the response updates the entity everywhere and notifies readers', () async {
-    final h = harness();
-    var rebuilds = 0;
-    final list = h.client.createScope(onChanged: () => rebuilds++);
-    list.run((q) => q.me.friends().map((f) => f.name).toList());
-    await list.whenSettled;
-    list.run((q) => q.me.friends().map((f) => f.name).toList()); // the rebuild
-    rebuilds = 0;
+  test(
+    'mutate records the selection, sends it alone, returns the value',
+    () async {
+      final h = harness();
+      await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
 
-    await h.client.mutate((m) => m.rename(id: 'a', name: 'Robert')?.name);
-
-    expect(rebuilds, 1);
-    expect(list.run((q) => q.me.friends()[0].name), 'Robert');
-    expect(h.client.cache.entity('ROOT_MUTATION'), anyOf(isNull, isEmpty),
-        reason: 'payload root fields are dropped once the result is read');
-  });
-
-  test('optimistic write is visible immediately and confirmed by the response',
-      () async {
-    final h = harness();
-    final scope = h.client.createScope(onChanged: () {});
-    final bob = await h.client.resolve((q) => q.me.friends()[0]);
-
-    final future = h.client.mutate(
-      (m) => m.rename(id: 'a', name: 'Robert')?.name,
-      optimistic: () => bob.name = 'Robert',
-    );
-    expect(scope.run((q) => q.me.friends()[0].name), 'Robert', reason: 'before the response');
-    await future;
-    expect(scope.run((q) => q.me.friends()[0].name), 'Robert');
-  });
-
-  test('a failed mutation rolls the optimistic writes back and throws', () async {
-    final h = harness(failMutation: true);
-    var rebuilds = 0;
-    final scope = h.client.createScope(onChanged: () => rebuilds++);
-    final bob = await h.client.resolve((q) => q.me.friends()[0]);
-    scope.run((q) => (q.me.friends()[0].name, q.me.friends()[0].age));
-    rebuilds = 0;
-
-    await expectLater(
-      h.client.mutate(
+      final name = await h.client.mutate(
         (m) => m.rename(id: 'a', name: 'Robert')?.name,
-        optimistic: () {
-          bob.name = 'Robert';
-          bob.age = 30; // was never fetched: must go back to missing, not null
-        },
-      ),
-      throwsStateError,
-    );
+      );
 
-    expect(scope.run((q) => q.me.friends()[0].name), 'Bob');
-    expect(h.client.cache.read('query', [const Ref('User:a'), 'age']), missing);
-    expect(rebuilds, 3,
-        reason: 'once per optimistic write (name, age), once for the rollback');
-  });
+      expect(name, 'Robert');
+      expect(h.sent, hasLength(2));
+      final op = h.sent.last;
+      expect(op.document, contains('mutation (\$id: ID!, \$name: String!) {'));
+      expect(
+        op.document,
+        contains(
+          ': rename(id: \$id, name: \$name) {\n    __typename\n    id\n    name\n  }',
+        ),
+      );
+      expect(op.variables, {'id': 'a', 'name': 'Robert'});
+    },
+  );
+
+  test(
+    'the response updates the entity everywhere and notifies readers',
+    () async {
+      final h = harness();
+      var rebuilds = 0;
+      final list = h.client.createScope(onChanged: () => rebuilds++);
+      list.run((q) => q.me.friends().map((f) => f.name).toList());
+      await list.whenSettled;
+      list.run(
+        (q) => q.me.friends().map((f) => f.name).toList(),
+      ); // the rebuild
+      rebuilds = 0;
+
+      await h.client.mutate((m) => m.rename(id: 'a', name: 'Robert')?.name);
+
+      expect(rebuilds, 1);
+      expect(list.run((q) => q.me.friends()[0].name), 'Robert');
+      expect(
+        h.client.cache.entity('ROOT_MUTATION'),
+        anyOf(isNull, isEmpty),
+        reason: 'payload root fields are dropped once the result is read',
+      );
+    },
+  );
+
+  test(
+    'optimistic write is visible immediately and confirmed by the response',
+    () async {
+      final h = harness();
+      final scope = h.client.createScope(onChanged: () {});
+      final bob = await h.client.resolve((q) => q.me.friends()[0]);
+
+      final future = h.client.mutate(
+        (m) => m.rename(id: 'a', name: 'Robert')?.name,
+        optimistic: () => bob.name = 'Robert',
+      );
+      expect(
+        scope.run((q) => q.me.friends()[0].name),
+        'Robert',
+        reason: 'before the response',
+      );
+      await future;
+      expect(scope.run((q) => q.me.friends()[0].name), 'Robert');
+    },
+  );
+
+  test(
+    'a failed mutation rolls the optimistic writes back and throws',
+    () async {
+      final h = harness(failMutation: true);
+      var rebuilds = 0;
+      final scope = h.client.createScope(onChanged: () => rebuilds++);
+      final bob = await h.client.resolve((q) => q.me.friends()[0]);
+      scope.run((q) => (q.me.friends()[0].name, q.me.friends()[0].age));
+      rebuilds = 0;
+
+      await expectLater(
+        h.client.mutate(
+          (m) => m.rename(id: 'a', name: 'Robert')?.name,
+          optimistic: () {
+            bob.name = 'Robert';
+            bob.age =
+                30; // was never fetched: must go back to missing, not null
+          },
+        ),
+        throwsStateError,
+      );
+
+      expect(scope.run((q) => q.me.friends()[0].name), 'Bob');
+      expect(
+        h.client.cache.read('query', [const Ref('User:a'), 'age']),
+        missing,
+      );
+      expect(
+        rebuilds,
+        3,
+        reason: 'once per optimistic write (name, age), once for the rollback',
+      );
+    },
+  );
 
   test('scalar mutation results are returned too', () async {
-    final h = Harness((q, v) => q.startsWith('mutation')
-        ? {'deleteUser_${_deleteAlias(v)}': true}
-        : meWithFriends());
+    final h = Harness(
+      (q, v) => q.startsWith('mutation')
+          ? {'deleteUser_${_deleteAlias(v)}': true}
+          : meWithFriends(),
+    );
     expect(await h.client.mutate((m) => m.deleteUser(id: 'a')), isTrue);
   });
 
-  testWidgets('MutationBuilder: loading state, then every copy rebuilds', (tester) async {
+  testWidgets('MutationBuilder: loading state, then every copy rebuilds', (
+    tester,
+  ) async {
     // Hold the mutation response until we have looked at the optimistic state.
     final release = Completer<void>();
     final sent = <PrintedOperation>[];
@@ -619,46 +751,65 @@ void _mutationTests() {
         final alias = RegExp(r'(rename_\w+):').firstMatch(q)!.group(1)!;
         final v = body['variables'] as Map;
         return http.Response(
-          jsonEncode({'data': {alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']}}}),
+          jsonEncode({
+            'data': {
+              alias: {'__typename': 'User', 'id': v['id'], 'name': v['name']},
+            },
+          }),
           200,
         );
       }),
     );
-    await tester.pumpWidget(SlingScope<Query>(
-      client: client,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: Column(children: [
-          QueryBuilder<Query>(
-            builder: (_, q, s) => Text('list: ${q.me.friends()[0].name ?? '\u2026'}'),
+    await tester.pumpWidget(
+      SlingScope<Query>(
+        client: client,
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: [
+              QueryBuilder<Query>(
+                builder: (_, q, s) =>
+                    Text('list: ${q.me.friends()[0].name ?? '\u2026'}'),
+              ),
+              QueryBuilder<Query>(
+                builder: (_, q, s) {
+                  final bob = q.user(id: 'a');
+                  final name = bob?.name;
+                  return MutationBuilder<Mutation>(
+                    root: Mutation.root,
+                    builder: (_, mutate, m) => GestureDetector(
+                      onTap: () => mutate(
+                        (mu) => mu.rename(id: 'a', name: 'Robert')?.name,
+                        optimistic: () => bob?.name = 'Robert!',
+                      ),
+                      child: Text(
+                        'detail: $name ${m.isLoading ? '(saving)' : ''}',
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
-          QueryBuilder<Query>(
-            builder: (_, q, s) {
-              final bob = q.user(id: 'a');
-              final name = bob?.name;
-              return MutationBuilder<Mutation>(
-                root: Mutation.root,
-                builder: (_, mutate, m) => GestureDetector(
-                  onTap: () => mutate(
-                    (mu) => mu.rename(id: 'a', name: 'Robert')?.name,
-                    optimistic: () => bob?.name = 'Robert!',
-                  ),
-                  child: Text('detail: $name ${m.isLoading ? '(saving)' : ''}'),
-                ),
-              );
-            },
-          ),
-        ]),
+        ),
       ),
-    ));
+    );
     await tester.pump();
     expect(find.text('list: Bob'), findsOneWidget);
-    expect(find.text('detail: Bob '), findsOneWidget, reason: 'served via lookup, no 2nd request');
+    expect(
+      find.text('detail: Bob '),
+      findsOneWidget,
+      reason: 'served via lookup, no 2nd request',
+    );
     expect(sent, hasLength(1));
 
     await tester.tap(find.textContaining('detail:'));
     await tester.pump();
-    expect(find.text('list: Robert!'), findsOneWidget, reason: 'optimistic, both copies');
+    expect(
+      find.text('list: Robert!'),
+      findsOneWidget,
+      reason: 'optimistic, both copies',
+    );
     expect(find.text('detail: Robert! (saving)'), findsOneWidget);
 
     release.complete();
@@ -670,34 +821,41 @@ void _mutationTests() {
   });
 }
 
-String _deleteAlias(Map vars) => Selection.root('mutation')
-    .child('deleteUser', {'id': Arg('ID!', vars['id'])})
-    .alias
-    .substring('deleteUser_'.length);
+String _deleteAlias(Map vars) =>
+    Selection.root('mutation')
+        .child('deleteUser', {'id': Arg('ID!', vars['id'])})
+        .alias
+        .substring('deleteUser_'.length);
 
 // --- Normalization --------------------------------------------------------------
 
 void _normalizationTests() {
   Map<String, Object?> meWithFriends() => {
-        'me': {
-          '__typename': 'User',
-          'id': '1',
-          'name': 'Ada',
-          'friends': [
-            {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
-            {'__typename': 'User', 'id': 'b', 'name': 'Cy'},
-          ],
-        },
-      };
+    'me': {
+      '__typename': 'User',
+      'id': '1',
+      'name': 'Ada',
+      'friends': [
+        {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
+        {'__typename': 'User', 'id': 'b', 'name': 'Cy'},
+      ],
+    },
+  };
 
   test('keyed objects are stored once and referenced', () async {
     final h = Harness((q, v) => meWithFriends());
     await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
 
     final cache = h.client.cache;
-    expect(cache.entityKeys, containsAll(['ROOT_QUERY', 'User:1', 'User:a', 'User:b']));
+    expect(
+      cache.entityKeys,
+      containsAll(['ROOT_QUERY', 'User:1', 'User:a', 'User:b']),
+    );
     expect(cache.entity('ROOT_QUERY')!['me'], const Ref('User:1'));
-    expect(cache.entity('User:1')!['friends'], [const Ref('User:a'), const Ref('User:b')]);
+    expect(cache.entity('User:1')!['friends'], [
+      const Ref('User:a'),
+      const Ref('User:b'),
+    ]);
     expect(cache.read('query', ['me', 'friends', 1, 'name']), 'Cy');
     expect(cache.read('query', [const Ref('User:b'), 'name']), 'Cy');
   });
@@ -706,7 +864,9 @@ void _normalizationTests() {
       'only the missing ones are fetched', () async {
     final h = Harness((q, v) {
       if (q.contains('user(')) {
-        return {'user_${_alias(v)}': {'__typename': 'User', 'id': 'a', 'age': 41}};
+        return {
+          'user_${_alias(v)}': {'__typename': 'User', 'id': 'a', 'age': 41},
+        };
       }
       return meWithFriends();
     });
@@ -719,45 +879,72 @@ void _normalizationTests() {
     final age = await h.client.resolve((q) => q.user(id: 'a')?.age);
     expect(age, 41);
     expect(h.sent, hasLength(2));
-    expect(h.sent.last.document, contains('user(id: \$id) {\n    __typename\n    id\n    age\n  }'));
-    expect(h.sent.last.document, isNot(contains('\n    name')), reason: 'name was cached');
+    expect(
+      h.sent.last.document,
+      contains('user(id: \$id) {\n    __typename\n    id\n    age\n  }'),
+    );
+    expect(
+      h.sent.last.document,
+      isNot(contains('\n    name')),
+      reason: 'name was cached',
+    );
     // After the fetch the root field points at the same entity.
-    expect(h.client.cache.entity('ROOT_QUERY')!['user_${_alias({'id': 'a'})}'],
-        const Ref('User:a'));
+    expect(
+      h.client.cache.entity('ROOT_QUERY')!['user_${_alias({'id': 'a'})}'],
+      const Ref('User:a'),
+    );
   });
 
-  test('optimistic write on one path is visible through every other path', () async {
-    final h = Harness((q, v) => meWithFriends());
-    await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
+  test(
+    'optimistic write on one path is visible through every other path',
+    () async {
+      final h = Harness((q, v) => meWithFriends());
+      await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
 
-    final scope = h.client.createScope(onChanged: () {});
-    scope.run((q) => q.user(id: 'a')!.name = 'Robert');
-    expect(scope.run((q) => q.me.friends()[0].name), 'Robert');
-    expect(h.sent, hasLength(1));
-  });
+      final scope = h.client.createScope(onChanged: () {});
+      scope.run((q) => q.user(id: 'a')!.name = 'Robert');
+      expect(scope.run((q) => q.me.friends()[0].name), 'Robert');
+      expect(h.sent, hasLength(1));
+    },
+  );
 
-  test('notification is per entity field: only scopes that read it rebuild',
-      () async {
-    final h = Harness((q, v) => meWithFriends());
-    await h.client.resolve((q) => (q.me.name, q.me.friends().map((f) => f.name).toList()));
+  test(
+    'notification is per entity field: only scopes that read it rebuild',
+    () async {
+      final h = Harness((q, v) => meWithFriends());
+      await h.client.resolve(
+        (q) => (q.me.name, q.me.friends().map((f) => f.name).toList()),
+      );
 
-    var listRebuilds = 0, headerRebuilds = 0, ageRebuilds = 0;
-    final list = h.client.createScope(onChanged: () => listRebuilds++);
-    final header = h.client.createScope(onChanged: () => headerRebuilds++);
-    final age = h.client.createScope(onChanged: () => ageRebuilds++);
-    list.run((q) => q.me.friends().map((f) => f.name).toList());
-    header.run((q) => q.me.name);
-    age.run((q) => q.me.friends()[0].age); // missing → skeleton, dep on User:a.age
+      var listRebuilds = 0, headerRebuilds = 0, ageRebuilds = 0;
+      final list = h.client.createScope(onChanged: () => listRebuilds++);
+      final header = h.client.createScope(onChanged: () => headerRebuilds++);
+      final age = h.client.createScope(onChanged: () => ageRebuilds++);
+      list.run((q) => q.me.friends().map((f) => f.name).toList());
+      header.run((q) => q.me.name);
+      age.run(
+        (q) => q.me.friends()[0].age,
+      ); // missing → skeleton, dep on User:a.age
 
-    final touched = h.client.cache.write('query', [const Ref('User:a'), 'name'], 'Robert');
-    expect(touched, {'User:a.name'});
-    // Notify manually: cache writes outside a scope do not notify by themselves.
-    list.onWrite(CacheWrite('query', [const Ref('User:a'), 'name'], 'Bob', touched));
+      final touched = h.client.cache.write('query', [
+        const Ref('User:a'),
+        'name',
+      ], 'Robert');
+      expect(touched, {'User:a.name'});
+      // Notify manually: cache writes outside a scope do not notify by themselves.
+      list.onWrite(
+        CacheWrite('query', [const Ref('User:a'), 'name'], 'Bob', touched),
+      );
 
-    expect(listRebuilds, 1);
-    expect(headerRebuilds, 0);
-    expect(ageRebuilds, 0, reason: 'read a different field of the same entity');
-  });
+      expect(listRebuilds, 1);
+      expect(headerRebuilds, 0);
+      expect(
+        ageRebuilds,
+        0,
+        reason: 'read a different field of the same entity',
+      );
+    },
+  );
 
   test('lists of entities are replaced, entities are merged', () async {
     var call = 0;
@@ -785,30 +972,42 @@ void _normalizationTests() {
 
     final cache = h.client.cache;
     expect(cache.entity('User:1')!['friends'], [const Ref('User:b')]);
-    expect(cache.entity('User:b'), {'__typename': 'User', 'id': 'b', 'name': 'Cy', 'age': 30});
+    expect(cache.entity('User:b'), {
+      '__typename': 'User',
+      'id': 'b',
+      'name': 'Cy',
+      'age': 30,
+    });
     expect(cache.hasEntity('User:a'), isTrue, reason: 'unreachable until gc()');
     expect(cache.gc(), {'User:a'});
   });
 
-  test('evict removes the entity, drops it from lists and blanks object fields',
-      () async {
-    final h = Harness((q, v) => meWithFriends());
-    await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
-    final cache = h.client.cache;
+  test(
+    'evict removes the entity, drops it from lists and blanks object fields',
+    () async {
+      final h = Harness((q, v) => meWithFriends());
+      await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
+      final cache = h.client.cache;
 
-    final touched = cache.evict('User:a');
-    expect(touched, containsAll(['User:a.name', 'User:1.friends']));
-    expect(cache.entity('User:1')!['friends'], [const Ref('User:b')]);
+      final touched = cache.evict('User:a');
+      expect(touched, containsAll(['User:a.name', 'User:1.friends']));
+      expect(cache.entity('User:1')!['friends'], [const Ref('User:b')]);
 
-    cache.evict('User:1');
-    expect(cache.read('query', ['me']), missing, reason: 'blanked field → refetch');
-  });
+      cache.evict('User:1');
+      expect(
+        cache.read('query', ['me']),
+        missing,
+        reason: 'blanked field → refetch',
+      );
+    },
+  );
 
   test('snapshot round-trips through JSON and hydrates', () async {
     final h = Harness((q, v) => meWithFriends());
     await h.client.resolve((q) => q.me.friends().map((f) => f.name).toList());
 
-    final json = jsonDecode(jsonEncode(h.client.cache.snapshot)) as Map<String, Object?>;
+    final json =
+        jsonDecode(jsonEncode(h.client.cache.snapshot)) as Map<String, Object?>;
     expect((json['ROOT_QUERY'] as Map)['me'], {'__ref': 'User:1'});
 
     final restored = Cache(initial: json);
@@ -834,8 +1033,10 @@ void _normalizationTests() {
       endpoint: Uri.parse('http://test/graphql'),
       rootFactory: Query.root,
       cache: Cache(normalization: Normalization.none),
-      httpClient: MockClient((req) async =>
-          http.Response(jsonEncode({'data': meWithFriends()}), 200)),
+      httpClient: MockClient(
+        (req) async =>
+            http.Response(jsonEncode({'data': meWithFriends()}), 200),
+      ),
     );
     await client.resolve((q) => q.me.friends().map((f) => f.name).toList());
     expect(client.cache.entityKeys, ['ROOT_QUERY']);
@@ -843,10 +1044,11 @@ void _normalizationTests() {
   });
 }
 
-String _friendsAlias(int limit) => Selection.root('query')
-    .child('friends', {'limit': Arg('Int', limit)})
-    .alias
-    .substring('friends_'.length);
+String _friendsAlias(int limit) =>
+    Selection.root('query')
+        .child('friends', {'limit': Arg('Int', limit)})
+        .alias
+        .substring('friends_'.length);
 
 String _alias(Map vars) {
   // Recompute the alias the same way Selection does, for the test server.

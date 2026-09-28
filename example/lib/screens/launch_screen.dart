@@ -92,7 +92,10 @@ class _LaunchScreenState extends State<LaunchScreen> {
                       child: SkeletonText(
                         launch.name,
                         width: 220,
-                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     _FavoriteButton(launch: launch, favorite: favorite),
@@ -101,11 +104,15 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 const SizedBox(height: 4),
                 SkeletonText(
                   launch.date?.let(
-                    (d) => 'Flight #${launch.flightNumber} · ${formatDate(d)} · '
+                    (d) =>
+                        'Flight #${launch.flightNumber} · ${formatDate(d)} · '
                         '${launch.status?.graphqlName}',
                   ),
                   width: 260,
-                  style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
+                  style: const TextStyle(
+                    color: CupertinoColors.systemGrey,
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (launch.isSkeleton || launch.details != null)
@@ -116,7 +123,10 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 SkeletonText(rocket?.description, width: double.infinity),
                 _Row('Height', rocket?.height?.meters?.let((v) => '$v m')),
                 _Row('Mass', rocket?.mass?.kg?.let((v) => '$v kg')),
-                _Row('Success rate', rocket?.successRatePct?.let((v) => '$v %')),
+                _Row(
+                  'Success rate',
+                  rocket?.successRatePct?.let((v) => '$v %'),
+                ),
                 const SizedBox(height: 24),
                 const _Section('Launchpad'),
                 _Row('Site', launch.launchpad?.fullName),
@@ -128,7 +138,8 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 ],
                 const SizedBox(height: 24),
                 CupertinoButton(
-                  onPressed: () => setState(() => _showPayloads = !_showPayloads),
+                  onPressed: () =>
+                      setState(() => _showPayloads = !_showPayloads),
                   child: Text(
                     '${_showPayloads ? 'Hide' : 'Show'} payloads '
                     '(${launch.payloads?.length ?? '…'}) — no request, thanks to prepare',
@@ -180,24 +191,25 @@ class _FavoriteButton extends StatelessWidget {
         onPressed: id == null || favorite == null || state.isLoading
             ? null
             : () => mutate(
-                  (m) => m.toggleFavorite(launchId: id)?.favorite,
-                  optimistic: () {
-                    final wasFavorite = favorite!;
-                    launch.favorite = !wasFavorite;
-                    final cache = client.cacheScope;
-                    final me = cache.query.me;
-                    // cacheScope reads never fetch. Me tab not loaded yet:
-                    // it will fetch the fresh list itself.
-                    if (me == null || me.isSkeleton) return;
-                    final favorites = cache.list((q) => q.me?.favorites);
-                    final changed =
-                        wasFavorite ? favorites.remove(launch) : favorites.prepend(launch);
-                    final count = me.favoriteCount;
-                    if (changed && count != null) {
-                      me.favoriteCount = count + (wasFavorite ? -1 : 1);
-                    }
-                  },
-                ),
+                (m) => m.toggleFavorite(launchId: id)?.favorite,
+                optimistic: () {
+                  final wasFavorite = favorite!;
+                  launch.favorite = !wasFavorite;
+                  final cache = client.cacheScope;
+                  final me = cache.query.me;
+                  // cacheScope reads never fetch. Me tab not loaded yet:
+                  // it will fetch the fresh list itself.
+                  if (me == null || me.isSkeleton) return;
+                  final favorites = cache.list((q) => q.me?.favorites);
+                  final changed = wasFavorite
+                      ? favorites.remove(launch)
+                      : favorites.prepend(launch);
+                  final count = me.favoriteCount;
+                  if (changed && count != null) {
+                    me.favoriteCount = count + (wasFavorite ? -1 : 1);
+                  }
+                },
+              ),
         child: Icon(
           favorite ?? false ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
           color: state.error != null ? kColorTextSecondary : kColorCoral,
@@ -213,9 +225,12 @@ class _Section extends StatelessWidget {
   final String title;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      title,
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+    ),
+  );
 }
 
 class _Row extends StatelessWidget {
@@ -224,22 +239,22 @@ class _Row extends StatelessWidget {
   final String? value;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 110,
-              child: SkeletonText(
-                label,
-                width: 60,
-                style: const TextStyle(color: CupertinoColors.systemGrey),
-              ),
-            ),
-            Expanded(child: SkeletonText(value, width: 140)),
-          ],
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 110,
+          child: SkeletonText(
+            label,
+            width: 60,
+            style: const TextStyle(color: CupertinoColors.systemGrey),
+          ),
         ),
-      );
+        Expanded(child: SkeletonText(value, width: 140)),
+      ],
+    ),
+  );
 }
 
 extension<T extends Object> on T {

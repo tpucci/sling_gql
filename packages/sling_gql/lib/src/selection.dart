@@ -22,7 +22,7 @@ class Arg {
 /// side by side in one document *and* in the cache.
 class Selection {
   Selection._(this.field, this.args, this.parent)
-      : alias = _aliasFor(field, args);
+    : alias = _aliasFor(field, args);
 
   Selection.root(String operation) : this._(operation, const {}, null);
 
@@ -182,10 +182,14 @@ class PrintedOperation {
       final args = node.args.entries.where((e) => e.value.value != null);
       if (args.isNotEmpty) {
         buf.write('(');
-        buf.write(args.map((e) {
-          final name = nameFor(e.key, e.value.value, e.value.graphqlType);
-          return '${e.key}: \$$name';
-        }).join(', '));
+        buf.write(
+          args
+              .map((e) {
+                final name = nameFor(e.key, e.value.value, e.value.graphqlType);
+                return '${e.key}: \$$name';
+              })
+              .join(', '),
+        );
         buf.write(')');
       }
       if (!node.isLeaf || node.isObject) {

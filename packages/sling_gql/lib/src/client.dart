@@ -9,7 +9,11 @@ import 'selection.dart';
 
 /// Error returned by the GraphQL endpoint (transport or `errors[]`).
 class SlingException implements Exception {
-  SlingException(this.message, {this.graphqlErrors = const [], this.statusCode});
+  SlingException(
+    this.message, {
+    this.graphqlErrors = const [],
+    this.statusCode,
+  });
 
   final String message;
   final List<Map<String, Object?>> graphqlErrors;
@@ -206,7 +210,8 @@ class QueryScope<Q extends Accessor> implements Recorder {
     if (_error != null) {
       final retryAfter = client.retryFailedAfter;
       final at = _errorAt;
-      final expired = retryAfter != null &&
+      final expired =
+          retryAfter != null &&
           at != null &&
           client._now().difference(at) >= retryAfter;
       if (!expired) return;
@@ -481,7 +486,10 @@ class CacheList<R extends Accessor> {
     if (items == null || key == null) return false;
     final ref = Ref(key);
     if (!items.contains(ref)) return false;
-    _replace(items, [for (final e in items) if (e != ref) e]);
+    _replace(items, [
+      for (final e in items)
+        if (e != ref) e,
+    ]);
     return true;
   }
 
@@ -507,7 +515,9 @@ class CacheList<R extends Accessor> {
     final path = this.path!; // non-null: `_items` was
     final operation = _scope.operation;
     final touched = _cache.write(operation, path, next);
-    _scope.onWrite(CacheWrite(operation, path, List<Object?>.of(previous), touched));
+    _scope.onWrite(
+      CacheWrite(operation, path, List<Object?>.of(previous), touched),
+    );
   }
 }
 
@@ -547,14 +557,14 @@ class SlingClient<Q extends Accessor> {
     this.retryFailedAfter,
     // Clock behind `retryFailedAfter`; only worth overriding in tests.
     DateTime Function() now = DateTime.now,
-  })  : cache = cache ?? Cache(),
-        _http = httpClient ?? http.Client(),
-        // ignore: prefer_initializing_formals
-        _transport = transport,
-        warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
-        onWaterfall = onWaterfall ?? _printWaterfall,
-        // ignore: prefer_initializing_formals
-        _now = now;
+  }) : cache = cache ?? Cache(),
+       _http = httpClient ?? http.Client(),
+       // ignore: prefer_initializing_formals
+       _transport = transport,
+       warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
+       onWaterfall = onWaterfall ?? _printWaterfall,
+       // ignore: prefer_initializing_formals
+       _now = now;
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
@@ -810,7 +820,8 @@ class SlingClient<Q extends Accessor> {
 
     final op = PrintedOperation.from(tree);
     final failedAt = _failedAt;
-    final expired = retryFailedAfter != null &&
+    final expired =
+        retryFailedAfter != null &&
         failedAt != null &&
         _now().difference(failedAt) >= retryFailedAfter!;
     if (op.document == _failedDocument && !expired) {
@@ -929,16 +940,21 @@ class SlingClient<Q extends Accessor> {
   }
 
   Future<(Map<String, Object?>, List<Map<String, Object?>>)> _post(
-      PrintedOperation op) async {
+    PrintedOperation op,
+  ) async {
     final request = http.Request('POST', endpoint)
       ..headers.addAll({'content-type': 'application/json', ...headers})
       ..body = jsonEncode({'query': op.document, 'variables': op.variables});
     final response = await transport(request);
     if (response.statusCode >= 400) {
-      throw SlingException('HTTP ${response.statusCode}', statusCode: response.statusCode);
+      throw SlingException(
+        'HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
     }
     final json = jsonDecode(response.body) as Map<String, Object?>;
-    final errors = (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
+    final errors =
+        (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
     final data = json['data'] as Map<String, Object?>?;
     if (data == null) {
       throw SlingException(

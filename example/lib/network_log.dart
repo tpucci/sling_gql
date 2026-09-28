@@ -10,7 +10,9 @@ class NetworkLog extends ChangeNotifier {
   void add(PrintedOperation op) {
     entries.insert(0, op);
     if (kDebugMode) {
-      debugPrint('[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}');
+      debugPrint(
+        '[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}',
+      );
     }
     notifyListeners();
   }
@@ -22,8 +24,11 @@ class NetworkLog extends ChangeNotifier {
 }
 
 class NetworkLogScope extends InheritedNotifier<NetworkLog> {
-  const NetworkLogScope({super.key, required NetworkLog log, required super.child})
-      : super(notifier: log);
+  const NetworkLogScope({
+    super.key,
+    required NetworkLog log,
+    required super.child,
+  }) : super(notifier: log);
 
   static NetworkLog of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<NetworkLogScope>()!.notifier!;
@@ -74,7 +79,10 @@ class NetworkLogScreen extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('#$n', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  '#$n',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 4),
                 _Code(op.document),
                 if (op.variables.isNotEmpty) ...[
@@ -96,15 +104,15 @@ class _Code extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: CupertinoColors.systemGrey6.resolveFrom(context),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          text,
-          style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
-        ),
-      );
+    width: double.infinity,
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: CupertinoColors.systemGrey6.resolveFrom(context),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+    ),
+  );
 }

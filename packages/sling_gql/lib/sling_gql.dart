@@ -4,7 +4,14 @@ library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
 export 'src/cache/cache.dart'
-    show Cache, CacheWrite, NormalizedCache, Normalization, Ref, missing, depKey;
+    show
+        Cache,
+        CacheWrite,
+        NormalizedCache,
+        Normalization,
+        Ref,
+        missing,
+        depKey;
 export 'src/client.dart'
     show
         SlingClient,

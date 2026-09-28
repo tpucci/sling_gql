@@ -11,13 +11,13 @@ class SkeletonBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: kColorSurface,
-          borderRadius: BorderRadius.circular(4),
-        ),
-      );
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: kColorSurface,
+      borderRadius: BorderRadius.circular(4),
+    ),
+  );
 }
 
 /// Renders [text], or a skeleton box of [width] when `null`.
@@ -40,6 +40,11 @@ class SkeletonText extends StatelessWidget {
         child: SkeletonBox(width: width, height: fontSize),
       );
     }
-    return Text(text, style: style, maxLines: 2, overflow: TextOverflow.ellipsis);
+    return Text(
+      text,
+      style: style,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }

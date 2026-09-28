@@ -80,10 +80,14 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: CupertinoSlidingSegmentedControl<LaunchStatus>(
                 groupValue: _status ?? _allSentinel,
-                onValueChanged: (v) => _onSegmentChanged(v == _allSentinel ? null : v),
+                onValueChanged: (v) =>
+                    _onSegmentChanged(v == _allSentinel ? null : v),
                 children: {
                   for (final e in _segments.entries)
-                    e.key ?? _allSentinel: Text(e.value, style: const TextStyle(fontSize: 13)),
+                    e.key ?? _allSentinel: Text(
+                      e.value,
+                      style: const TextStyle(fontSize: 13),
+                    ),
                 },
               ),
             ),
@@ -212,4 +216,3 @@ class _Header extends StatelessWidget {
     );
   }
 }
-

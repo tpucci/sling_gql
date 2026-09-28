@@ -8,12 +8,12 @@ class TypeRef {
   const TypeRef({required this.kind, this.name, this.ofType});
 
   factory TypeRef.fromJson(Map<String, Object?> json) => TypeRef(
-        kind: json['kind']! as String,
-        name: json['name'] as String?,
-        ofType: json['ofType'] == null
-            ? null
-            : TypeRef.fromJson(json['ofType']! as Map<String, Object?>),
-      );
+    kind: json['kind']! as String,
+    name: json['name'] as String?,
+    ofType: json['ofType'] == null
+        ? null
+        : TypeRef.fromJson(json['ofType']! as Map<String, Object?>),
+  );
 
   final String kind;
   final String? name;

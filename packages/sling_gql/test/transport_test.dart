@@ -26,49 +26,58 @@ http.Request _copy(http.Request r) => http.Request(r.method, r.url)
   ..bodyBytes = r.bodyBytes;
 
 void main() {
-  test('default transport POSTs JSON with content-type and static headers',
-      () async {
-    final seen = <http.Request>[];
-    final client = SlingClient<Query>(
-      endpoint: testEndpoint,
-      rootFactory: Query.root,
-      headers: const {'x-app': 'example'},
-      httpClient: _recording(seen),
-    );
+  test(
+    'default transport POSTs JSON with content-type and static headers',
+    () async {
+      final seen = <http.Request>[];
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        headers: const {'x-app': 'example'},
+        httpClient: _recording(seen),
+      );
 
-    expect(await client.resolve((q) => q.me.name), 'Ada');
-    final req = seen.single;
-    expect(req.method, 'POST');
-    expect(req.url, testEndpoint);
-    expect(req.headers['content-type'], startsWith('application/json'));
-    expect(req.headers['x-app'], 'example');
-    expect(jsonDecode(req.body), containsPair('query', contains('me')));
-  });
+      expect(await client.resolve((q) => q.me.name), 'Ada');
+      final req = seen.single;
+      expect(req.method, 'POST');
+      expect(req.url, testEndpoint);
+      expect(req.headers['content-type'], startsWith('application/json'));
+      expect(req.headers['x-app'], 'example');
+      expect(jsonDecode(req.body), containsPair('query', contains('me')));
+    },
+  );
 
-  test('a transport can add headers per request (auth / token refresh)',
-      () async {
-    final seen = <http.Request>[];
-    final http.Client inner = _recording(seen);
-    var token = 't1';
-    final client = SlingClient<Query>(
-      endpoint: testEndpoint,
-      rootFactory: Query.root,
-      headers: const {'x-app': 'example'},
-      transport: (request) async {
-        request.headers['authorization'] = 'Bearer $token';
-        return http.Response.fromStream(await inner.send(request));
-      },
-    );
+  test(
+    'a transport can add headers per request (auth / token refresh)',
+    () async {
+      final seen = <http.Request>[];
+      final http.Client inner = _recording(seen);
+      var token = 't1';
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        headers: const {'x-app': 'example'},
+        transport: (request) async {
+          request.headers['authorization'] = 'Bearer $token';
+          return http.Response.fromStream(await inner.send(request));
+        },
+      );
 
-    await client.resolve((q) => q.me.name);
-    token = 't2';
-    await client.resolve((q) => q.user(id: 'z')?.name); // not cached
+      await client.resolve((q) => q.me.name);
+      token = 't2';
+      await client.resolve((q) => q.user(id: 'z')?.name); // not cached
 
-    expect(seen.map((r) => r.headers['authorization']),
-        ['Bearer t1', 'Bearer t2']);
-    expect(seen.first.headers['x-app'], 'example',
-        reason: 'static headers are applied before the transport runs');
-  });
+      expect(seen.map((r) => r.headers['authorization']), [
+        'Bearer t1',
+        'Bearer t2',
+      ]);
+      expect(
+        seen.first.headers['x-app'],
+        'example',
+        reason: 'static headers are applied before the transport runs',
+      );
+    },
+  );
 
   test('a transport can retry (copying the request) and the scope never sees '
       'the failure', () async {
@@ -78,8 +87,10 @@ void main() {
       endpoint: testEndpoint,
       rootFactory: Query.root,
       transport: (request) async {
-        for (var attempt = 0;; attempt++) {
-          final res = await http.Response.fromStream(await inner.send(_copy(request)));
+        for (var attempt = 0; ; attempt++) {
+          final res = await http.Response.fromStream(
+            await inner.send(_copy(request)),
+          );
           if (res.statusCode < 500 || attempt == 2) return res;
         }
       },
@@ -107,7 +118,10 @@ void main() {
       (m) => m.rename(id: '1', name: 'Grace')?.name,
     );
     expect(calls, 1);
-    expect(jsonDecode(seen.single.body), containsPair('query', startsWith('mutation')));
+    expect(
+      jsonDecode(seen.single.body),
+      containsPair('query', startsWith('mutation')),
+    );
   });
 
   test('transport errors surface as the scope error', () async {

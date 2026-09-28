@@ -35,7 +35,9 @@ void main() {
         }
         if (RegExp(r'user(_\w+)?: user').hasMatch(query)) {
           userCalls++;
-          final alias = RegExp(r'(user(?:_\w+)?): user').firstMatch(query)!.group(1)!;
+          final alias = RegExp(r'(user(?:_\w+)?): user')
+              .firstMatch(query)!
+              .group(1)!;
           data[alias] = {'__typename': 'User', 'id': 'a', 'name': 'Bob'};
         }
         return http.Response(jsonEncode({'data': data}), 200);
@@ -66,53 +68,65 @@ void main() {
     expect(userCalls, 1, reason: 'the scope reading only `user(id:)` is not');
   });
 
-  test('refetchQueries: matches a root field regardless of its arguments',
-      () async {
-    var userCalls = 0;
-    final client = SlingClient<Query>(
-      endpoint: testEndpoint,
-      rootFactory: Query.root,
-      httpClient: MockClient((req) async {
-        final body = jsonDecode(req.body) as Map<String, Object?>;
-        final query = body['query'] as String;
-        if (query.startsWith('mutation')) {
+  test(
+    'refetchQueries: matches a root field regardless of its arguments',
+    () async {
+      var userCalls = 0;
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        httpClient: MockClient((req) async {
+          final body = jsonDecode(req.body) as Map<String, Object?>;
+          final query = body['query'] as String;
+          if (query.startsWith('mutation')) {
+            return http.Response(
+              jsonEncode({
+                'data': {
+                  'rename_x': {
+                    '__typename': 'User',
+                    'id': '1',
+                    'name': 'Grace',
+                  },
+                },
+              }),
+              200,
+            );
+          }
+          userCalls++;
+          final alias = RegExp(r'(user(?:_\w+)?): user')
+              .firstMatch(query)!
+              .group(1)!;
           return http.Response(
             jsonEncode({
               'data': {
-                'rename_x': {'__typename': 'User', 'id': '1', 'name': 'Grace'},
+                alias: {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
               },
             }),
             200,
           );
-        }
-        userCalls++;
-        final alias = RegExp(r'(user(?:_\w+)?): user').firstMatch(query)!.group(1)!;
-        return http.Response(
-          jsonEncode({
-            'data': {
-              alias: {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
-            },
-          }),
-          200,
-        );
-      }),
-    );
+        }),
+      );
 
-    final scope = client.createScope(onChanged: () {});
-    scope.run((q) => q.user(id: 'a')?.name);
-    await scope.whenSettled;
-    expect(userCalls, 1);
+      final scope = client.createScope(onChanged: () {});
+      scope.run((q) => q.user(id: 'a')?.name);
+      await scope.whenSettled;
+      expect(userCalls, 1);
 
-    await client.mutateWith(
-      Mutation.root,
-      (m) => m.rename(id: '1', name: 'Grace')?.name,
-      refetchQueries: ['user'],
-    );
-    await scope.whenSettled;
+      await client.mutateWith(
+        Mutation.root,
+        (m) => m.rename(id: '1', name: 'Grace')?.name,
+        refetchQueries: ['user'],
+      );
+      await scope.whenSettled;
 
-    expect(userCalls, 2,
-        reason: 'matched on Selection.field (`user`), not the aliased/hashed key');
-  });
+      expect(
+        userCalls,
+        2,
+        reason:
+            'matched on Selection.field (`user`), not the aliased/hashed key',
+      );
+    },
+  );
 
   test('refetchQueries: no refetch when the mutation fails', () async {
     var meCalls = 0;
@@ -159,6 +173,10 @@ void main() {
     );
     await Future<void>.delayed(Duration.zero);
 
-    expect(meCalls, 1, reason: 'a failed mutation must not trigger refetchQueries');
+    expect(
+      meCalls,
+      1,
+      reason: 'a failed mutation must not trigger refetchQueries',
+    );
   });
 }

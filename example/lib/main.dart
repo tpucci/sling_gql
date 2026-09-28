@@ -17,12 +17,11 @@ void main() {
     onOperation: log.add,
   );
 
-  runApp(SlingScope<Query>(
-    client: client,
-    schema: slingSchema,
-    child: NetworkLogScope(
-      log: log,
-      child: const SlingApp(),
+  runApp(
+    SlingScope<Query>(
+      client: client,
+      schema: slingSchema,
+      child: NetworkLogScope(log: log, child: const SlingApp()),
     ),
-  ));
+  );
 }

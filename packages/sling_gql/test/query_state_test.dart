@@ -10,8 +10,7 @@ import 'package:sling_gql/sling_gql.dart';
 import 'support/test_schema.dart';
 
 void main() {
-  testWidgets(
-      'QueryState.isSkeleton is true only for the first paint (missing data '
+  testWidgets('QueryState.isSkeleton is true only for the first paint (missing data '
       'and a fetch in flight), false once data has landed', (tester) async {
     final release = Completer<void>();
     final client = SlingClient<Query>(
@@ -31,18 +30,20 @@ void main() {
     );
 
     final states = <QueryState>[];
-    await tester.pumpWidget(SlingScope<Query>(
-      client: client,
-      child: Directionality(
-        textDirection: TextDirection.ltr,
-        child: QueryBuilder<Query>(
-          builder: (_, q, s) {
-            states.add(s);
-            return Text(q.me.name ?? '\u2026');
-          },
+    await tester.pumpWidget(
+      SlingScope<Query>(
+        client: client,
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: QueryBuilder<Query>(
+            builder: (_, q, s) {
+              states.add(s);
+              return Text(q.me.name ?? '\u2026');
+            },
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
     // First paint: nothing cached yet, a fetch is in flight.

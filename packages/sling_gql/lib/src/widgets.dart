@@ -36,13 +36,17 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
   /// The client, typed with its query root.
   static SlingClient<Q> of<Q extends Accessor>(BuildContext context) {
     final client = clientOf(context);
-    assert(client is SlingClient<Q>, 'SlingScope above provides $client, not SlingClient<$Q>');
+    assert(
+      client is SlingClient<Q>,
+      'SlingScope above provides $client, not SlingClient<$Q>',
+    );
     return client as SlingClient<Q>;
   }
 
   /// The client without knowing its query root type — enough for mutations.
   static SlingClient<Accessor> clientOf(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<_InheritedClient>();
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_InheritedClient>();
     assert(scope != null, 'No SlingScope found above this widget');
     return scope!.client;
   }
@@ -50,31 +54,38 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
   /// The mutation root provided by the nearest [SlingScope], via either
   /// [mutationRoot] or [schema]. Used by [MutationBuilder] when it isn't
   /// given an explicit `root:`.
-  static RootFactory<M> mutationRootOf<M extends Accessor>(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<_InheritedClient>();
+  static RootFactory<M> mutationRootOf<M extends Accessor>(
+    BuildContext context,
+  ) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_InheritedClient>();
     assert(scope != null, 'No SlingScope found above this widget');
     final root = scope!.mutationRoot;
     assert(
       root != null && root is RootFactory<M>,
       root == null
           ? 'MutationBuilder<$M> has no root: and the nearest SlingScope was '
-              'not given mutationRoot: or schema: — pass one of the three.'
+                'not given mutationRoot: or schema: — pass one of the three.'
           : 'SlingScope above provides a mutation root for a different type '
-              'than $M — check schema:/mutationRoot: matches MutationBuilder<$M>.',
+                'than $M — check schema:/mutationRoot: matches MutationBuilder<$M>.',
     );
     return root as RootFactory<M>;
   }
 
   @override
   Widget build(BuildContext context) => _InheritedClient(
-        client: client,
-        mutationRoot: mutationRoot ?? schema?.mutation,
-        child: child,
-      );
+    client: client,
+    mutationRoot: mutationRoot ?? schema?.mutation,
+    child: child,
+  );
 }
 
 class _InheritedClient extends InheritedWidget {
-  const _InheritedClient({required this.client, this.mutationRoot, required super.child});
+  const _InheritedClient({
+    required this.client,
+    this.mutationRoot,
+    required super.child,
+  });
 
   final SlingClient<Accessor> client;
   final RootFactory<Accessor>? mutationRoot;
@@ -266,7 +277,8 @@ class MutationBuilder<M extends Accessor> extends StatefulWidget {
   State<MutationBuilder<M>> createState() => _MutationBuilderState<M>();
 }
 
-class _MutationBuilderState<M extends Accessor> extends State<MutationBuilder<M>> {
+class _MutationBuilderState<M extends Accessor>
+    extends State<MutationBuilder<M>> {
   bool _loading = false;
   Object? _error;
   RootFactory<M>? _root;

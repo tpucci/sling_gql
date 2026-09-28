@@ -11,11 +11,11 @@ class GqlInputValue {
   });
 
   factory GqlInputValue.fromJson(Map<String, Object?> json) => GqlInputValue(
-        name: json['name']! as String,
-        description: json['description'] as String?,
-        type: TypeRef.fromJson(json['type']! as Map<String, Object?>),
-        defaultValue: json['defaultValue'],
-      );
+    name: json['name']! as String,
+    description: json['description'] as String?,
+    type: TypeRef.fromJson(json['type']! as Map<String, Object?>),
+    defaultValue: json['defaultValue'],
+  );
 
   final String name;
   final String? description;
@@ -36,15 +36,15 @@ class GqlField {
   });
 
   factory GqlField.fromJson(Map<String, Object?> json) => GqlField(
-        name: json['name']! as String,
-        description: json['description'] as String?,
-        type: TypeRef.fromJson(json['type']! as Map<String, Object?>),
-        args: (json['args']! as List)
-            .map((a) => GqlInputValue.fromJson(a as Map<String, Object?>))
-            .toList(),
-        isDeprecated: json['isDeprecated'] as bool? ?? false,
-        deprecationReason: json['deprecationReason'] as String?,
-      );
+    name: json['name']! as String,
+    description: json['description'] as String?,
+    type: TypeRef.fromJson(json['type']! as Map<String, Object?>),
+    args: (json['args']! as List)
+        .map((a) => GqlInputValue.fromJson(a as Map<String, Object?>))
+        .toList(),
+    isDeprecated: json['isDeprecated'] as bool? ?? false,
+    deprecationReason: json['deprecationReason'] as String?,
+  );
 
   final String name;
   final String? description;
@@ -63,11 +63,11 @@ class GqlEnumValue {
   });
 
   factory GqlEnumValue.fromJson(Map<String, Object?> json) => GqlEnumValue(
-        name: json['name']! as String,
-        description: json['description'] as String?,
-        isDeprecated: json['isDeprecated'] as bool? ?? false,
-        deprecationReason: json['deprecationReason'] as String?,
-      );
+    name: json['name']! as String,
+    description: json['description'] as String?,
+    isDeprecated: json['isDeprecated'] as bool? ?? false,
+    deprecationReason: json['deprecationReason'] as String?,
+  );
 
   final String name;
   final String? description;
@@ -97,17 +97,19 @@ class GqlType {
       description: json['description'] as String?,
       fields: fields == null
           ? const []
-          : fields.map((f) => GqlField.fromJson(f as Map<String, Object?>)).toList(),
+          : fields
+                .map((f) => GqlField.fromJson(f as Map<String, Object?>))
+                .toList(),
       inputFields: inputFields == null
           ? const []
           : inputFields
-              .map((f) => GqlInputValue.fromJson(f as Map<String, Object?>))
-              .toList(),
+                .map((f) => GqlInputValue.fromJson(f as Map<String, Object?>))
+                .toList(),
       enumValues: enumValues == null
           ? const []
           : enumValues
-              .map((v) => GqlEnumValue.fromJson(v as Map<String, Object?>))
-              .toList(),
+                .map((v) => GqlEnumValue.fromJson(v as Map<String, Object?>))
+                .toList(),
     );
   }
 
@@ -134,7 +136,8 @@ class IntrospectionSchema {
     final schema = (json['__schema'] as Map<String, Object?>?) ?? json;
     final queryType = schema['queryType'] as Map<String, Object?>?;
     final mutationType = schema['mutationType'] as Map<String, Object?>?;
-    final subscriptionType = schema['subscriptionType'] as Map<String, Object?>?;
+    final subscriptionType =
+        schema['subscriptionType'] as Map<String, Object?>?;
     final types = (schema['types']! as List)
         .map((t) => GqlType.fromJson(t as Map<String, Object?>))
         .toList();

@@ -41,10 +41,7 @@ class MeScreen extends StatelessWidget {
             final favorites = me?.favorites ?? const <Launch>[];
 
             if (state.error != null) {
-              return ErrorView(
-                error: state.error!,
-                onRetry: state.refetch,
-              );
+              return ErrorView(error: state.error!, onRetry: state.refetch);
             }
 
             return CustomScrollView(
@@ -156,10 +153,7 @@ class _ProfileHeader extends StatelessWidget {
                       ? null
                       : '$favoriteCount favourite${favoriteCount == 1 ? '' : 's'}',
                   width: 80,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: kColorAccent,
-                  ),
+                  style: const TextStyle(fontSize: 13, color: kColorAccent),
                 ),
               ],
             ),
@@ -170,4 +164,3 @@ class _ProfileHeader extends StatelessWidget {
     );
   }
 }
-

@@ -26,14 +26,13 @@ void main() {
   });
 
   Future<void> pumpApp(WidgetTester tester) async {
-    await tester.pumpWidget(SlingScope<Query>(
-      client: client,
-      schema: slingSchema,
-      child: NetworkLogScope(
-        log: log,
-        child: const SlingApp(),
+    await tester.pumpWidget(
+      SlingScope<Query>(
+        client: client,
+        schema: slingSchema,
+        child: NetworkLogScope(log: log, child: const SlingApp()),
       ),
-    ));
+    );
     // CupertinoTabView wraps each tab in its own Navigator; that Navigator
     // needs one extra pump to push its initial route before content builds.
     await tester.pump();
@@ -43,282 +42,386 @@ void main() {
     // Real network: poll until no scope is loading anymore. Pumping with a
     // duration also advances the fake clock so page transitions complete.
     for (var i = 0; i < 50; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
       await tester.pump(const Duration(milliseconds: 100));
-      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty) break;
+      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty)
+        break;
     }
     await tester.pump(const Duration(milliseconds: 500));
   }
 
-  testWidgets('first frame → one request; load more → one more; detail → one more',
-      (tester) async {
-    await pumpApp(tester);
-    await settle(tester);
+  testWidgets(
+    'first frame → one request; load more → one more; detail → one more',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
 
-    expect(log.entries, hasLength(1), reason: 'header + list + rows batched');
-    expect(find.text('Sling Space'), findsOneWidget);
+      expect(log.entries, hasLength(1), reason: 'header + list + rows batched');
+      expect(find.text('Sling Space'), findsOneWidget);
 
-    // The launches list uses a ValueKey so we can scroll it unambiguously even
-    // if other Scrollables exist in the tab scaffold.
-    final launchesScrollable = find.descendant(
-      of: find.byKey(const ValueKey('launches-scroll')),
-      matching: find.byType(Scrollable),
-    );
+      // The launches list uses a ValueKey so we can scroll it unambiguously even
+      // if other Scrollables exist in the tab scaffold.
+      final launchesScrollable = find.descendant(
+        of: find.byKey(const ValueKey('launches-scroll')),
+        matching: find.byType(Scrollable),
+      );
 
-    await tester.scrollUntilVisible(
-      find.textContaining('Load more'),
-      300,
-      scrollable: launchesScrollable,
-    );
-    expect(find.textContaining('Load more (20 / 181)'), findsOneWidget);
-    await tester.tap(find.textContaining('Load more'));
-    await settle(tester);
+      await tester.scrollUntilVisible(
+        find.textContaining('Load more'),
+        300,
+        scrollable: launchesScrollable,
+      );
+      expect(find.textContaining('Load more (20 / 181)'), findsOneWidget);
+      await tester.tap(find.textContaining('Load more'));
+      await settle(tester);
 
-    expect(log.entries, hasLength(2), reason: 'only the second page is fetched');
-    expect(log.entries.first.variables, containsPair('after', isA<String>()),
-        reason: 'the `after` cursor is sent as a variable');
-    await tester.scrollUntilVisible(
-      find.textContaining('Load more'),
-      300,
-      scrollable: launchesScrollable,
-    );
-    expect(find.textContaining('Load more (40 / 181)'), findsOneWidget);
+      expect(
+        log.entries,
+        hasLength(2),
+        reason: 'only the second page is fetched',
+      );
+      expect(
+        log.entries.first.variables,
+        containsPair('after', isA<String>()),
+        reason: 'the `after` cursor is sent as a variable',
+      );
+      await tester.scrollUntilVisible(
+        find.textContaining('Load more'),
+        300,
+        scrollable: launchesScrollable,
+      );
+      expect(find.textContaining('Load more (40 / 181)'), findsOneWidget);
 
-    final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
-    final tappedName = tester
-        .widget<Text>(find.descendant(of: tappedRow, matching: find.byType(Text)).first)
-        .data!;
-    await tester.tap(tappedRow);
-    await settle(tester);
+      final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
+      final tappedName = tester
+          .widget<Text>(
+            find.descendant(of: tappedRow, matching: find.byType(Text)).first,
+          )
+          .data!;
+      await tester.tap(tappedRow);
+      await settle(tester);
 
-    expect(log.entries, hasLength(3), reason: 'detail screen: exactly one request');
-    final detail = log.entries.first.document;
-    expect(detail, contains('launch('));
-    expect(detail, contains('payloads {'), reason: 'prepare selected the collapsed section');
-    expect(detail, isNot(contains('nodes')), reason: 'list data was served from cache');
-    expect(detail, isNot(contains('date')),
-        reason: 'name/date/status come from the Launch entity the list wrote');
-    expect(detail, isNot(contains('status')));
-    expect(detail, contains('details'), reason: 'only fields the list did not fetch');
-    expect(find.text('Rocket'), findsOneWidget);
+      expect(
+        log.entries,
+        hasLength(3),
+        reason: 'detail screen: exactly one request',
+      );
+      final detail = log.entries.first.document;
+      expect(detail, contains('launch('));
+      expect(
+        detail,
+        contains('payloads {'),
+        reason: 'prepare selected the collapsed section',
+      );
+      expect(
+        detail,
+        isNot(contains('nodes')),
+        reason: 'list data was served from cache',
+      );
+      expect(
+        detail,
+        isNot(contains('date')),
+        reason: 'name/date/status come from the Launch entity the list wrote',
+      );
+      expect(detail, isNot(contains('status')));
+      expect(
+        detail,
+        contains('details'),
+        reason: 'only fields the list did not fetch',
+      );
+      expect(find.text('Rocket'), findsOneWidget);
 
-    // The tab bar stays visible over the detail screen (per-tab navigators);
-    // bring the button above it before tapping or the tap hits the "Me" tab.
-    await tester.ensureVisible(find.textContaining('Show payloads'));
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.textContaining('Show payloads'));
-    await tester.pump();
-    expect(log.entries, hasLength(3), reason: 'no request when expanding: prepare paid for it');
-    expect(find.textContaining('Hide payloads'), findsOneWidget, reason: 'the tap landed');
+      // The tab bar stays visible over the detail screen (per-tab navigators);
+      // bring the button above it before tapping or the tap hits the "Me" tab.
+      await tester.ensureVisible(find.textContaining('Show payloads'));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.textContaining('Show payloads'));
+      await tester.pump();
+      expect(
+        log.entries,
+        hasLength(3),
+        reason: 'no request when expanding: prepare paid for it',
+      );
+      expect(
+        find.textContaining('Hide payloads'),
+        findsOneWidget,
+        reason: 'the tap landed',
+      );
 
-    // --- Mutation: toggle favourite from the detail screen -------------------
-    // The mock server keeps favourites in memory across runs, so assert on the
-    // transition rather than on an absolute state.
-    // Scroll back to the top of the detail screen where the heart lives.
-    final anyHeart = find.byWidgetPredicate(
-      (w) => w is Icon && (w.icon == CupertinoIcons.heart || w.icon == CupertinoIcons.heart_fill),
-    );
-    await tester.scrollUntilVisible(anyHeart, -200, scrollable: find.byType(Scrollable).last);
-    await tester.pump(const Duration(milliseconds: 300));
-    final wasFavorite = find.byIcon(CupertinoIcons.heart_fill).evaluate().isNotEmpty;
-    await tester.tap(
-      find.byIcon(wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart),
-    );
-    await tester.pump();
-    expect(
-      find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
-      findsOneWidget,
-      reason: 'optimistic write shows before the response',
-    );
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 800)));
-    await tester.pump();
+      // --- Mutation: toggle favourite from the detail screen -------------------
+      // The mock server keeps favourites in memory across runs, so assert on the
+      // transition rather than on an absolute state.
+      // Scroll back to the top of the detail screen where the heart lives.
+      final anyHeart = find.byWidgetPredicate(
+        (w) =>
+            w is Icon &&
+            (w.icon == CupertinoIcons.heart ||
+                w.icon == CupertinoIcons.heart_fill),
+      );
+      await tester.scrollUntilVisible(
+        anyHeart,
+        -200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      final wasFavorite = find
+          .byIcon(CupertinoIcons.heart_fill)
+          .evaluate()
+          .isNotEmpty;
+      await tester.tap(
+        find.byIcon(
+          wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byIcon(
+          wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill,
+        ),
+        findsOneWidget,
+        reason: 'optimistic write shows before the response',
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 800)),
+      );
+      await tester.pump();
 
-    expect(log.entries, hasLength(4), reason: 'one mutation request');
-    final mutation = log.entries.first.document;
-    expect(mutation, startsWith('mutation'));
-    expect(mutation, contains('toggleFavorite(launchId: \$launchId) {\n    __typename\n    id\n    favorite\n  }'));
-    expect(
-      find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
-      findsOneWidget,
-      reason: 'confirmed by the response',
-    );
+      expect(log.entries, hasLength(4), reason: 'one mutation request');
+      final mutation = log.entries.first.document;
+      expect(mutation, startsWith('mutation'));
+      expect(
+        mutation,
+        contains(
+          'toggleFavorite(launchId: \$launchId) {\n    __typename\n    id\n    favorite\n  }',
+        ),
+      );
+      expect(
+        find.byIcon(
+          wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill,
+        ),
+        findsOneWidget,
+        reason: 'confirmed by the response',
+      );
 
-    // Back to the list: the row reads the same Launch entity → star updated,
-    // and no request was needed for it.
-    await tester.tap(find.byType(CupertinoNavigationBarBackButton));
-    await tester.pump(const Duration(milliseconds: 600)); // page transition
-    final row = find.ancestor(of: find.text(tappedName), matching: find.byType(CupertinoListTile));
-    expect(
-      find.descendant(of: row, matching: find.byIcon(CupertinoIcons.heart_fill)),
-      wasFavorite ? findsNothing : findsOneWidget,
-    );
-    expect(log.entries, hasLength(4));
+      // Back to the list: the row reads the same Launch entity → star updated,
+      // and no request was needed for it.
+      await tester.tap(find.byType(CupertinoNavigationBarBackButton));
+      await tester.pump(const Duration(milliseconds: 600)); // page transition
+      final row = find.ancestor(
+        of: find.text(tappedName),
+        matching: find.byType(CupertinoListTile),
+      );
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.byIcon(CupertinoIcons.heart_fill),
+        ),
+        wasFavorite ? findsNothing : findsOneWidget,
+      );
+      expect(log.entries, hasLength(4));
 
-    // Close keep-alive connections: their 15 s idle timer would otherwise be
-    // reported as pending by the test binding.
-    client.dispose();
-  });
+      // Close keep-alive connections: their 15 s idle timer would otherwise be
+      // reported as pending by the test binding.
+      client.dispose();
+    },
+  );
 
-  testWidgets('toggleFavorite → Me tab gains/loses the launch with no refetch',
-      (tester) async {
-    await pumpApp(tester);
-    await settle(tester);
+  testWidgets(
+    'toggleFavorite → Me tab gains/loses the launch with no refetch',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
 
-    // Load the Me tab first so `me.favorites` is cached.
-    await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
-    await tester.pump();
-    await settle(tester);
-    expect(log.entries, hasLength(2), reason: 'Launches tab + Me tab');
-    final favoritesBefore = find.byType(LaunchRow).evaluate().length;
+      // Load the Me tab first so `me.favorites` is cached.
+      await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
+      await tester.pump();
+      await settle(tester);
+      expect(log.entries, hasLength(2), reason: 'Launches tab + Me tab');
+      final favoritesBefore = find.byType(LaunchRow).evaluate().length;
 
-    int shownCount() {
-      final text = find
+      int shownCount() {
+        final text = find
+            .textContaining('favourite')
+            .evaluate()
+            .map((e) => (e.widget as Text).data!)
+            .firstWhere((s) => RegExp(r'^\d+').hasMatch(s));
+        return int.parse(RegExp(r'^\d+').firstMatch(text)!.group(0)!);
+      }
+
+      expect(shownCount(), favoritesBefore);
+
+      // Open the first launch of the list.
+      await tester.tap(find.byIcon(CupertinoIcons.rocket));
+      await tester.pump();
+      await settle(tester);
+      final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
+      final tappedName = tester
+          .widget<Text>(
+            find.descendant(of: tappedRow, matching: find.byType(Text)).first,
+          )
+          .data!;
+      await tester.tap(tappedRow);
+      await settle(tester);
+      expect(log.entries, hasLength(3), reason: 'detail screen: one request');
+
+      // Taps the detail screen's heart and waits for the mutation to land: the
+      // button is disabled while it is in flight.
+      Future<bool> toggle() async {
+        final wasFavorite = find
+            .byIcon(CupertinoIcons.heart_fill)
+            .evaluate()
+            .isNotEmpty;
+        final heart = find.byIcon(
+          wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+        );
+        await tester.tap(heart);
+        await tester.pump();
+        final button = find.ancestor(
+          of: find.byIcon(
+            wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill,
+          ),
+          matching: find.byType(CupertinoButton),
+        );
+        for (var i = 0; i < 50; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await tester.pump();
+          if (tester.widget<CupertinoButton>(button.first).onPressed != null)
+            break;
+        }
+        return wasFavorite;
+      }
+
+      Future<void> showMeTab() async {
+        await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      final meRowNamed = find.descendant(
+        of: find.byType(LaunchRow),
+        matching: find.text(tappedName),
+      );
+
+      // Toggle once: the Me tab's list and count follow, no request.
+      final wasFavorite = await toggle();
+      expect(log.entries, hasLength(4), reason: 'the mutation only');
+      expect(log.entries.first.document, startsWith('mutation'));
+      await showMeTab();
+      final delta = wasFavorite ? -1 : 1;
+      expect(find.byType(LaunchRow).evaluate().length, favoritesBefore + delta);
+      expect(shownCount(), favoritesBefore + delta);
+      expect(meRowNamed, wasFavorite ? findsNothing : findsOneWidget);
+      expect(log.entries, hasLength(4), reason: 'no refetch of me.favorites');
+
+      // Toggle back (restores the shared mock server's state).
+      await tester.tap(find.byIcon(CupertinoIcons.rocket));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await toggle();
+      expect(log.entries, hasLength(5), reason: 'the second mutation only');
+      await showMeTab();
+      expect(find.byType(LaunchRow).evaluate().length, favoritesBefore);
+      expect(shownCount(), favoritesBefore);
+      expect(meRowNamed, wasFavorite ? findsOneWidget : findsNothing);
+      expect(log.entries, hasLength(5));
+
+      client.dispose();
+    },
+  );
+
+  testWidgets(
+    'Me tab → one request with me+favorites; Success segment → one more request; All → no request',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
+
+      // Switch to the Me tab (index 1).
+      // Extra pump needed so CupertinoTabView's Navigator can build MeScreen.
+      await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
+      await tester.pump(); // Navigator initialises and MeScreen builds
+      await settle(tester);
+
+      // Exactly one request on switching to Me; it must contain me { and favorites {.
+      expect(
+        log.entries,
+        hasLength(2),
+        reason: 'Launches tab (1 request) + Me tab (1 request)',
+      );
+      final meDoc = log.entries.first.document;
+      expect(meDoc, contains('me {'), reason: 'me field selected');
+      expect(
+        meDoc,
+        contains('favorites {'),
+        reason: 'favorites nested field selected',
+      );
+
+      // Viewer name visible.
+      expect(find.text('Mira Vance'), findsOneWidget);
+
+      // Number of LaunchRow widgets must equal the favouriteCount shown.
+      final launchRows = find.byType(LaunchRow).evaluate().length;
+      // Find the favouriteCount text — it shows "N favourite(s)".
+      final countWidget = find
           .textContaining('favourite')
           .evaluate()
           .map((e) => (e.widget as Text).data!)
           .firstWhere((s) => RegExp(r'^\d+').hasMatch(s));
-      return int.parse(RegExp(r'^\d+').firstMatch(text)!.group(0)!);
-    }
-
-    expect(shownCount(), favoritesBefore);
-
-    // Open the first launch of the list.
-    await tester.tap(find.byIcon(CupertinoIcons.rocket));
-    await tester.pump();
-    await settle(tester);
-    final tappedRow = find.byType(CupertinoListTile).hitTestable().first;
-    final tappedName = tester
-        .widget<Text>(find.descendant(of: tappedRow, matching: find.byType(Text)).first)
-        .data!;
-    await tester.tap(tappedRow);
-    await settle(tester);
-    expect(log.entries, hasLength(3), reason: 'detail screen: one request');
-
-    // Taps the detail screen's heart and waits for the mutation to land: the
-    // button is disabled while it is in flight.
-    Future<bool> toggle() async {
-      final wasFavorite = find.byIcon(CupertinoIcons.heart_fill).evaluate().isNotEmpty;
-      final heart = find.byIcon(wasFavorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart);
-      await tester.tap(heart);
-      await tester.pump();
-      final button = find.ancestor(
-        of: find.byIcon(wasFavorite ? CupertinoIcons.heart : CupertinoIcons.heart_fill),
-        matching: find.byType(CupertinoButton),
+      final countInText = int.parse(
+        RegExp(r'^\d+').firstMatch(countWidget)!.group(0)!,
       );
-      for (var i = 0; i < 50; i++) {
-        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-        await tester.pump();
-        if (tester.widget<CupertinoButton>(button.first).onPressed != null) break;
-      }
-      return wasFavorite;
-    }
+      expect(launchRows, equals(countInText));
 
-    Future<void> showMeTab() async {
-      await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-    }
+      // Switch back to Launches tab.
+      await tester.tap(find.byIcon(CupertinoIcons.rocket));
+      await tester.pump(); // tab switch frame
+      await settle(tester);
 
-    final meRowNamed = find.descendant(
-      of: find.byType(LaunchRow),
-      matching: find.text(tappedName),
-    );
+      // Tap the "Success" status segment.
+      await tester.tap(find.text('Success'));
+      await settle(tester);
 
-    // Toggle once: the Me tab's list and count follow, no request.
-    final wasFavorite = await toggle();
-    expect(log.entries, hasLength(4), reason: 'the mutation only');
-    expect(log.entries.first.document, startsWith('mutation'));
-    await showMeTab();
-    final delta = wasFavorite ? -1 : 1;
-    expect(find.byType(LaunchRow).evaluate().length, favoritesBefore + delta);
-    expect(shownCount(), favoritesBefore + delta);
-    expect(meRowNamed, wasFavorite ? findsNothing : findsOneWidget);
-    expect(log.entries, hasLength(4), reason: 'no refetch of me.favorites');
+      // Exactly one more request compared to before.
+      expect(
+        log.entries,
+        hasLength(3),
+        reason: 'a status filter is a new argument set → new cache entry → one request',
+      );
+      final statusDoc = log.entries.first;
+      expect(statusDoc.document, contains('filter: \$filter'));
+      expect(
+        statusDoc.variables.values.any(
+          (v) => v is Map && v['status'] == 'SUCCESS',
+        ),
+        isTrue,
+        reason: 'LaunchFilter(status: SUCCESS) sent as a variable',
+      );
 
-    // Toggle back (restores the shared mock server's state).
-    await tester.tap(find.byIcon(CupertinoIcons.rocket));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await toggle();
-    expect(log.entries, hasLength(5), reason: 'the second mutation only');
-    await showMeTab();
-    expect(find.byType(LaunchRow).evaluate().length, favoritesBefore);
-    expect(shownCount(), favoritesBefore);
-    expect(meRowNamed, wasFavorite ? findsOneWidget : findsNothing);
-    expect(log.entries, hasLength(5));
+      // Every visible row is a successful launch (the row's leading icon).
+      final visibleRows = find.byType(LaunchRow).evaluate().length;
+      expect(visibleRows, greaterThan(0));
+      expect(
+        find.byIcon(CupertinoIcons.checkmark_circle_fill).evaluate().length,
+        equals(visibleRows),
+        reason:
+            'every visible row in the Success segment shows the success icon',
+      );
 
-    client.dispose();
-  });
+      // Switch back to All — no new request.
+      final requestsBeforeAll = log.entries.length;
+      await tester.tap(find.text('All'));
+      await settle(tester);
 
-  testWidgets('Me tab → one request with me+favorites; Success segment → one more request; All → no request',
-      (tester) async {
-    await pumpApp(tester);
-    await settle(tester);
+      expect(
+        log.entries,
+        hasLength(requestsBeforeAll),
+        reason: 'switching back to All is served from cache, no request',
+      );
 
-    // Switch to the Me tab (index 1).
-    // Extra pump needed so CupertinoTabView's Navigator can build MeScreen.
-    await tester.tap(find.byIcon(CupertinoIcons.person_crop_circle));
-    await tester.pump(); // Navigator initialises and MeScreen builds
-    await settle(tester);
-
-    // Exactly one request on switching to Me; it must contain me { and favorites {.
-    expect(log.entries, hasLength(2),
-        reason: 'Launches tab (1 request) + Me tab (1 request)');
-    final meDoc = log.entries.first.document;
-    expect(meDoc, contains('me {'), reason: 'me field selected');
-    expect(meDoc, contains('favorites {'), reason: 'favorites nested field selected');
-
-    // Viewer name visible.
-    expect(find.text('Mira Vance'), findsOneWidget);
-
-    // Number of LaunchRow widgets must equal the favouriteCount shown.
-    final launchRows = find.byType(LaunchRow).evaluate().length;
-    // Find the favouriteCount text — it shows "N favourite(s)".
-    final countWidget = find
-        .textContaining('favourite')
-        .evaluate()
-        .map((e) => (e.widget as Text).data!)
-        .firstWhere((s) => RegExp(r'^\d+').hasMatch(s));
-    final countInText = int.parse(RegExp(r'^\d+').firstMatch(countWidget)!.group(0)!);
-    expect(launchRows, equals(countInText));
-
-    // Switch back to Launches tab.
-    await tester.tap(find.byIcon(CupertinoIcons.rocket));
-    await tester.pump(); // tab switch frame
-    await settle(tester);
-
-    // Tap the "Success" status segment.
-    await tester.tap(find.text('Success'));
-    await settle(tester);
-
-    // Exactly one more request compared to before.
-    expect(log.entries, hasLength(3),
-        reason: 'a status filter is a new argument set → new cache entry → one request');
-    final statusDoc = log.entries.first;
-    expect(statusDoc.document, contains('filter: \$filter'));
-    expect(
-      statusDoc.variables.values.any((v) => v is Map && v['status'] == 'SUCCESS'),
-      isTrue,
-      reason: 'LaunchFilter(status: SUCCESS) sent as a variable',
-    );
-
-    // Every visible row is a successful launch (the row's leading icon).
-    final visibleRows = find.byType(LaunchRow).evaluate().length;
-    expect(visibleRows, greaterThan(0));
-    expect(
-      find.byIcon(CupertinoIcons.checkmark_circle_fill).evaluate().length,
-      equals(visibleRows),
-      reason: 'every visible row in the Success segment shows the success icon',
-    );
-
-    // Switch back to All — no new request.
-    final requestsBeforeAll = log.entries.length;
-    await tester.tap(find.text('All'));
-    await settle(tester);
-
-    expect(log.entries, hasLength(requestsBeforeAll),
-        reason: 'switching back to All is served from cache, no request');
-
-    client.dispose();
-  });
+      client.dispose();
+    },
+  );
 }

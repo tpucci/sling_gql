@@ -8,23 +8,37 @@ import 'package:sling_gql_gen/sling_gql_gen.dart';
 Future<void> main(List<String> arguments) async {
   final parser = ArgParser()
     ..addOption('schema', help: 'Path to a GraphQL introspection JSON file.')
-    ..addOption('endpoint', help: 'GraphQL endpoint URL to introspect instead of --schema.')
-    ..addMultiOption('header', abbr: 'H', help: 'HTTP header for --endpoint, e.g. "Authorization: Bearer x".')
-    ..addOption('out', help: 'Path of the Dart file to generate.', mandatory: true)
+    ..addOption(
+      'endpoint',
+      help: 'GraphQL endpoint URL to introspect instead of --schema.',
+    )
+    ..addMultiOption(
+      'header',
+      abbr: 'H',
+      help: 'HTTP header for --endpoint, e.g. "Authorization: Bearer x".',
+    )
+    ..addOption(
+      'out',
+      help: 'Path of the Dart file to generate.',
+      mandatory: true,
+    )
     ..addOption(
       'part-of-import',
-      help: 'Override the sling_gql import '
+      help:
+          'Override the sling_gql import '
           '(default: package:sling_gql/sling_gql.dart).',
     )
     ..addOption(
       'key-field',
       defaultsTo: 'id',
-      help: 'Field that identifies an object for cache normalization. '
+      help:
+          'Field that identifies an object for cache normalization. '
           'Object types having it are stored once as `__typename:<key>`.',
     )
     ..addMultiOption(
       'scalar',
-      help: 'Custom scalar mapping, repeatable: Name=DartType[:converterExpr]. '
+      help:
+          'Custom scalar mapping, repeatable: Name=DartType[:converterExpr]. '
           'E.g. "DateTime=DateTime" uses the built-in DateTime.parse/'
           'toIso8601String converter; "Money=Decimal:MoneyConverter" calls '
           'MoneyConverter.parse/MoneyConverter.serialize. A converter is '
@@ -43,7 +57,9 @@ Future<void> main(List<String> arguments) async {
   }
 
   if (results['help'] as bool) {
-    stdout.writeln('Usage: dart run sling_gql_gen (--schema <schema.json> | --endpoint <url>) --out <file.dart>');
+    stdout.writeln(
+      'Usage: dart run sling_gql_gen (--schema <schema.json> | --endpoint <url>) --out <file.dart>',
+    );
     stdout.writeln(parser.usage);
     return;
   }
@@ -51,12 +67,16 @@ Future<void> main(List<String> arguments) async {
   final schemaPath = results['schema'] as String?;
   final endpoint = results['endpoint'] as String?;
   final outPath = results['out'] as String;
-  final importPath = results['part-of-import'] as String? ?? 'package:sling_gql/sling_gql.dart';
+  final importPath =
+      results['part-of-import'] as String? ??
+      'package:sling_gql/sling_gql.dart';
   final keyField = results['key-field'] as String;
 
   final List<ScalarMapping> scalars;
   try {
-    scalars = (results['scalar'] as List<String>).map(ScalarMapping.parseFlag).toList();
+    scalars = (results['scalar'] as List<String>)
+        .map(ScalarMapping.parseFlag)
+        .toList();
   } on FormatException catch (e) {
     stderr.writeln(e.message);
     exitCode = 64;
@@ -83,7 +103,9 @@ Future<void> main(List<String> arguments) async {
     final headers = {
       'content-type': 'application/json',
       for (final h in results['header'] as List<String>)
-        h.substring(0, h.indexOf(':')).trim(): h.substring(h.indexOf(':') + 1).trim(),
+        h.substring(0, h.indexOf(':')).trim(): h
+            .substring(h.indexOf(':') + 1)
+            .trim(),
     };
     final response = await http.post(
       Uri.parse(endpoint!),
@@ -91,7 +113,9 @@ Future<void> main(List<String> arguments) async {
       body: jsonEncode({'query': introspectionQuery}),
     );
     if (response.statusCode >= 400) {
-      stderr.writeln('Introspection failed: HTTP ${response.statusCode}\n${response.body}');
+      stderr.writeln(
+        'Introspection failed: HTTP ${response.statusCode}\n${response.body}',
+      );
       exitCode = 69;
       return;
     }
@@ -106,7 +130,12 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln('Introspected $endpoint');
   }
   final schema = IntrospectionSchema.fromJson(json);
-  final code = generate(schema, importPath: importPath, keyField: keyField, scalars: scalars);
+  final code = generate(
+    schema,
+    importPath: importPath,
+    keyField: keyField,
+    scalars: scalars,
+  );
 
   final outFile = File(outPath);
   await outFile.parent.create(recursive: true);
@@ -116,7 +145,9 @@ Future<void> main(List<String> arguments) async {
   try {
     final result = await Process.run('dart', ['format', outFile.path]);
     if (result.exitCode != 0) {
-      stderr.writeln('dart format exited with ${result.exitCode} (output left unformatted):');
+      stderr.writeln(
+        'dart format exited with ${result.exitCode} (output left unformatted):',
+      );
       stderr.writeln(result.stderr);
     }
   } on ProcessException catch (e) {

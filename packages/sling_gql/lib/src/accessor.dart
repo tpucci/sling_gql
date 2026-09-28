@@ -64,7 +64,8 @@ abstract class Accessor {
   /// True when this object does not exist in cache yet (skeleton state):
   /// every scalar read returns `null` and records a miss.
   bool get isSkeleton =>
-      recorder.cache.read(recorder.operation, path, deps: recorder.deps) == missing;
+      recorder.cache.read(recorder.operation, path, deps: recorder.deps) ==
+      missing;
 
   /// The `__typename` of the cached object, if any.
   String? get $typename => scalar<String>('__typename');
@@ -83,8 +84,10 @@ abstract class Accessor {
         keyed ? recorder.cache.normalization.selectedKeyField : null,
       );
 
-  Object? _read(Selection sel) => recorder.cache
-      .read(recorder.operation, [...path, sel.alias], deps: recorder.deps);
+  Object? _read(Selection sel) => recorder.cache.read(recorder.operation, [
+    ...path,
+    sel.alias,
+  ], deps: recorder.deps);
 
   /// True when the cache holds a value for [field] on this object —
   /// including an explicit server `null` — false when it was never fetched.
@@ -98,7 +101,8 @@ abstract class Accessor {
   /// (see `QueryState.error`) also reads as not fetched here.
   bool isFetched(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
-    return recorder.cache.read(recorder.operation, [...path, sel.alias]) != missing;
+    return recorder.cache.read(recorder.operation, [...path, sel.alias]) !=
+        missing;
   }
 
   /// Reads a scalar field. Returns `null` (and records a miss) when not cached.
@@ -128,27 +132,41 @@ abstract class Accessor {
   /// usually `String`) is converted to a richer Dart type [T] by [parse].
   /// Backs both [enumValue] and a generator `--scalar` mapping (e.g.
   /// `DateTime`). Same miss/skeleton semantics as [scalar].
-  T? scalarAs<T, W>(String field, T Function(W) parse, {Map<String, Arg>? args}) {
+  T? scalarAs<T, W>(
+    String field,
+    T Function(W) parse, {
+    Map<String, Arg>? args,
+  }) {
     final raw = scalar<W>(field, args: args);
     return raw == null ? null : parse(raw);
   }
 
   /// Reads a list of such values (see [scalarAs]). Same miss/skeleton
   /// semantics as [scalarList].
-  List<T?>? scalarListAs<T, W>(String field, T Function(W) parse, {Map<String, Arg>? args}) {
+  List<T?>? scalarListAs<T, W>(
+    String field,
+    T Function(W) parse, {
+    Map<String, Arg>? args,
+  }) {
     final raw = scalarList<W>(field, args: args);
     return raw?.map((e) => e == null ? null : parse(e)).toList();
   }
 
   /// Reads an enum field: the cached wire `String` mapped through [parse]
   /// (the generated `fromGraphQL`). Same miss/skeleton semantics as [scalar].
-  T? enumValue<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) =>
-      scalarAs<T, String>(field, parse, args: args);
+  T? enumValue<T>(
+    String field,
+    T Function(String) parse, {
+    Map<String, Arg>? args,
+  }) => scalarAs<T, String>(field, parse, args: args);
 
   /// Reads a list of enums, mapping each wire `String` through [parse].
   /// Same miss/skeleton semantics as [scalarList].
-  List<T?>? enumList<T>(String field, T Function(String) parse, {Map<String, Arg>? args}) =>
-      scalarListAs<T, String>(field, parse, args: args);
+  List<T?>? enumList<T>(
+    String field,
+    T Function(String) parse, {
+    Map<String, Arg>? args,
+  }) => scalarListAs<T, String>(field, parse, args: args);
 
   /// Reads an object field. Returns a skeleton accessor when not cached,
   /// `null` only when the server explicitly returned `null`.
@@ -194,7 +212,9 @@ abstract class Accessor {
     final List<R>? result;
     if (value == missing) {
       recorder.onMiss(sel);
-      result = [ctor(recorder, sel, [...path, sel.alias, 0])];
+      result = [
+        ctor(recorder, sel, [...path, sel.alias, 0]),
+      ];
     } else if (value == null) {
       result = null;
     } else {
@@ -228,9 +248,12 @@ abstract class Accessor {
     // JSON numbers: `1` decodes as int but the schema may say Float.
     if (T == double && value is num) return value.toDouble() as T;
     if (T == int && value is num) return value.toInt() as T;
-    throw StateError('Expected $T but cache holds ${value.runtimeType}: $value');
+    throw StateError(
+      'Expected $T but cache holds ${value.runtimeType}: $value',
+    );
   }
 
   @override
-  String toString() => '${selection.field}@$path${isSkeleton ? ' (skeleton)' : ''}';
+  String toString() =>
+      '${selection.field}@$path${isSkeleton ? ' (skeleton)' : ''}';
 }

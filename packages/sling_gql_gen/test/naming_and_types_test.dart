@@ -55,7 +55,10 @@ void main() {
     });
 
     test('object/input type names pass through', () {
-      expect(named('INPUT_OBJECT', 'LaunchFind').toGraphQLLiteral(), 'LaunchFind');
+      expect(
+        named('INPUT_OBJECT', 'LaunchFind').toGraphQLLiteral(),
+        'LaunchFind',
+      );
       expect(named('ENUM', 'order_by').toGraphQLLiteral(), 'order_by');
     });
   });
@@ -79,7 +82,10 @@ void main() {
     test('list of non-null enum -> List<Enum> with non-null elements, nullable list', () {
       final ref = TypeRef(
         kind: 'LIST',
-        ofType: TypeRef(kind: 'NON_NULL', ofType: named('ENUM', 'users_select_column')),
+        ofType: TypeRef(
+          kind: 'NON_NULL',
+          ofType: named('ENUM', 'users_select_column'),
+        ),
       );
       final resolved = resolveArgDartType(ref);
       expect(resolved.dartType, 'List<users_select_column>');
@@ -87,12 +93,18 @@ void main() {
     });
 
     test('enum resolves to its (sanitized) Dart enum name', () {
-      expect(resolveArgDartType(named('ENUM', 'LaunchStatus')).dartType, 'LaunchStatus');
+      expect(
+        resolveArgDartType(named('ENUM', 'LaunchStatus')).dartType,
+        'LaunchStatus',
+      );
       expect(resolveArgDartType(named('ENUM', '_Order')).dartType, r'$Order');
     });
 
     test('list of nullable input object -> List<T?>', () {
-      final ref = TypeRef(kind: 'LIST', ofType: named('INPUT_OBJECT', 'LaunchFind'));
+      final ref = TypeRef(
+        kind: 'LIST',
+        ofType: named('INPUT_OBJECT', 'LaunchFind'),
+      );
       final resolved = resolveArgDartType(ref);
       expect(resolved.dartType, 'List<LaunchFind?>');
     });
@@ -107,25 +119,39 @@ void main() {
     TypeRef named(String kind, String name) => TypeRef(kind: kind, name: name);
 
     test('scalar passes through unchanged', () {
-      expect(argValueExpression('limit', named('SCALAR', 'Int'), nonNull: false), 'limit');
+      expect(
+        argValueExpression('limit', named('SCALAR', 'Int'), nonNull: false),
+        'limit',
+      );
     });
 
     test('nullable input object calls ?.toJson()', () {
       expect(
-        argValueExpression('find', named('INPUT_OBJECT', 'LaunchFind'), nonNull: false),
+        argValueExpression(
+          'find',
+          named('INPUT_OBJECT', 'LaunchFind'),
+          nonNull: false,
+        ),
         'find?.toJson()',
       );
     });
 
     test('required input object calls .toJson()', () {
       expect(
-        argValueExpression('find', named('INPUT_OBJECT', 'LaunchFind'), nonNull: true),
+        argValueExpression(
+          'find',
+          named('INPUT_OBJECT', 'LaunchFind'),
+          nonNull: true,
+        ),
         'find.toJson()',
       );
     });
 
     test('list of nullable-element input objects maps toJson with ?.', () {
-      final ref = TypeRef(kind: 'LIST', ofType: named('INPUT_OBJECT', 'OrderBy'));
+      final ref = TypeRef(
+        kind: 'LIST',
+        ofType: named('INPUT_OBJECT', 'OrderBy'),
+      );
       expect(
         argValueExpression('order', ref, nonNull: false),
         'order?.map((e) => e?.toJson()).toList()',
@@ -135,7 +161,10 @@ void main() {
     test('list of non-null-element input objects maps toJson without ?.', () {
       final ref = TypeRef(
         kind: 'LIST',
-        ofType: TypeRef(kind: 'NON_NULL', ofType: named('INPUT_OBJECT', 'OrderBy')),
+        ofType: TypeRef(
+          kind: 'NON_NULL',
+          ofType: named('INPUT_OBJECT', 'OrderBy'),
+        ),
       );
       expect(
         argValueExpression('order', ref, nonNull: false),
@@ -145,11 +174,19 @@ void main() {
 
     test('enum calls toGraphQL(), honoring nullability', () {
       expect(
-        argValueExpression('status', named('ENUM', 'LaunchStatus'), nonNull: false),
+        argValueExpression(
+          'status',
+          named('ENUM', 'LaunchStatus'),
+          nonNull: false,
+        ),
         'status?.toGraphQL()',
       );
       expect(
-        argValueExpression('status', named('ENUM', 'LaunchStatus'), nonNull: true),
+        argValueExpression(
+          'status',
+          named('ENUM', 'LaunchStatus'),
+          nonNull: true,
+        ),
         'status.toGraphQL()',
       );
     });

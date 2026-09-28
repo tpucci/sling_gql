@@ -50,28 +50,29 @@ class LaunchRow extends StatelessWidget {
       onTap: launch.id == null
           ? null
           : () => Navigator.of(context).push(
-                CupertinoPageRoute<void>(
-                  builder: (_) => LaunchScreen(id: launch.id!),
-                ),
+              CupertinoPageRoute<void>(
+                builder: (_) => LaunchScreen(id: launch.id!),
               ),
+            ),
     );
   }
 }
 
 IconData _statusIcon(LaunchStatus? status) => switch (status) {
-      LaunchStatus.success => CupertinoIcons.checkmark_circle_fill,
-      LaunchStatus.failure => CupertinoIcons.xmark_circle_fill,
-      LaunchStatus.partialFailure =>
-        CupertinoIcons.exclamationmark_circle_fill,
-      LaunchStatus.scrubbed => CupertinoIcons.pause_circle_fill,
-      LaunchStatus.scheduled => CupertinoIcons.clock_fill,
-      LaunchStatus.unknown || null => CupertinoIcons.question_circle,
-    };
+  LaunchStatus.success => CupertinoIcons.checkmark_circle_fill,
+  LaunchStatus.failure => CupertinoIcons.xmark_circle_fill,
+  LaunchStatus.partialFailure => CupertinoIcons.exclamationmark_circle_fill,
+  LaunchStatus.scrubbed => CupertinoIcons.pause_circle_fill,
+  LaunchStatus.scheduled => CupertinoIcons.clock_fill,
+  LaunchStatus.unknown || null => CupertinoIcons.question_circle,
+};
 
 Color _statusColor(LaunchStatus? status) => switch (status) {
-      LaunchStatus.success => CupertinoColors.systemGreen,
-      LaunchStatus.failure => CupertinoColors.systemRed,
-      LaunchStatus.partialFailure => CupertinoColors.systemOrange,
-      LaunchStatus.scheduled => CupertinoColors.systemBlue,
-      LaunchStatus.scrubbed || LaunchStatus.unknown || null => CupertinoColors.systemGrey,
-    };
+  LaunchStatus.success => CupertinoColors.systemGreen,
+  LaunchStatus.failure => CupertinoColors.systemRed,
+  LaunchStatus.partialFailure => CupertinoColors.systemOrange,
+  LaunchStatus.scheduled => CupertinoColors.systemBlue,
+  LaunchStatus.scrubbed ||
+  LaunchStatus.unknown ||
+  null => CupertinoColors.systemGrey,
+};

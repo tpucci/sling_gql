@@ -119,7 +119,10 @@ String generate(
   }
 
   final entityTypes = objectTypes
-      .where((t) => t.name != schema.queryTypeName && t.name != schema.mutationTypeName)
+      .where(
+        (t) =>
+            t.name != schema.queryTypeName && t.name != schema.mutationTypeName,
+      )
       .where((t) => ctx.isKeyed(t.name))
       .toList();
   if (entityTypes.isNotEmpty) {
@@ -128,7 +131,8 @@ String generate(
   }
 
   for (final t in objectTypes) {
-    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName) continue;
+    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName)
+      continue;
     out.writeln();
     _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
@@ -159,7 +163,9 @@ void _emitDocAndDeprecation(
     }
   }
   if (isDeprecated) {
-    out.writeln('$indent@Deprecated(${dartStringLiteral(deprecationReason ?? 'deprecated')})');
+    out.writeln(
+      '$indent@Deprecated(${dartStringLiteral(deprecationReason ?? 'deprecated')})',
+    );
   }
 }
 
@@ -176,7 +182,8 @@ class _EmitContext {
     final type = typesByName[typeName];
     if (type == null || type.kind != 'OBJECT') return false;
     return type.fields.any(
-      (f) => f.name == keyField && f.args.isEmpty && f.type.named.kind == 'SCALAR',
+      (f) =>
+          f.name == keyField && f.args.isEmpty && f.type.named.kind == 'SCALAR',
     );
   }
 
@@ -196,13 +203,15 @@ class _EmitContext {
   bool isReadOnly(GqlType owner, GqlField field) {
     if (field.name == keyField && isKeyed(owner.name)) return true;
     if (owner.name == 'PageInfo') return true;
-    return isConnection(owner) && const {'totalCount', 'pageInfo'}.contains(field.name);
+    return isConnection(owner) &&
+        const {'totalCount', 'pageInfo'}.contains(field.name);
   }
 
   /// Relay-style connection: has `pageInfo` plus `nodes` or `edges`.
   bool isConnection(GqlType type) {
     final names = type.fields.map((f) => f.name).toSet();
-    return names.contains('pageInfo') && (names.contains('nodes') || names.contains('edges'));
+    return names.contains('pageInfo') &&
+        (names.contains('nodes') || names.contains('edges'));
   }
 }
 
@@ -238,7 +247,9 @@ void _emitSlingSchema(StringBuffer out) {
 /// the caller having to pass `Mutation.root`.
 void _emitMutateExtension(StringBuffer out) {
   out
-    ..writeln('/// Typed mutations for this schema. See `SlingClient.mutateWith`.')
+    ..writeln(
+      '/// Typed mutations for this schema. See `SlingClient.mutateWith`.',
+    )
     ..writeln('extension SlingMutations on SlingClient<Query> {')
     ..writeln('  Future<T> mutate<T>(')
     ..writeln('    T Function(Mutation mutation) body, {')
@@ -258,9 +269,22 @@ void _emitMutateExtension(StringBuffer out) {
 /// shadow — extension members lose to instance members silently.
 const Set<String> _cacheScopeMembers = {
   ...dartKeywords,
-  'client', 'operation', 'root', 'cache', 'deps', 'onMiss', 'onWrite',
-  'locateList', 'query', 'entity', 'list', 'evict', 'hashCode',
-  'runtimeType', 'toString', 'noSuchMethod',
+  'client',
+  'operation',
+  'root',
+  'cache',
+  'deps',
+  'onMiss',
+  'onWrite',
+  'locateList',
+  'query',
+  'entity',
+  'list',
+  'evict',
+  'hashCode',
+  'runtimeType',
+  'toString',
+  'noSuchMethod',
 };
 
 /// `cacheScope.launch('launch-181')`: one method per keyed type, returning
@@ -274,8 +298,12 @@ void _emitCacheAccessExtension(
 ) {
   final keyParam = sanitizeIdentifier(ctx.keyField);
   out
-    ..writeln('/// Typed, non-fetching cache access for this schema\'s keyed types:')
-    ..writeln("/// `client.cacheScope.launch('launch-181')` returns the cached entity or")
+    ..writeln(
+      '/// Typed, non-fetching cache access for this schema\'s keyed types:',
+    )
+    ..writeln(
+      "/// `client.cacheScope.launch('launch-181')` returns the cached entity or",
+    )
     ..writeln('/// `null`. See `CacheScope`.')
     ..writeln('extension SlingCacheAccess on CacheScope<Query> {');
   final used = <String>{};
@@ -314,7 +342,12 @@ void _emitObjectClass(
   out.writeln('}');
 }
 
-void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ctx) {
+void _emitField(
+  StringBuffer out,
+  GqlType owner,
+  GqlField field,
+  _EmitContext ctx,
+) {
   final dartFieldName = sanitizeIdentifier(field.name);
   final leaf = field.type.named;
   final isList = field.type.isListType;
@@ -322,24 +355,28 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
 
   // Normalization hints for object fields (see `generate`).
   final keyed = !isScalarLeaf && ctx.isKeyed(leaf.name!);
-  final lookup = !isScalarLeaf && ctx.isLookup(field) ? sanitizeTypeName(leaf.name!) : null;
+  final lookup = !isScalarLeaf && ctx.isLookup(field)
+      ? sanitizeTypeName(leaf.name!)
+      : null;
   final objectOpts = lookup != null
       ? ", lookup: '$lookup'" // implies keyed
       : keyed
-          ? ', keyed: true'
-          : '';
+      ? ', keyed: true'
+      : '';
 
   final scalarMapping = leaf.kind == 'SCALAR' ? ctx.registry[leaf.name!] : null;
-  final elementDartType =
-      leaf.kind == 'SCALAR' ? ctx.registry.dartType(leaf.name!) : sanitizeTypeName(leaf.name!);
+  final elementDartType = leaf.kind == 'SCALAR'
+      ? ctx.registry.dartType(leaf.name!)
+      : sanitizeTypeName(leaf.name!);
 
   // A field whose sanitized Dart name is spelled exactly like the Dart
   // class it returns (common with Hasura's lowercase table types, e.g. a
   // `users` field returning type `users`) would shadow that top-level type
   // name within this class body, breaking `elementDartType.new` and the
   // return-type annotation. Disambiguate the member, not the type.
-  final effectiveFieldName =
-      dartFieldName == elementDartType ? '$dartFieldName\$' : dartFieldName;
+  final effectiveFieldName = dartFieldName == elementDartType
+      ? '$dartFieldName\$'
+      : dartFieldName;
 
   _emitDocAndDeprecation(
     out,
@@ -349,7 +386,9 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
     deprecationReason: field.deprecationReason,
   );
   if (leaf.kind == 'SCALAR' && !ctx.registry.isKnown(leaf.name!)) {
-    out.writeln('  /// Unknown custom scalar `${leaf.name}`; read as `Object?`.');
+    out.writeln(
+      '  /// Unknown custom scalar `${leaf.name}`; read as `Object?`.',
+    );
   }
 
   final hasArgs = field.args.isNotEmpty;
@@ -363,27 +402,33 @@ void _emitField(StringBuffer out, GqlType owner, GqlField field, _EmitContext ct
   final scalarRead = isEnum
       ? 'enumValue($key, $elementDartType.fromGraphQL'
       : scalarMapping != null
-          ? 'scalarAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
-          : 'scalar<$elementDartType>($key';
+      ? 'scalarAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
+      : 'scalar<$elementDartType>($key';
   final scalarListRead = isEnum
       ? 'enumList($key, $elementDartType.fromGraphQL'
       : scalarMapping != null
-          ? 'scalarListAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
-          : 'scalarList<$elementDartType>($key';
+      ? 'scalarListAs<$elementDartType, String>($key, ${scalarMapping.parseExpr}'
+      : 'scalarList<$elementDartType>($key';
   final writeValue = isEnum
       ? 'v?.graphqlName'
       : scalarMapping != null
-          ? scalarMapping.serializeCall('v', nonNull: false)
-          : 'v';
+      ? scalarMapping.serializeCall('v', nonNull: false)
+      : 'v';
 
   if (!hasArgs) {
     if (!isList && isScalarLeaf) {
-      out.writeln("  $elementDartType? get $effectiveFieldName => $scalarRead);");
+      out.writeln(
+        "  $elementDartType? get $effectiveFieldName => $scalarRead);",
+      );
       if (!ctx.isReadOnly(owner, field)) {
-        out.writeln("  set $effectiveFieldName($elementDartType? v) => write($key, $writeValue);");
+        out.writeln(
+          "  set $effectiveFieldName($elementDartType? v) => write($key, $writeValue);",
+        );
       }
     } else if (isList && isScalarLeaf) {
-      out.writeln("  List<$elementDartType?>? get $effectiveFieldName => $scalarListRead);");
+      out.writeln(
+        "  List<$elementDartType?>? get $effectiveFieldName => $scalarListRead);",
+      );
     } else if (!isList) {
       out.writeln(
         "  $elementDartType? get $effectiveFieldName => object($key, $elementDartType.new$objectOpts);",
@@ -440,7 +485,12 @@ String _buildArgsMap(List<GqlInputValue> args, ScalarRegistry registry) {
     final resolved = resolveArgDartType(a.type, scalars: registry);
     final required = resolved.nonNull && a.defaultValue == null;
     final dartName = sanitizeIdentifier(a.name);
-    final valueExpr = argValueExpression(dartName, a.type, nonNull: required, scalars: registry);
+    final valueExpr = argValueExpression(
+      dartName,
+      a.type,
+      nonNull: required,
+      scalars: registry,
+    );
     entries.add("'${a.name}': Arg('${a.type.toGraphQLLiteral()}', $valueExpr)");
   }
   return '{${entries.join(', ')}}';
@@ -471,7 +521,9 @@ void _emitEnum(StringBuffer out, GqlType type) {
     out.writeln('  $dartName(${dartStringLiteral(v.name)}),');
   }
   out
-    ..writeln('  /// A wire value this client does not know (forward compatibility).')
+    ..writeln(
+      '  /// A wire value this client does not know (forward compatibility).',
+    )
     ..writeln("  unknown('');")
     ..writeln()
     ..writeln('  const $enumName(this.graphqlName);')
@@ -479,11 +531,17 @@ void _emitEnum(StringBuffer out, GqlType type) {
     ..writeln('  /// The value as spelled in the GraphQL schema.')
     ..writeln('  final String graphqlName;')
     ..writeln()
-    ..writeln('  /// Maps a wire value to its constant, [unknown] when unmatched.')
+    ..writeln(
+      '  /// Maps a wire value to its constant, [unknown] when unmatched.',
+    )
     ..writeln('  static $enumName fromGraphQL(String value) =>')
-    ..writeln('      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);')
+    ..writeln(
+      '      values.firstWhere((v) => v.graphqlName == value, orElse: () => unknown);',
+    )
     ..writeln()
-    ..writeln('  /// The wire value to send as an argument; [unknown] has none.')
+    ..writeln(
+      '  /// The wire value to send as an argument; [unknown] has none.',
+    )
     ..writeln('  String toGraphQL() {')
     ..writeln('    if (this == unknown) {')
     ..writeln(
@@ -501,7 +559,9 @@ void _emitInputClass(StringBuffer out, GqlType type, ScalarRegistry registry) {
   _emitDocAndDeprecation(out, indent: '', description: type.description);
   out.writeln('class $className {');
 
-  final ctorParams = type.inputFields.map((f) => 'this.${sanitizeIdentifier(f.name)}').join(', ');
+  final ctorParams = type.inputFields
+      .map((f) => 'this.${sanitizeIdentifier(f.name)}')
+      .join(', ');
   out.writeln('  const $className({$ctorParams});');
   out.writeln();
 
@@ -515,7 +575,12 @@ void _emitInputClass(StringBuffer out, GqlType type, ScalarRegistry registry) {
   out.writeln('  Map<String, Object?> toJson() => {');
   for (final f in type.inputFields) {
     final dartName = sanitizeIdentifier(f.name);
-    final valueExpr = argValueExpression(dartName, f.type, nonNull: false, scalars: registry);
+    final valueExpr = argValueExpression(
+      dartName,
+      f.type,
+      nonNull: false,
+      scalars: registry,
+    );
     out.writeln("    if ($dartName != null) '${f.name}': $valueExpr,");
   }
   out.writeln('  };');

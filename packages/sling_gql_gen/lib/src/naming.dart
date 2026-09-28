@@ -13,14 +13,72 @@ library;
 /// that would either fail to parse or shadow language constructs if used as
 /// an identifier.
 const Set<String> dartKeywords = {
-  'is', 'in', 'default', 'new', 'switch', 'case', 'do', 'if', 'else', 'for',
-  'while', 'return', 'void', 'var', 'final', 'const', 'this', 'super', 'null',
-  'true', 'false', 'with', 'enum', 'extends', 'implements', 'import', 'export',
-  'library', 'part', 'static', 'assert', 'break', 'continue', 'catch', 'try',
-  'finally', 'throw', 'rethrow', 'abstract', 'as', 'async', 'await', 'yield',
-  'get', 'set', 'operator', 'factory', 'external', 'typedef', 'dynamic',
-  'covariant', 'deferred', 'late', 'required', 'mixin', 'on', 'show', 'hide',
-  'sync', 'interface', 'extension', 'base', 'sealed', 'when', 'of', 'class',
+  'is',
+  'in',
+  'default',
+  'new',
+  'switch',
+  'case',
+  'do',
+  'if',
+  'else',
+  'for',
+  'while',
+  'return',
+  'void',
+  'var',
+  'final',
+  'const',
+  'this',
+  'super',
+  'null',
+  'true',
+  'false',
+  'with',
+  'enum',
+  'extends',
+  'implements',
+  'import',
+  'export',
+  'library',
+  'part',
+  'static',
+  'assert',
+  'break',
+  'continue',
+  'catch',
+  'try',
+  'finally',
+  'throw',
+  'rethrow',
+  'abstract',
+  'as',
+  'async',
+  'await',
+  'yield',
+  'get',
+  'set',
+  'operator',
+  'factory',
+  'external',
+  'typedef',
+  'dynamic',
+  'covariant',
+  'deferred',
+  'late',
+  'required',
+  'mixin',
+  'on',
+  'show',
+  'hide',
+  'sync',
+  'interface',
+  'extension',
+  'base',
+  'sealed',
+  'when',
+  'of',
+  'class',
   'type',
 };
 
@@ -28,9 +86,22 @@ const Set<String> dartKeywords = {
 /// members it inherits) that a generated getter/method must not clash with.
 const Set<String> dartReservedAndAccessorMembers = {
   ...dartKeywords,
-  'recorder', 'selection', 'path', 'isSkeleton', 'scalar', 'scalarList',
-  'enumValue', 'enumList', 'object', 'list', 'write', 'hashCode',
-  'runtimeType', 'toString', 'noSuchMethod', 'toJson',
+  'recorder',
+  'selection',
+  'path',
+  'isSkeleton',
+  'scalar',
+  'scalarList',
+  'enumValue',
+  'enumList',
+  'object',
+  'list',
+  'write',
+  'hashCode',
+  'runtimeType',
+  'toString',
+  'noSuchMethod',
+  'toJson',
 };
 
 /// [dartKeywords] plus the members every generated `enum` already has
@@ -38,15 +109,32 @@ const Set<String> dartReservedAndAccessorMembers = {
 /// `fromGraphQL`, `toGraphQL`) that an enum constant must not clash with.
 const Set<String> dartReservedAndEnumMembers = {
   ...dartKeywords,
-  'unknown', 'values', 'index', 'name', 'graphqlName', 'fromGraphQL',
-  'toGraphQL', 'byName', 'compareTo', 'hashCode', 'runtimeType', 'toString',
+  'unknown',
+  'values',
+  'index',
+  'name',
+  'graphqlName',
+  'fromGraphQL',
+  'toGraphQL',
+  'byName',
+  'compareTo',
+  'hashCode',
+  'runtimeType',
+  'toString',
   'noSuchMethod',
 };
 
 /// Type names that would collide with dart:core or sling_gql runtime types
 /// if used verbatim as a generated class name.
 const Set<String> dartCoreOrRuntimeTypeNames = {
-  'Object', 'String', 'List', 'Map', 'Cache', 'Accessor', 'Selection', 'Arg',
+  'Object',
+  'String',
+  'List',
+  'Map',
+  'Cache',
+  'Accessor',
+  'Selection',
+  'Arg',
   'Recorder',
 };
 
@@ -83,14 +171,18 @@ String sanitizeEnumConstantName(String name) {
   final trimmed = name.replaceFirst(RegExp('^_+'), '');
   // All-caps wire names (`PARTIAL_FAILURE`) are lowercased before splitting;
   // mixed-case ones (`dateAsc`) keep their inner capitals.
-  final normalized = trimmed.toUpperCase() == trimmed ? trimmed.toLowerCase() : trimmed;
+  final normalized = trimmed.toUpperCase() == trimmed
+      ? trimmed.toLowerCase()
+      : trimmed;
   final words = normalized.split('_').where((w) => w.isNotEmpty).toList();
   final buffer = StringBuffer();
   for (var i = 0; i < words.length; i++) {
     final word = words[i];
-    buffer.write(i == 0
-        ? word[0].toLowerCase() + word.substring(1)
-        : word[0].toUpperCase() + word.substring(1));
+    buffer.write(
+      i == 0
+          ? word[0].toLowerCase() + word.substring(1)
+          : word[0].toUpperCase() + word.substring(1),
+    );
   }
   var out = buffer.toString();
   if (leadingUnderscore || out.isEmpty || RegExp('^[0-9]').hasMatch(out)) {
@@ -132,5 +224,8 @@ String dartStringLiteral(String value) {
 
 /// Formats a GraphQL description as one or more `///` doc-comment lines.
 List<String> docCommentLines(String description) {
-  return description.split('\n').map((line) => '/// $line'.trimRight()).toList();
+  return description
+      .split('\n')
+      .map((line) => '/// $line'.trimRight())
+      .toList();
 }

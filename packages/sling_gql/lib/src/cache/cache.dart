@@ -186,14 +186,18 @@ class NormalizedCache implements Cache {
       if (key is String) {
         final map = container as Map<String, Object?>;
         topField ??= key;
-        container = map[key] ??= next is int ? <Object?>[] : <String, Object?>{};
+        container = map[key] ??= next is int
+            ? <Object?>[]
+            : <String, Object?>{};
       } else {
         final list = container as List<Object?>;
         final index = key as int;
         while (list.length <= index) {
           list.add(null);
         }
-        container = list[index] ??= next is int ? <Object?>[] : <String, Object?>{};
+        container = list[index] ??= next is int
+            ? <Object?>[]
+            : <String, Object?>{};
       }
     }
     if (container is Ref) {
@@ -287,7 +291,11 @@ class NormalizedCache implements Cache {
     return touched;
   }
 
-  void _mergeEntity(String key, Map<String, Object?> fields, Set<String> touched) {
+  void _mergeEntity(
+    String key,
+    Map<String, Object?> fields,
+    Set<String> touched,
+  ) {
     final entity = _entities.putIfAbsent(key, () => {});
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
@@ -310,8 +318,9 @@ class NormalizedCache implements Cache {
         _mergeEntity(key, incoming, touched);
         return Ref(key);
       }
-      final target =
-          existing is Map<String, Object?> ? existing : <String, Object?>{};
+      final target = existing is Map<String, Object?>
+          ? existing
+          : <String, Object?>{};
       for (final e in incoming.entries) {
         target[e.key] = _normalize(target[e.key], e.value, touched);
       }
@@ -426,15 +435,15 @@ class NormalizedCache implements Cache {
 
   @override
   Map<String, Object?> get snapshot => {
-        for (final e in _entities.entries) e.key: _toJson(e.value),
-      };
+    for (final e in _entities.entries) e.key: _toJson(e.value),
+  };
 
   static Object? _toJson(Object? node) => switch (node) {
-        Ref() => node.toJson(),
-        Map() => {for (final e in node.entries) e.key as String: _toJson(e.value)},
-        List() => [for (final e in node) _toJson(e)],
-        _ => node,
-      };
+    Ref() => node.toJson(),
+    Map() => {for (final e in node.entries) e.key as String: _toJson(e.value)},
+    List() => [for (final e in node) _toJson(e)],
+    _ => node,
+  };
 
   void _hydrate(Map<String, Object?> json) {
     for (final e in json.entries) {
