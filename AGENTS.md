@@ -52,7 +52,9 @@ on the code.
   tag matches that package's `pubspec.yaml`, and publishes via pub.dev
   automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
   `sling_gql_gen-v{{version}}`, no secrets). Manual escape hatch:
-  `melos version <package> <patch|minor|major|x.y.z>`. Code must be
+  `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
+  `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos
+  reads commits from; before them the history is not conventional. Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves

@@ -1,3 +1,8 @@
+## 0.1.1
+
+- `example/main.dart`: a complete, self-contained app (query, mutation, optimistic write) shown on the pub.dev Example tab.
+- Repository: pub workspace + melos, CI on every push, releases via `melos version`.
+
 ## 0.1.0
 
 Initial release — proof of concept.

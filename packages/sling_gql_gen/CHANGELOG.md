@@ -1,3 +1,9 @@
+## 0.1.1
+
+- `example/README.md`: schema → CLI → generated output walkthrough, shown on the pub.dev Example tab.
+- README uses `flutter pub add --dev sling_gql_gen` / `dart run sling_gql_gen`.
+- Repository: pub workspace + melos, CI on every push, releases via `melos version`.
+
 ## 0.1.0
 
 Initial release — proof of concept.
