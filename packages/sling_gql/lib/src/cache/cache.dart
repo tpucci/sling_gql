@@ -62,12 +62,20 @@ abstract class Cache {
 
   /// Merges a GraphQL response `data` object. Objects the [Normalization]
   /// identifies are stored once as entities and referenced; the rest is
-  /// merged inline. Returns the dependency keys touched.
+  /// merged inline. Returns the dependency keys touched (the ones whose
+  /// value changed). When [at] is given, every key the response wrote 	tt
+  /// changed or not 	tt is stamped with it (see [fetchedAt]).
   Set<String> writeResponse(
     String operation,
     Selection selection,
-    Map<String, Object?> data,
-  );
+    Map<String, Object?> data, {
+    DateTime? at,
+  });
+
+  /// When [depKey] (`entity.field`) was last written by a server response,
+  /// or `null` if never: hydrated snapshots, optimistic writes and manual
+  /// [write]s carry no stamp, so they count as stale for `maxAge`.
+  DateTime? fetchedAt(String depKey);
 
   /// Removes an entity and every reference to it (list elements are dropped,
   /// object fields become missing so they are re-fetched on next read).
@@ -108,7 +116,11 @@ class NormalizedCache implements Cache {
   final Normalization normalization;
 
   final Map<String, Map<String, Object?>> _entities = {};
+  final Map<String, DateTime> _fetchedAt = {};
   final _changes = StreamController<Set<String>>.broadcast(sync: true);
+
+  /// Set while a stamped [writeResponse] runs: every key written is added.
+  Set<String>? _writing;
 
   static String rootKey(String operation) => 'ROOT_${operation.toUpperCase()}';
   static bool isRootKey(String key) => key.startsWith('ROOT_');
@@ -283,13 +295,28 @@ class NormalizedCache implements Cache {
   Set<String> writeResponse(
     String operation,
     Selection selection,
-    Map<String, Object?> data,
-  ) {
+    Map<String, Object?> data, {
+    DateTime? at,
+  }) {
     final touched = <String>{};
-    _mergeEntity(rootKey(operation), data, touched);
+    final written = at == null ? null : <String>{};
+    _writing = written;
+    try {
+      _mergeEntity(rootKey(operation), data, touched);
+    } finally {
+      _writing = null;
+    }
+    if (written != null) {
+      for (final key in written) {
+        _fetchedAt[key] = at!;
+      }
+    }
     _emit(touched);
     return touched;
   }
+
+  @override
+  DateTime? fetchedAt(String depKey) => _fetchedAt[depKey];
 
   void _mergeEntity(
     String key,
@@ -302,9 +329,11 @@ class NormalizedCache implements Cache {
       final existing = entity[e.key];
       final value = _normalize(existing, e.value, touched);
       entity[e.key] = value;
+      final dep = depKey(key, e.key);
+      _writing?.add(dep);
       // Containers are merged in place, so compare only leaves and refs.
       if (!had || value is Map || value is List || value != existing) {
-        touched.add(depKey(key, e.key));
+        touched.add(dep);
       }
     }
   }
@@ -346,7 +375,9 @@ class NormalizedCache implements Cache {
     final removed = _entities.remove(key);
     if (removed == null) return touched;
     for (final field in removed.keys) {
-      touched.add(depKey(key, field));
+      final dep = depKey(key, field);
+      touched.add(dep);
+      _fetchedAt.remove(dep);
     }
     final ref = Ref(key);
     for (final e in _entities.entries) {
@@ -472,6 +503,7 @@ class NormalizedCache implements Cache {
         for (final field in e.value.keys) depKey(e.key, field),
     };
     _entities.clear();
+    _fetchedAt.clear();
     _emit(touched);
   }
 }

@@ -129,6 +129,12 @@ class QueryState {
   /// "never branch on list length while loading" in `guides/getting-started`.
   bool get isSkeleton => hasMissingData && isLoading;
 
+  /// The last build rendered cached data older than the scope's `maxAge`
+  /// (or never fetched from the server) and a background refetch is on its
+  /// way 	tt stale-while-revalidate. Always false without a `maxAge`. Pair
+  /// with [isLoading] for a subtle "refreshing" indicator.
+  bool get isStale => _scope.isStale;
+
   /// The last error from a request this widget took part in.
   ///
   /// **Sticky until [refetch].** A failing query does not retry itself on
@@ -143,6 +149,11 @@ class QueryState {
   /// [error] immediately and resolves once the new attempt has landed (or
   /// failed again).
   Future<void> refetch() => _scope.refetch();
+
+  /// Like [refetch], but a no-op when everything this widget read is within
+  /// its `maxAge`. Bind it to "screen became visible again" style triggers
+  /// where a hard refetch would be wasteful.
+  Future<void> revalidate() => _scope.revalidate();
 }
 
 typedef QueryWidgetBuilder<Q extends Accessor> = Widget Function(
@@ -161,9 +172,22 @@ class QueryBuilder<Q extends Accessor> extends StatefulWidget {
     required this.builder,
     this.prepare,
     this.debugLabel,
+    this.fetchPolicy,
+    this.maxAge,
   });
 
   final QueryWidgetBuilder<Q> builder;
+
+  /// How this widget combines cache and network (see [FetchPolicy]);
+  /// defaults to `SlingClient.fetchPolicy`. `cacheAndNetwork` shows cached
+  /// data and refreshes it once when the widget mounts; `networkOnly`
+  /// shows skeletons until its own request lands. Read when the widget's
+  /// scope is created (first build); changing it later has no effect.
+  final FetchPolicy? fetchPolicy;
+
+  /// Stale-while-revalidate window for this widget (see `QueryScope.maxAge`);
+  /// defaults to `SlingClient.maxAge`. Read when the scope is created.
+  final Duration? maxAge;
 
   /// Names this widget's scope in dev-mode waterfall warnings
   /// (see `SlingClient.onWaterfall`). Defaults to the widget's [key] when
@@ -194,6 +218,8 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
         onChanged: _onChanged,
         scheduler: frameEndScheduler,
         debugLabel: widget.debugLabel ?? widget.key?.toString(),
+        fetchPolicy: widget.fetchPolicy,
+        maxAge: widget.maxAge,
       );
     }
   }

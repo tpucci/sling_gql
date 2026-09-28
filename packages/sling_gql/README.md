@@ -88,9 +88,11 @@ query {
   trip; dev-mode waterfall warnings.
 - Mutations with optimistic writes (journaled, rolled back on failure).
 - Partial `errors[]` handling, sticky errors, retry cooldown.
+- Fetch policies per widget (`cacheFirst`, `cacheAndNetwork`, `networkOnly`)
+  and `maxAge` stale-while-revalidate with `state.isStale` / `revalidate()`.
 - Cursor pagination helpers, `CacheScope.list` for list membership.
 
-Not yet: subscriptions, unions/interfaces, SWR/expiry.
+Not yet: subscriptions, unions/interfaces.
 
 ## Rules of thumb
 

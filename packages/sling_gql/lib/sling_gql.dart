@@ -16,6 +16,7 @@ export 'src/client.dart'
     show
         SlingClient,
         SlingException,
+        FetchPolicy,
         CacheScope,
         CacheList,
         QueryScope,

@@ -83,7 +83,28 @@ typedef FlushScheduler = void Function(void Function() flush);
 /// event-loop tasks, so a microtask would split one frame into two requests.
 void microtaskScheduler(void Function() flush) => scheduleMicrotask(flush);
 
-/// A scope in which selections are recorded — one per widget build.
+/// How a scope combines the cache and the network.
+///
+/// Independent of `maxAge`: a stale-while-revalidate window applies on top
+/// of any policy (see [QueryScope.maxAge]).
+enum FetchPolicy {
+  /// Read from the cache; fetch only what is missing. The default.
+  cacheFirst,
+
+  /// Read from the cache *and* refetch the whole selection in the
+  /// background on the scope's first run (a screen opening), so it shows
+  /// cached data at once and fresh data as soon as it lands. Later rebuilds
+  /// behave like [cacheFirst].
+  cacheAndNetwork,
+
+  /// Ignore the cache until this scope's own request has landed: the first
+  /// runs read skeletons and everything selected is fetched, even if cached.
+  /// The response is written to the shared cache as usual, and from then on
+  /// the scope reads like [cacheFirst].
+  networkOnly,
+}
+
+/// A scope in which selections are recorded, one per widget build.
 ///
 /// The scope owns the selection tree recorded during its last run, so it can
 /// be re-fetched wholesale (`refetch`) and so the client knows which scopes to
@@ -94,11 +115,39 @@ class QueryScope<Q extends Accessor> implements Recorder {
     required this.onChanged,
     this.scheduler = microtaskScheduler,
     String? debugLabel,
-  }) : debugLabel = debugLabel ?? 'QueryScope#${++_lastId}';
+    FetchPolicy? fetchPolicy,
+    Duration? maxAge,
+  }) : debugLabel = debugLabel ?? 'QueryScope#${++_lastId}',
+       fetchPolicy = fetchPolicy ?? client.fetchPolicy,
+       maxAge = maxAge ?? client.maxAge,
+       _bypassCache =
+           (fetchPolicy ?? client.fetchPolicy) == FetchPolicy.networkOnly;
 
   static int _lastId = 0;
 
   final SlingClient<Q> client;
+
+  /// How this scope combines cache and network (see [FetchPolicy]).
+  /// Defaults to [SlingClient.fetchPolicy].
+  final FetchPolicy fetchPolicy;
+
+  /// Stale-while-revalidate window. When set, a run whose data was last
+  /// fetched from the server longer ago than this (or never: hydrated
+  /// snapshots, optimistic writes) keeps rendering the cached values and
+  /// refetches the whole selection in the background; [isStale] is true
+  /// meanwhile. `null` (the default, from [SlingClient.maxAge]) means cached
+  /// data never expires: only [refetch] gets fresh data.
+  ///
+  /// Freshness is per dependency key (`Launch:launch-181.name`): a field is
+  /// fresh if *some* response wrote it within the window, whichever screen
+  /// asked for it.
+  final Duration? maxAge;
+
+  /// True while [FetchPolicy.networkOnly] is still waiting for its first
+  /// successful response: reads come back `missing` so everything selected
+  /// is fetched.
+  bool _bypassCache;
+  late final _BypassCache _bypass = _BypassCache(client.cache);
 
   /// Invoked when data relevant to this scope changed and it should re-run.
   final void Function() onChanged;
@@ -113,7 +162,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   String get operation => 'query';
 
   @override
-  Cache get cache => client.cache;
+  Cache get cache => _bypassCache ? _bypass : client.cache;
 
   Selection _root = Selection.root('query');
   @override
@@ -128,7 +177,15 @@ class QueryScope<Q extends Accessor> implements Recorder {
 
   bool _hadMiss = false;
   bool _awaiting = false;
+  bool _stale = false;
+  int _runCount = 0;
   Object? _error;
+
+  /// The pending fetch was not caused by misses (revalidation, cache-and-
+  /// network, [refetch]): the scope renders cached data meanwhile, and an
+  /// error from it must stay visible even though nothing is missing.
+  bool _backgroundFetch = false;
+  bool _errorIsBackground = false;
 
   /// When [_error] was set; used to expire it once `retryFailedAfter` elapses.
   DateTime? _errorAt;
@@ -159,6 +216,11 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// True if the last run touched data that is not in the cache.
   bool get hasMissingData => _hadMiss;
 
+  /// True when the last run rendered cached data older than [maxAge] (or
+  /// never fetched from the server); a background refetch is in flight or
+  /// blocked by a sticky [error]. Always false without a [maxAge].
+  bool get isStale => _stale;
+
   /// The last error from a fetch this scope took part in.
   ///
   /// **Sticky until [refetch].** Once a request this scope took part in
@@ -183,19 +245,65 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _missesAreWaterfall = _rebuildFromClient && _requestCount > 0;
     _rebuildFromClient = false;
     final result = body(client.rootFactory(this));
-    if (!_hadMiss) {
-      // Fully served from cache: any previous error is moot.
+    final firstRun = _runCount++ == 0;
+    final maxAge = this.maxAge;
+    _stale = maxAge != null && client._isStale(_deps, maxAge);
+    if (!_hadMiss && !_stale && !_errorIsBackground) {
+      // Fully served from fresh cache: an error from a miss-driven fetch is
+      // moot (a background one stays until `refetch`, see `error`).
       _error = null;
       _errorAt = null;
     }
+    final wantsNetwork =
+        _stale || (firstRun && fetchPolicy == FetchPolicy.cacheAndNetwork);
+    // A miss already schedules a fetch of the missing leaves; a stale or
+    // cache-and-network run adds the *whole* selection to it. Sticky errors
+    // block it like they block misses, so a failing server cannot loop.
+    if (wantsNetwork && !_awaiting && !_errorBlocksFetch()) {
+      client._enqueue(_root);
+      _awaiting = true;
+      _backgroundFetch = !_hadMiss;
+      client._schedule(this);
+    }
     return result;
+  }
+
+  /// Re-fetches like [refetch], unless every field read in the last run is
+  /// within [maxAge], in which case nothing is sent and the future completes
+  /// at once. Without a [maxAge] it is exactly [refetch]. The soft option for
+  /// "refresh when this screen comes back into view".
+  Future<void> revalidate() {
+    final maxAge = this.maxAge;
+    if (maxAge != null && !client._isStale(_deps, maxAge)) {
+      return Future.value();
+    }
+    return refetch();
+  }
+
+  /// True when a sticky error must suppress a fetch (see [error]). Expires
+  /// the error when `SlingClient.retryFailedAfter` has elapsed.
+  bool _errorBlocksFetch() {
+    if (_error == null) return false;
+    final retryAfter = client.retryFailedAfter;
+    final at = _errorAt;
+    final expired =
+        retryAfter != null &&
+        at != null &&
+        client._now().difference(at) >= retryAfter;
+    if (!expired) return true;
+    _error = null;
+    _errorAt = null;
+    _errorIsBackground = false;
+    return false;
   }
 
   /// Re-fetches everything this scope selected during its last run.
   Future<void> refetch() {
     _error = null;
     _errorAt = null;
+    _errorIsBackground = false;
     _awaiting = true;
+    _backgroundFetch = !_hadMiss;
     client._enqueue(_root, force: true);
     client._schedule(this);
     return whenSettled;
@@ -207,21 +315,12 @@ class QueryScope<Q extends Accessor> implements Recorder {
     // Error state is sticky until `refetch()` (or `SlingClient.retryFailedAfter`
     // elapses) so a failing query does not loop:
     // build → miss → fetch → fail → rebuild → miss → …
-    if (_error != null) {
-      final retryAfter = client.retryFailedAfter;
-      final at = _errorAt;
-      final expired =
-          retryAfter != null &&
-          at != null &&
-          client._now().difference(at) >= retryAfter;
-      if (!expired) return;
-      _error = null;
-      _errorAt = null;
-    }
+    if (_errorBlocksFetch()) return;
     if (client._enqueueLeaf(leaf) && _missesAreWaterfall) {
       _waterfallLeaves.add(leaf);
     }
     _awaiting = true;
+    _backgroundFetch = false;
     client._schedule(this);
   }
 
@@ -234,6 +333,10 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _awaiting = false;
     _error = error;
     _errorAt = error != null ? client._now() : null;
+    _errorIsBackground = error != null && _backgroundFetch;
+    _backgroundFetch = false;
+    // network-only: the scope's own data has landed, read the cache from now on.
+    if (error == null) _bypassCache = false;
     _settled?.complete();
     _settled = null;
   }
@@ -265,6 +368,53 @@ class QueryScope<Q extends Accessor> implements Recorder {
     }
     return parts.join('.');
   }
+}
+
+/// The cache a [FetchPolicy.networkOnly] scope reads through before its
+/// first response: every read is a miss, every write goes to the real cache.
+class _BypassCache implements Cache {
+  _BypassCache(this._inner);
+
+  final Cache _inner;
+
+  @override
+  Object? read(String operation, List<Object> path, {Set<String>? deps}) =>
+      missing;
+
+  @override
+  bool hasEntity(String key) => false;
+
+  @override
+  Normalization get normalization => _inner.normalization;
+  @override
+  Set<String> write(String operation, List<Object> path, Object? value) =>
+      _inner.write(operation, path, value);
+  @override
+  Set<String> remove(String operation, List<Object> path) =>
+      _inner.remove(operation, path);
+  @override
+  Set<String> writeResponse(
+    String operation,
+    Selection selection,
+    Map<String, Object?> data, {
+    DateTime? at,
+  }) => _inner.writeResponse(operation, selection, data, at: at);
+  @override
+  DateTime? fetchedAt(String depKey) => _inner.fetchedAt(depKey);
+  @override
+  Set<String> evict(String key) => _inner.evict(key);
+  @override
+  Set<String> gc() => _inner.gc();
+  @override
+  Iterable<String> get entityKeys => _inner.entityKeys;
+  @override
+  Map<String, Object?>? entity(String key) => _inner.entity(key);
+  @override
+  Stream<Set<String>> get onChange => _inner.onChange;
+  @override
+  Map<String, Object?> get snapshot => _inner.snapshot;
+  @override
+  void clear() => _inner.clear();
 }
 
 /// Recorder for one `mutate` call. Misses are expected (nothing is cached
@@ -555,7 +705,10 @@ class SlingClient<Q extends Accessor> {
     bool? warnOnWaterfall,
     void Function(WaterfallWarning warning)? onWaterfall,
     this.retryFailedAfter,
-    // Clock behind `retryFailedAfter`; only worth overriding in tests.
+    this.fetchPolicy = FetchPolicy.cacheFirst,
+    this.maxAge,
+    // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
+    // tests.
     DateTime Function() now = DateTime.now,
   }) : cache = cache ?? Cache(),
        _http = httpClient ?? http.Client(),
@@ -601,8 +754,28 @@ class SlingClient<Q extends Accessor> {
   /// checked lazily, on the next miss for that document, not on a timer.
   final Duration? retryFailedAfter;
 
-  /// Clock used by [retryFailedAfter]; overridable for tests.
+  /// Default [FetchPolicy] for scopes that do not set their own
+  /// (`QueryBuilder(fetchPolicy:)`, [resolve], [createScope]).
+  final FetchPolicy fetchPolicy;
+
+  /// Default stale-while-revalidate window for every scope (see
+  /// [QueryScope.maxAge]); `null` means cached data never expires.
+  final Duration? maxAge;
+
+  /// Clock used by [retryFailedAfter] and [maxAge]; overridable for tests.
   final DateTime Function() _now;
+
+  /// True when any of [deps] was last fetched longer than [maxAge] ago, or
+  /// never fetched from the server.
+  bool _isStale(Set<String> deps, Duration maxAge) {
+    if (deps.isEmpty) return false;
+    final now = _now();
+    for (final dep in deps) {
+      final at = cache.fetchedAt(dep);
+      if (at == null || now.difference(at) > maxAge) return true;
+    }
+    return false;
+  }
 
   // `print`, not `debugPrint`: client.dart stays free of Flutter imports.
   // ignore: avoid_print
@@ -627,12 +800,16 @@ class SlingClient<Q extends Accessor> {
     required void Function() onChanged,
     FlushScheduler scheduler = microtaskScheduler,
     String? debugLabel,
+    FetchPolicy? fetchPolicy,
+    Duration? maxAge,
   }) {
     final scope = QueryScope<Q>(
       this,
       onChanged: onChanged,
       scheduler: scheduler,
       debugLabel: debugLabel,
+      fetchPolicy: fetchPolicy,
+      maxAge: maxAge,
     );
     _scopes.add(scope);
     return scope;
@@ -673,9 +850,19 @@ class SlingClient<Q extends Accessor> {
 
   /// Imperative one-shot: runs [body] against a throwaway scope, fetches what
   /// is missing, and resolves once the cache is populated. Useful for
-  /// `prepare`-style prefetching or tests.
-  Future<T> resolve<T>(T Function(Q root) body) async {
-    final scope = createScope(onChanged: () {});
+  /// `prepare`-style prefetching or tests. [fetchPolicy] / [maxAge] default
+  /// to the client's: `resolve(body, fetchPolicy: FetchPolicy.networkOnly)`
+  /// is "fetch this now, whatever the cache has".
+  Future<T> resolve<T>(
+    T Function(Q root) body, {
+    FetchPolicy? fetchPolicy,
+    Duration? maxAge,
+  }) async {
+    final scope = createScope(
+      onChanged: () {},
+      fetchPolicy: fetchPolicy,
+      maxAge: maxAge,
+    );
     try {
       scope.run(body);
       await scope.whenSettled;
@@ -945,7 +1132,7 @@ class SlingClient<Q extends Accessor> {
         graphqlErrors: errors,
       );
     }
-    return (cache.writeResponse(operation, tree, data), error);
+    return (cache.writeResponse(operation, tree, data, at: _now()), error);
   }
 
   /// Removes the value at a GraphQL error `path` (aliases and list indices)
