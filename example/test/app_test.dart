@@ -46,8 +46,9 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
       await tester.pump(const Duration(milliseconds: 100));
-      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty)
+      if (i > 0 && find.byType(CupertinoActivityIndicator).evaluate().isEmpty) {
         break;
+      }
     }
     await tester.pump(const Duration(milliseconds: 500));
   }
@@ -289,8 +290,9 @@ void main() {
             () => Future<void>.delayed(const Duration(milliseconds: 50)),
           );
           await tester.pump();
-          if (tester.widget<CupertinoButton>(button.first).onPressed != null)
+          if (tester.widget<CupertinoButton>(button.first).onPressed != null) {
             break;
+          }
         }
         return wasFavorite;
       }

@@ -131,8 +131,9 @@ String generate(
   }
 
   for (final t in objectTypes) {
-    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName)
+    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName) {
       continue;
+    }
     out.writeln();
     _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
