@@ -49,12 +49,12 @@ Map<String, Object?> _arg(
 /// A small inline introspection document mirroring
 /// `packages/sling_gql/test/core_test.dart`'s hand-written example, plus a
 /// list-with-args field, an enum, an input object with a Hasura-style `_eq`
-/// field, and a Mutation root that must be skipped.
+/// field, and Mutation and Subscription roots.
 final Map<String, Object?> _schemaJson = {
   '__schema': {
     'queryType': {'name': 'Query'},
     'mutationType': {'name': 'Mutation'},
-    'subscriptionType': null,
+    'subscriptionType': {'name': 'Subscription'},
     'types': [
       {
         'kind': 'OBJECT',
@@ -93,6 +93,21 @@ final Map<String, Object?> _schemaJson = {
               _arg('id', _nonNull(_type('SCALAR', 'ID'))),
               _arg('name', _nonNull(_type('SCALAR', 'String'))),
             ],
+          ),
+        ],
+        'description': null,
+        'inputFields': null,
+        'enumValues': null,
+      },
+      {
+        'kind': 'OBJECT',
+        'name': 'Subscription',
+        'fields': [
+          _field('userChanged', _nonNull(_type('OBJECT', 'User'))),
+          _field(
+            'userRenamed',
+            _nonNull(_type('OBJECT', 'User')),
+            args: [_arg('id', _nonNull(_type('SCALAR', 'ID')))],
           ),
         ],
         'description': null,
@@ -300,7 +315,60 @@ void main() {
     );
   });
 
+  test('emits Subscription root and the typed subscribe extension', () {
+    expect(code, contains('class Subscription extends Accessor {'));
+    expect(
+      code,
+      contains('Subscription.root(Recorder r) : super(r, r.root, const []);'),
+    );
+    expect(
+      code,
+      contains(
+        "User? get userChanged => object('userChanged', User.new, keyed: true);",
+      ),
+    );
+    expect(
+      code,
+      contains(
+        "User? userRenamed({required String id}) => object('userRenamed', User.new, args: {'id': Arg('ID!', id)}, lookup: 'User');",
+      ),
+    );
+    expect(
+      code,
+      contains('extension SlingSubscriptions on SlingClient<Query> {'),
+    );
+    expect(
+      code,
+      contains(
+        'subscribeWith(Subscription.root, body, retryAfter: retryAfter);',
+      ),
+    );
+    expect(
+      RegExp('class Subscription extends Accessor').allMatches(code),
+      hasLength(1),
+    );
+    expect(code, isNot(contains('Subscription? subscription(')));
+  });
+
   test('emits the slingSchema convenience constant', () {
+    expect(
+      code,
+      contains(
+        'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
+        'mutation: Mutation.root, subscription: Subscription.root);',
+      ),
+    );
+  });
+
+  test('no Subscription class when the schema has no subscription type', () {
+    final json = Map<String, Object?>.from(_schemaJson);
+    final schema = Map<String, Object?>.from(
+      json['__schema'] as Map<String, Object?>,
+    )..['subscriptionType'] = null;
+    final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
+    // `Subscription` is then an ordinary object type: no `.root`.
+    expect(code, isNot(contains('Subscription.root')));
+    expect(code, isNot(contains('extension SlingSubscriptions')));
     expect(
       code,
       contains(

@@ -48,8 +48,12 @@ Flags:
 - `class Query extends Accessor` for the schema's query root type, with
   `Query(super.recorder, super.selection, super.path);` and
   `Query.root(Recorder r) : super(r, r.root, const []);` constructors.
+  `Mutation` and `Subscription` roots get the same shape, plus
+  `extension SlingMutations` (`client.mutate(...)`) and
+  `extension SlingSubscriptions` (`client.subscribe(...)`), and the
+  `slingSchema` constant bundling the roots for `SlingScope(schema:)`.
 - One `class <Name> extends Accessor` per other `OBJECT` type (skipping the
-  mutation/subscription roots and introspection `__*` types), with a getter
+  operation roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)
   per field with arguments. Scalar and enum fields without arguments also
   get a setter for optimistic writes, except where a write could never be

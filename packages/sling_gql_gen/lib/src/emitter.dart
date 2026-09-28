@@ -66,17 +66,15 @@ String generate(
 }) {
   final typesByName = schema.typesByName;
   final ctx = _EmitContext(typesByName, keyField, ScalarRegistry(scalars));
-  // Subscriptions are not supported yet; the Mutation root is emitted like
-  // Query, with a `.root` constructor and a `client.mutate` extension.
-  final skipRootNames = {
-    if (schema.subscriptionTypeName != null) schema.subscriptionTypeName!,
-  };
-
   final objectTypes = schema.types
       .where((t) => t.kind == 'OBJECT')
       .where((t) => !t.name.startsWith('__'))
-      .where((t) => !skipRootNames.contains(t.name))
       .toList();
+  final rootNames = {
+    schema.queryTypeName,
+    if (schema.mutationTypeName != null) schema.mutationTypeName!,
+    if (schema.subscriptionTypeName != null) schema.subscriptionTypeName!,
+  };
   final enumTypes = schema.types
       .where((t) => t.kind == 'ENUM')
       .where((t) => !t.name.startsWith('__'))
@@ -109,20 +107,35 @@ String generate(
   final mutationType = schema.mutationTypeName == null
       ? null
       : typesByName[schema.mutationTypeName!];
-  if (mutationType != null && mutationType.fields.isNotEmpty) {
+  final hasMutation = mutationType != null && mutationType.fields.isNotEmpty;
+  if (hasMutation) {
     out.writeln();
     _emitRootClass(out, mutationType, ctx, className: 'Mutation');
     out.writeln();
     _emitMutateExtension(out);
+  }
+
+  // The Subscription root is emitted like Mutation: a `.root` constructor
+  // and a `client.subscribe` extension. The runtime opens the stream.
+  final subscriptionType = schema.subscriptionTypeName == null
+      ? null
+      : typesByName[schema.subscriptionTypeName!];
+  final hasSubscription =
+      subscriptionType != null && subscriptionType.fields.isNotEmpty;
+  if (hasSubscription) {
     out.writeln();
-    _emitSlingSchema(out);
+    _emitRootClass(out, subscriptionType, ctx, className: 'Subscription');
+    out.writeln();
+    _emitSubscribeExtension(out);
+  }
+
+  if (hasMutation) {
+    out.writeln();
+    _emitSlingSchema(out, subscription: hasSubscription);
   }
 
   final entityTypes = objectTypes
-      .where(
-        (t) =>
-            t.name != schema.queryTypeName && t.name != schema.mutationTypeName,
-      )
+      .where((t) => !rootNames.contains(t.name))
       .where((t) => ctx.isKeyed(t.name))
       .toList();
   if (entityTypes.isNotEmpty) {
@@ -131,9 +144,7 @@ String generate(
   }
 
   for (final t in objectTypes) {
-    if (t.name == schema.queryTypeName || t.name == schema.mutationTypeName) {
-      continue;
-    }
+    if (rootNames.contains(t.name)) continue;
     out.writeln();
     _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
@@ -216,7 +227,8 @@ class _EmitContext {
   }
 }
 
-/// Operation root types (`Query`, `Mutation`) get a `.root` constructor that
+/// Operation root types (`Query`, `Mutation`, `Subscription`) get a `.root`
+/// constructor that
 /// binds them to a [Recorder]'s selection root.
 void _emitRootClass(
   StringBuffer out,
@@ -236,12 +248,32 @@ void _emitRootClass(
 }
 
 /// A schema-wide convenience so apps never name roots by hand: pass to
-/// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` resolves its
-/// root without a `root:` argument.
-void _emitSlingSchema(StringBuffer out) {
+/// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` /
+/// `SubscriptionBuilder` resolve their roots without a `root:` argument.
+void _emitSlingSchema(StringBuffer out, {required bool subscription}) {
   out.writeln(
-    'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, mutation: Mutation.root);',
+    'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
+    'mutation: Mutation.root'
+    '${subscription ? ', subscription: Subscription.root' : ''});',
   );
+}
+
+/// `client.subscribe((s) => s.launchStatusChanged?.status)` without the
+/// caller having to pass `Subscription.root`.
+void _emitSubscribeExtension(StringBuffer out) {
+  out
+    ..writeln(
+      '/// Typed subscriptions for this schema. See `SlingClient.subscribeWith`.',
+    )
+    ..writeln('extension SlingSubscriptions on SlingClient<Query> {')
+    ..writeln('  SlingSubscription<T> subscribe<T>(')
+    ..writeln('    T Function(Subscription subscription) body, {')
+    ..writeln('    Duration? retryAfter,')
+    ..writeln('  }) =>')
+    ..writeln(
+      '      subscribeWith(Subscription.root, body, retryAfter: retryAfter);',
+    )
+    ..writeln('}');
 }
 
 /// `client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)` without
