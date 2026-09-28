@@ -5,6 +5,7 @@ import '../generated/schema.dart';
 import '../screens/launch_screen.dart';
 import '../theme.dart';
 import 'skeleton.dart';
+import 'status_icon.dart';
 
 /// A single row in the launch list, reused by both the Launches and Me tabs.
 ///
@@ -26,7 +27,7 @@ class LaunchRow extends StatelessWidget {
     return CupertinoListTile(
       leading: launch.isSkeleton
           ? const SkeletonBox(width: 28, height: 28)
-          : Icon(_statusIcon(status), color: _statusColor(status)),
+          : StatusIcon(status),
       title: SkeletonText(launch.name, width: 160),
       subtitle: SkeletonText(
         date == null ? null : '${formatDate(date)} · $rocketName',
@@ -57,22 +58,3 @@ class LaunchRow extends StatelessWidget {
     );
   }
 }
-
-IconData _statusIcon(LaunchStatus? status) => switch (status) {
-  LaunchStatus.success => CupertinoIcons.checkmark_circle_fill,
-  LaunchStatus.failure => CupertinoIcons.xmark_circle_fill,
-  LaunchStatus.partialFailure => CupertinoIcons.exclamationmark_circle_fill,
-  LaunchStatus.scrubbed => CupertinoIcons.pause_circle_fill,
-  LaunchStatus.scheduled => CupertinoIcons.clock_fill,
-  LaunchStatus.unknown || null => CupertinoIcons.question_circle,
-};
-
-Color _statusColor(LaunchStatus? status) => switch (status) {
-  LaunchStatus.success => CupertinoColors.systemGreen,
-  LaunchStatus.failure => CupertinoColors.systemRed,
-  LaunchStatus.partialFailure => CupertinoColors.systemOrange,
-  LaunchStatus.scheduled => CupertinoColors.systemBlue,
-  LaunchStatus.scrubbed ||
-  LaunchStatus.unknown ||
-  null => CupertinoColors.systemGrey,
-};

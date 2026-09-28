@@ -4,6 +4,7 @@ import 'package:sling_gql/sling_gql.dart';
 import '../generated/schema.dart';
 import '../network_log.dart';
 import '../theme.dart';
+import 'schedule_launch_screen.dart';
 import '../widgets/error_view.dart';
 import '../widgets/launch_row.dart';
 import '../widgets/skeleton.dart';
@@ -22,6 +23,12 @@ import '../widgets/skeleton.dart';
 ///   different argument set → different alias → different cache entry. Coming
 ///   back to a segment you already visited is instant: its pages are cached.
 ///   The rows themselves are the same `Launch:<id>` entities in every segment.
+/// - [_LiveStatus] keeps a `launchStatusChanged` subscription open (SSE).
+///   Each event is normalized into `Launch:<id>` like any response, so the
+///   row's status icon updates without the list knowing a subscription
+///   exists. The + button opens [ScheduleLaunchScreen]: schedule a launch and
+///   the server flies it (`SCHEDULED → IN_FLIGHT → SUCCESS | FAILURE`) while
+///   you watch the row.
 class LaunchesScreen extends StatefulWidget {
   const LaunchesScreen({super.key});
 
@@ -68,14 +75,25 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
     final filter = status == null ? null : LaunchFilter(status: status);
 
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('Launches'),
-        trailing: NetworkLogButton(),
+      navigationBar: CupertinoNavigationBar(
+        leading: CupertinoButton(
+          key: const ValueKey('schedule-launch'),
+          padding: EdgeInsets.zero,
+          onPressed: () => Navigator.of(context).push(
+            CupertinoPageRoute<void>(
+              builder: (_) => const ScheduleLaunchScreen(),
+            ),
+          ),
+          child: const Icon(CupertinoIcons.add),
+        ),
+        middle: const Text('Launches'),
+        trailing: const NetworkLogButton(),
       ),
       child: SafeArea(
         child: Column(
           children: [
             const _Header(),
+            const _LiveStatus(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: CupertinoSlidingSegmentedControl<LaunchStatus>(
@@ -158,6 +176,105 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// `useSubscription` in widget form, twice — a subscription selects one root
+/// field. `select` records the document once; the stream opens on mount and
+/// closes on unmount; every event is normalized into `Launch:<id>` before
+/// anything here runs, which is why the rows update without being told.
+///
+/// - `launchStatusChanged`: the banner narrates it; the row icons follow the
+///   entity (schedule a launch with the + button and watch the sequence),
+///   and the segments follow too: `listRules` (see `list_rules.dart`) move
+///   the launch between the cached `launches(filter:)` lists as its status
+///   changes.
+/// - `launchScheduled`: a new entity is not *in* any cached list yet; the
+///   same rule puts it at the top of "All" and "Scheduled". Nothing here
+///   edits the cache — `onEvent` only updates the banner.
+class _LiveStatus extends StatefulWidget {
+  const _LiveStatus();
+
+  @override
+  State<_LiveStatus> createState() => _LiveStatusState();
+}
+
+class _LiveStatusState extends State<_LiveStatus> {
+  String? _message;
+
+  @override
+  Widget build(BuildContext context) {
+    return SubscriptionBuilder<Subscription>(
+      select: (s) => s.launchScheduled
+        ?..name
+        ..status
+        ..date
+        ..favorite
+        ..rocket?.name,
+      onEvent: (s) => setState(
+        () => _message =
+            '${s.launchScheduled?.name} scheduled — T-minus a few seconds',
+      ),
+      builder: (context, _, scheduled) => SubscriptionBuilder<Subscription>(
+        select: (s) => s.launchStatusChanged
+          ?..name
+          ..status
+          ..upcoming,
+        onEvent: (s) {
+          final launch = s.launchStatusChanged;
+          setState(
+            () => _message = '${launch?.name} → ${launch?.status?.graphqlName}',
+          );
+        },
+        builder: (context, _, state) {
+          // Green: both connected. Coral: a connection dropped — the client
+          // reopens it (`subscriptionRetryAfter`); tapping retries now.
+          final connected = state.isConnected && scheduled.isConnected;
+          final reconnecting = state.isReconnecting || scheduled.isReconnecting;
+          final text = reconnecting
+              ? 'Live: connection lost — reconnecting… (tap to retry now)'
+              : 'Live: ${_message ?? 'waiting for a status change…'}';
+          return GestureDetector(
+            key: const ValueKey('live-status'),
+            behavior: HitTestBehavior.opaque,
+            onTap: reconnecting
+                ? () {
+                    state.retry();
+                    scheduled.retry();
+                  }
+                : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: kColorSurface,
+              child: Row(
+                children: [
+                  Icon(
+                    CupertinoIcons.circle_fill,
+                    size: 8,
+                    color: reconnecting
+                        ? kColorCoral
+                        : connected
+                        ? CupertinoColors.activeGreen
+                        : kColorTextSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: kColorTextSecondary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

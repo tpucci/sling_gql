@@ -6,6 +6,7 @@ import '../generated/schema.dart';
 import '../network_log.dart';
 import '../theme.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/status_icon.dart';
 
 /// Launch detail.
 ///
@@ -82,12 +83,24 @@ class _LaunchScreenState extends State<LaunchScreen> {
             final rocket = launch.rocket;
             final crew = launch.crew ?? const <Astronaut>[];
             final favorite = launch.favorite;
+            final status = launch.status;
 
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 Row(
                   children: [
+                    // Follows Launch:<id>.status: a subscription event
+                    // (schedule a launch, watch it fly) updates it live.
+                    if (launch.isSkeleton)
+                      const SkeletonBox(width: 32, height: 32)
+                    else
+                      StatusIcon(
+                        status,
+                        key: const ValueKey('detail-status'),
+                        size: 32,
+                      ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: SkeletonText(
                         launch.name,
@@ -102,17 +115,29 @@ class _LaunchScreenState extends State<LaunchScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                SkeletonText(
-                  launch.date?.let(
-                    (d) =>
-                        'Flight #${launch.flightNumber} · ${formatDate(d)} · '
-                        '${launch.status?.graphqlName}',
-                  ),
-                  width: 260,
-                  style: const TextStyle(
-                    color: CupertinoColors.systemGrey,
-                    fontSize: 13,
-                  ),
+                Row(
+                  children: [
+                    SkeletonText(
+                      launch.date?.let(
+                        (d) =>
+                            'Flight #${launch.flightNumber} · ${formatDate(d)} · ',
+                      ),
+                      width: 200,
+                      style: const TextStyle(
+                        color: CupertinoColors.systemGrey,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (status != null)
+                      Text(
+                        status.graphqlName,
+                        style: TextStyle(
+                          color: statusColor(status),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 if (launch.isSkeleton || launch.details != null)
@@ -173,9 +198,10 @@ class _LaunchScreenState extends State<LaunchScreen> {
 /// and merges the response into `Launch:<id>` — the list row's star follows.
 ///
 /// The response cannot tell the cache that `me.favorites` gained or lost a
-/// row, so the optimistic callback edits that list (and `favoriteCount`)
-/// through `cacheScope`: the Me tab updates with no refetch, and the edit is
-/// rolled back with the flag if the mutation fails.
+/// row; the `favorites` `ListRule` (see `list_rules.dart`) does that from
+/// `launch.favorite` — for the optimistic write, then again for the
+/// response — and is rolled back with the flag if the mutation fails. Only
+/// `favoriteCount`, which no rule can derive, is adjusted here.
 class _FavoriteButton extends StatelessWidget {
   const _FavoriteButton({required this.launch, required this.favorite});
   final Launch launch;
@@ -200,12 +226,8 @@ class _FavoriteButton extends StatelessWidget {
                   // cacheScope reads never fetch. Me tab not loaded yet:
                   // it will fetch the fresh list itself.
                   if (me == null || me.isSkeleton) return;
-                  final favorites = cache.list((q) => q.me?.favorites);
-                  final changed = wasFavorite
-                      ? favorites.remove(launch)
-                      : favorites.prepend(launch);
                   final count = me.favoriteCount;
-                  if (changed && count != null) {
+                  if (count != null) {
                     me.favoriteCount = count + (wasFavorite ? -1 : 1);
                   }
                 },

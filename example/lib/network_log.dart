@@ -4,21 +4,28 @@ import 'package:sling_gql/sling_gql.dart';
 
 /// Keeps every GraphQL document the client sent, newest first. The whole point
 /// of the PoC is to *see* what queries the widgets produce.
+///
+/// Subscriptions are long-lived connections, not round trips: they go to
+/// [subscriptions] so [entries] keeps counting requests.
 class NetworkLog extends ChangeNotifier {
   final List<PrintedOperation> entries = [];
+  final List<PrintedOperation> subscriptions = [];
 
   void add(PrintedOperation op) {
-    entries.insert(0, op);
+    final isSubscription = op.document.startsWith('subscription');
+    (isSubscription ? subscriptions : entries).insert(0, op);
     if (kDebugMode) {
-      debugPrint(
-        '[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}',
-      );
+      final label = isSubscription
+          ? 'subscription #${subscriptions.length}'
+          : 'request #${entries.length}';
+      debugPrint('[sling_gql] $label\n${op.document}\n${op.variables}');
     }
     notifyListeners();
   }
 
   void clear() {
     entries.clear();
+    subscriptions.clear();
     notifyListeners();
   }
 }
@@ -66,21 +73,30 @@ class NetworkLogScreen extends StatelessWidget {
     final log = NetworkLogScope.of(context);
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: Text('${log.entries.length} request(s)'),
+        middle: Text(
+          '${log.entries.length} request(s)'
+          '${log.subscriptions.isEmpty ? '' : ' · ${log.subscriptions.length} subscription(s)'}',
+        ),
       ),
       child: SafeArea(
         child: ListView.separated(
           padding: const EdgeInsets.all(12),
-          itemCount: log.entries.length,
+          itemCount: log.entries.length + log.subscriptions.length,
           separatorBuilder: (_, _) => const SizedBox(height: 16),
           itemBuilder: (context, i) {
-            final op = log.entries[i];
-            final n = log.entries.length - i;
+            // Subscriptions first (they are open), then requests newest first.
+            final isSubscription = i < log.subscriptions.length;
+            final op = isSubscription
+                ? log.subscriptions[i]
+                : log.entries[i - log.subscriptions.length];
+            final n = isSubscription
+                ? log.subscriptions.length - i
+                : log.entries.length - (i - log.subscriptions.length);
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '#$n',
+                  isSubscription ? 'subscription #$n (open)' : '#$n',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),

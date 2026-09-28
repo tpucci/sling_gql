@@ -38,6 +38,12 @@
             "deprecationReason": null
           },
           {
+            "name": "IN_FLIGHT",
+            "description": "Lift-off happened, outcome not known yet (only during a launch sequence).",
+            "isDeprecated": false,
+            "deprecationReason": null
+          },
+          {
             "name": "SUCCESS",
             "description": null,
             "isDeprecated": false,
@@ -2721,7 +2727,7 @@
           },
           {
             "name": "scheduleLaunch",
-            "description": null,
+            "description": "Schedules a launch and starts its launch sequence: the server moves it to\nIN_FLIGHT then SUCCESS or FAILURE on its own (SEQUENCE_MS apart), publishing\n`launchStatusChanged` at each step. `launchScheduled` fires immediately.",
             "args": [
               {
                 "name": "input",

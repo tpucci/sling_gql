@@ -24,6 +24,7 @@ GraphiQL: http://localhost:4000/graphql
 | ------------ | ------- | ---------------------------------------------------- |
 | `PORT`       | `4000`  | HTTP port, bound on `0.0.0.0`.                       |
 | `LATENCY_MS` | `400`   | Artificial delay awaited once per HTTP request.      |
+| `SEQUENCE_MS` | `4000` | Launch sequence step: `scheduleLaunch` → `IN_FLIGHT` after one step, `SUCCESS`/`FAILURE` after two (name containing "fail" fails), each published on `launchStatusChanged`. |
 
 Each operation is logged to stdout as it completes, e.g.:
 

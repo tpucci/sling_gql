@@ -15,6 +15,24 @@ import {
 } from "./data.mjs";
 
 // ---------------------------------------------------------------------------
+// Launch sequence: what makes subscriptions worth watching. A scheduled
+// launch lifts off and lands on its own, one status step per SEQUENCE_MS.
+// ---------------------------------------------------------------------------
+
+const SEQUENCE_MS = Number(process.env.SEQUENCE_MS ?? 4000);
+
+function runLaunchSequence(launch, pubsub) {
+  const step = (status) => {
+    updateLaunchStatusData(launch.id, status);
+    pubsub.publish("launchStatusChanged", { launchStatusChanged: launch });
+    console.log(`[${new Date().toTimeString().slice(0, 8)}] sequence ${launch.name}: ${status}`);
+  };
+  const outcome = launch.name.toLowerCase().includes("fail") ? "FAILURE" : "SUCCESS";
+  setTimeout(() => step("IN_FLIGHT"), SEQUENCE_MS).unref();
+  setTimeout(() => step(outcome), SEQUENCE_MS * 2).unref();
+}
+
+// ---------------------------------------------------------------------------
 // DateTime scalar
 // ---------------------------------------------------------------------------
 
@@ -236,6 +254,7 @@ export const resolvers = {
       }
       const launch = scheduleLaunchData(input);
       pubsub.publish("launchScheduled", { launchScheduled: launch });
+      runLaunchSequence(launch, pubsub);
       return launch;
     },
 

@@ -121,6 +121,10 @@ class Mutation extends Accessor {
     args: {'launchId': Arg('ID!', launchId)},
     keyed: true,
   );
+
+  /// Schedules a launch and starts its launch sequence: the server moves it to
+  /// IN_FLIGHT then SUCCESS or FAILURE on its own (SEQUENCE_MS apart), publishing
+  /// `launchStatusChanged` at each step. `launchScheduled` fires immediately.
   Launch? scheduleLaunch({required ScheduleLaunchInput input}) => object(
     'scheduleLaunch',
     Launch.new,
@@ -155,9 +159,28 @@ extension SlingMutations on SlingClient<Query> {
   );
 }
 
+class Subscription extends Accessor {
+  Subscription(super.recorder, super.selection, super.path);
+  Subscription.root(Recorder r) : super(r, r.root, const []);
+
+  Launch? get launchStatusChanged =>
+      object('launchStatusChanged', Launch.new, keyed: true);
+  Launch? get launchScheduled =>
+      object('launchScheduled', Launch.new, keyed: true);
+}
+
+/// Typed subscriptions for this schema. See `SlingClient.subscribeWith`.
+extension SlingSubscriptions on SlingClient<Query> {
+  SlingSubscription<T> subscribe<T>(
+    T Function(Subscription subscription) body, {
+    Duration? retryAfter,
+  }) => subscribeWith(Subscription.root, body, retryAfter: retryAfter);
+}
+
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
+  subscription: Subscription.root,
 );
 
 /// Typed, non-fetching cache access for this schema's keyed types:
@@ -455,6 +478,9 @@ class Viewer extends Accessor {
 
 enum LaunchStatus {
   scheduled('SCHEDULED'),
+
+  /// Lift-off happened, outcome not known yet (only during a launch sequence).
+  inFlight('IN_FLIGHT'),
   success('SUCCESS'),
   failure('FAILURE'),
   partialFailure('PARTIAL_FAILURE'),

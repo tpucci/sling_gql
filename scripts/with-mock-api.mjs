@@ -51,7 +51,12 @@ if (await isUp()) {
     const code = await run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: mockDir });
     if (code !== 0) process.exit(code);
   }
-  server = spawn('node', ['server.mjs'], { cwd: mockDir, stdio: 'inherit' });
+  // A fast launch sequence keeps the subscription test short.
+  server = spawn('node', ['server.mjs'], {
+    cwd: mockDir,
+    stdio: 'inherit',
+    env: { SEQUENCE_MS: '700', ...process.env },
+  });
   const deadline = Date.now() + 20_000;
   while (!(await isUp())) {
     if (Date.now() > deadline) {

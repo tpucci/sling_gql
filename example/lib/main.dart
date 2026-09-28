@@ -3,6 +3,7 @@ import 'package:sling_gql/sling_gql.dart';
 
 import 'app.dart';
 import 'generated/schema.dart';
+import 'list_rules.dart';
 import 'network_log.dart';
 
 /// The mock API in `../mock-api` (`npm start`). The iOS simulator shares the
@@ -15,6 +16,9 @@ void main() {
     endpoint: Uri.parse(endpoint),
     rootFactory: Query.root,
     onOperation: log.add,
+    listRules: listRules,
+    // A dropped subscription (server restarted) reopens itself.
+    subscriptionRetryAfter: const Duration(seconds: 3),
   );
 
   runApp(

@@ -3,6 +3,8 @@ scalar DateTime
 
 enum LaunchStatus {
   SCHEDULED
+  "Lift-off happened, outcome not known yet (only during a launch sequence)."
+  IN_FLIGHT
   SUCCESS
   FAILURE
   PARTIAL_FAILURE
@@ -229,6 +231,11 @@ input ScheduleLaunchInput {
 
 type Mutation {
   toggleFavorite(launchId: ID!): Launch!
+  """
+  Schedules a launch and starts its launch sequence: the server moves it to
+  IN_FLIGHT then SUCCESS or FAILURE on its own (SEQUENCE_MS apart), publishing
+  `launchStatusChanged` at each step. `launchScheduled` fires immediately.
+  """
   scheduleLaunch(input: ScheduleLaunchInput!): Launch!
   updateLaunchStatus(id: ID!, status: LaunchStatus!): Launch!
 }

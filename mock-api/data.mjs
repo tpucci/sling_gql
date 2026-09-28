@@ -576,7 +576,7 @@ export function updateLaunchStatus(id, status) {
   if (!launch) return null;
   launch.status = status;
   launch.upcoming =
-    (status === "SCHEDULED" || status === "SCRUBBED") &&
+    (status === "SCHEDULED" || status === "SCRUBBED" || status === "IN_FLIGHT") &&
     launch.date.getTime() > Date.now();
   return launch;
 }

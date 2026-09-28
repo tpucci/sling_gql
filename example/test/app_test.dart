@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
 import 'package:sling_gql_example/app.dart';
 import 'package:sling_gql_example/generated/schema.dart';
+import 'package:sling_gql_example/list_rules.dart';
 import 'package:sling_gql_example/network_log.dart';
 import 'package:sling_gql_example/widgets/launch_row.dart';
 import 'package:sling_gql_test/sling_gql_test.dart';
@@ -25,6 +29,8 @@ void main() {
         endpoint: Uri.parse('http://localhost:4000/graphql'),
         rootFactory: Query.root,
         onOperation: log.add,
+        listRules: listRules,
+        subscriptionRetryAfter: const Duration(seconds: 3),
       ),
     );
   });
@@ -393,6 +399,178 @@ void main() {
         log.entries,
         hasLength(requestsBeforeAll),
         reason: 'switching back to All is served from cache, no request',
+      );
+    },
+  );
+
+  testWidgets(
+    'launchStatusChanged over SSE: a status change made elsewhere updates the row',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
+
+      expect(
+        log.entries,
+        hasLength(1),
+        reason: 'subscriptions are not requests',
+      );
+      expect(log.subscriptions, hasLength(2), reason: 'scheduled + status');
+      expect(
+        log.subscriptions.map((op) => op.document),
+        everyElement(startsWith('subscription')),
+      );
+      expect(
+        log.subscriptions.map((op) => op.document).join(),
+        allOf(contains('launchStatusChanged'), contains('launchScheduled')),
+      );
+      expect(find.text('Live: waiting for a status change…'), findsOneWidget);
+      expect(client.activeSubscriptions, 2);
+
+      // The first row's launch, as the list has it.
+      final row = tester.widget<LaunchRow>(find.byType(LaunchRow).first);
+      final id = row.launch.id!;
+      final name = row.launch.name!;
+      final before = row.launch.status!;
+      final after = before == LaunchStatus.scrubbed
+          ? LaunchStatus.scheduled
+          : LaunchStatus.scrubbed;
+
+      // Change it *outside* this client (a plain POST, so the response is
+      // not written to our cache); only the subscription can tell the list.
+      Future<void> setStatus(LaunchStatus status) => tester.runAsync(() async {
+        final response = await http.post(
+          Uri.parse('http://localhost:4000/graphql'),
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode({
+            'query':
+                'mutation(\$id: ID!, \$status: LaunchStatus!) { '
+                'updateLaunchStatus(id: \$id, status: \$status) { id status } }',
+            'variables': {'id': id, 'status': status.graphqlName},
+          }),
+        );
+        expect(response.statusCode, 200);
+      });
+      // Put it back whatever happens, other tests assume the seed data.
+      addTearDown(
+        () => http.post(
+          Uri.parse('http://localhost:4000/graphql'),
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode({
+            'query':
+                'mutation(\$id: ID!, \$status: LaunchStatus!) { '
+                'updateLaunchStatus(id: \$id, status: \$status) { id } }',
+            'variables': {'id': id, 'status': before.graphqlName},
+          }),
+        ),
+      );
+
+      await setStatus(after);
+      // Let the event travel: real time for the socket, then a frame.
+      final banner = find.text('Live: $name → ${after.graphqlName}');
+      for (var i = 0; i < 40 && banner.evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+      }
+      expect(banner, findsOneWidget, reason: 'the event reached the widget');
+      expect(
+        tester.widget<LaunchRow>(find.byType(LaunchRow).first).launch.status,
+        after,
+        reason: 'the row reads the same Launch:<id> entity',
+      );
+      expect(log.entries, hasLength(1), reason: 'no request was needed');
+      expect(client.cache.entity('Launch:$id')!['status'], after.graphqlName);
+    },
+  );
+
+  testWidgets(
+    'mission control: schedule → detail page, then the sequence flies the '
+    'launch live through the list rules (segments follow the status)',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
+      // Cache the "Scheduled" and "Success" segments up front, so what
+      // they show after the flight comes from the list rules, not a fetch.
+      await tester.tap(find.text('Scheduled'));
+      await settle(tester);
+      await tester.tap(find.text('Success'));
+      await settle(tester);
+      await tester.tap(find.text('All'));
+      await settle(tester);
+      final before = log.entries.length; // 3
+
+      await tester.tap(find.byKey(const ValueKey('schedule-launch')));
+      await settle(tester);
+      expect(
+        log.entries,
+        hasLength(before + 1),
+        reason: 'rockets + launchpads for the pickers: one request',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('schedule-name')),
+        'Test Pigeon',
+      );
+      await tester.tap(find.byKey(const ValueKey('schedule-submit')));
+      await settle(tester);
+      // Redirected to the detail screen: the mutation, then the detail's
+      // own request for what the response did not carry.
+      expect(
+        log.entries,
+        hasLength(before + 3),
+        reason: 'the mutation + the detail screen',
+      );
+      expect(log.entries[1].document, contains('scheduleLaunch'));
+      expect(log.entries.first.document, contains('launch('));
+      expect(find.text('Test Pigeon'), findsOneWidget);
+      expect(find.text('Launch'), findsOneWidget);
+      final detailRequests = log.entries.length;
+
+      // The server flies it: IN_FLIGHT, then SUCCESS (name has no "fail").
+      // SEQUENCE_MS=700 in the test server; give it real time.
+      Future<void> waitFor(Finder finder) async {
+        for (var i = 0; i < 60 && finder.evaluate().isEmpty; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 100)),
+          );
+          await tester.pump();
+        }
+        expect(finder, findsOneWidget);
+      }
+
+      await waitFor(find.text('IN_FLIGHT'));
+      await waitFor(find.text('SUCCESS'));
+      expect(
+        log.entries,
+        hasLength(detailRequests),
+        reason: 'the sequence arrived over the subscription: no request',
+      );
+
+      // Back on the list: the launch is on top of "All" (prepended by the
+      // launches rule on the launchScheduled event) with its final status…
+      await tester.tap(find.byType(CupertinoNavigationBarBackButton));
+      await settle(tester);
+      final firstRow = tester.widget<LaunchRow>(find.byType(LaunchRow).first);
+      expect(firstRow.launch.name, 'Test Pigeon');
+      expect(firstRow.launch.status, LaunchStatus.success);
+      expect(find.textContaining('Test Pigeon → SUCCESS'), findsOneWidget);
+
+      // …and the cached segments followed the status without a request:
+      // "Success" gained it (prepended by the rule on the SUCCESS event),
+      // "Scheduled" lost it (removed on the IN_FLIGHT event).
+      await tester.tap(find.text('Success'));
+      await settle(tester);
+      expect(
+        tester.widget<LaunchRow>(find.byType(LaunchRow).first).launch.name,
+        'Test Pigeon',
+      );
+      await tester.tap(find.text('Scheduled'));
+      await settle(tester);
+      expect(find.text('Test Pigeon'), findsNothing);
+      expect(
+        log.entries,
+        hasLength(detailRequests),
+        reason: 'both segments were cached: the rules did the work',
       );
     },
   );
