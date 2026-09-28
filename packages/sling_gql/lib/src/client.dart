@@ -650,6 +650,27 @@ class SlingClient<Q extends Accessor> {
   /// ```
   CacheScope<Q> get cacheScope => CacheScope<Q>(this);
 
+  int _mutationsInFlight = 0;
+  Completer<void>? _idle;
+
+  /// True when the client has nothing in progress: no flush scheduled, no
+  /// query request in flight, no mutation awaiting its response. Scopes can
+  /// still be about to *rebuild* (their `onChanged` ran, the frame has not)
+  /// — pump a frame and check again. Test helpers (`pumpUntilSettled` in
+  /// `sling_gql_test`) loop on exactly that.
+  bool get isIdle =>
+      !_flushScheduled && _inflight == null && _mutationsInFlight == 0;
+
+  /// Completes once [isIdle] is true (immediately if it already is).
+  Future<void> get whenIdle =>
+      isIdle ? Future.value() : (_idle ??= Completer<void>()).future;
+
+  void _checkIdle() {
+    if (!isIdle) return;
+    _idle?.complete();
+    _idle = null;
+  }
+
   /// Imperative one-shot: runs [body] against a throwaway scope, fetches what
   /// is missing, and resolves once the cache is populated. Useful for
   /// `prepare`-style prefetching or tests.
@@ -722,11 +743,15 @@ class SlingClient<Q extends Accessor> {
 
     Set<String> touched;
     SlingException? error;
+    _mutationsInFlight++;
     try {
       (touched, error) = await _send('mutation', scope.root, op);
     } catch (e) {
       _notify(_rollback(journal));
       rethrow;
+    } finally {
+      _mutationsInFlight--;
+      _checkIdle();
     }
     if (error != null) {
       _notify(touched.union(_rollback(journal)));
@@ -814,6 +839,7 @@ class SlingClient<Q extends Accessor> {
         for (final s in scopes) {
           s._settle(null);
         }
+        _checkIdle();
       }
       return;
     }
@@ -831,6 +857,7 @@ class SlingClient<Q extends Accessor> {
         s._settle(_lastError);
         s._changedByClient();
       }
+      _checkIdle();
       return;
     }
     if (expired) {
@@ -879,6 +906,7 @@ class SlingClient<Q extends Accessor> {
     } else {
       _notify(touched, always: waiters);
     }
+    _checkIdle();
   }
 
   Set<QueryScope<Q>> _inflightScopes = {};

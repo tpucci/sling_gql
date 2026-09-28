@@ -1,5 +1,5 @@
 /// sling_gql — "read the field, get the query": a GraphQL client for Flutter
-/// where the widget is the query. Proof of concept: queries only.
+/// where the widget is the query. Proof of concept.
 library;
 
 export 'src/accessor.dart' show Accessor, Recorder;

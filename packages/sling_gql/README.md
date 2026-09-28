@@ -71,6 +71,10 @@ query {
 4. Read fields in `build()` with `QueryBuilder`; mutate with
    `MutationBuilder` or `client.mutate((m) => m.toggleFavorite(id: id)?.favorite)`.
 
+5. Test with [`sling_gql_test`](https://pub.dev/packages/sling_gql_test):
+   `MockGraphQLServer` answers the recorded documents from plain maps,
+   `tester.pumpUntilSettled(client)` waits for the round trip.
+
 ## What's in the box
 
 - Selection recording during `build()`, including accessors handed to child
