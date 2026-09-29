@@ -387,11 +387,28 @@ typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
 });
 
 /// Status of the last mutation run by a [MutationBuilder].
+///
+/// Describes the *latest* `mutate` call only: when calls overlap, an earlier
+/// one finishing later does not overwrite the state of a newer one.
 class MutationState {
-  const MutationState._(this.isLoading, this.error);
+  const MutationState._(this.isLoading, this.error, this.data);
 
+  /// A `mutate` call is in flight.
   final bool isLoading;
+
+  /// Why the last call failed (transport error, GraphQL errors, …), or
+  /// `null`. Cleared when the next call starts. `mutate` itself never throws:
+  /// it resolves to `null` and puts the exception here.
   final Object? error;
+
+  /// What the body returned for the last call that succeeded, computed from
+  /// the cache after the response landed — the same value that call's
+  /// `mutate` future resolved to. Kept while a new call is loading (no
+  /// flicker), cleared when a call fails; `null` before the first call.
+  ///
+  /// Untyped because every `mutate` call may return a different type: cast
+  /// it (`state.data as bool?`), or use the awaited value of `mutate`.
+  final Object? data;
 }
 
 typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
@@ -401,7 +418,7 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 );
 
 /// The `useMutation()` equivalent. Hands the builder a typed `mutate`
-/// function and the loading/error state of the last call:
+/// function and the loading/error/data state of the last call:
 ///
 /// ```dart
 /// MutationBuilder<Mutation>(
@@ -423,6 +440,11 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 ///
 /// The response is normalized into the shared cache, so the widgets reading
 /// the returned entities — here every copy of the launch — rebuild on their own.
+///
+/// `mutate` resolves to the body's value, or to `null` when the call fails —
+/// it never throws; the exception is in [MutationState.error] (the optimistic
+/// writes are already rolled back). Tell a failure from a `null` result by
+/// `state.error`, or call `client.mutate` directly to get the exception.
 class MutationBuilder<M extends Accessor> extends StatefulWidget {
   const MutationBuilder({super.key, this.root, required this.builder});
 
@@ -440,6 +462,9 @@ class _MutationBuilderState<M extends Accessor>
     extends State<MutationBuilder<M>> {
   bool _loading = false;
   Object? _error;
+  Object? _data;
+  // Incremented per `mutate` call; only the latest call updates the state.
+  int _call = 0;
   RootFactory<M>? _root;
 
   @override
@@ -462,28 +487,43 @@ class _MutationBuilderState<M extends Accessor>
     Iterable<String>? refetchQueries,
   }) async {
     final client = SlingScope.clientOf(context);
+    final call = ++_call;
     setState(() {
       _loading = true;
       _error = null;
     });
+    void settle(void Function() update) {
+      if (!mounted || call != _call) return;
+      setState(() {
+        update();
+        _loading = false;
+      });
+    }
+
     try {
-      return await client.mutateWith(
+      final result = await client.mutateWith(
         _root!,
         body,
         optimistic: optimistic,
         refetchQueries: refetchQueries,
       );
+      settle(() => _data = result);
+      return result;
     } catch (e) {
-      _error = e;
+      settle(() {
+        _error = e;
+        _data = null;
+      });
       return null;
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) =>
-      widget.builder(context, _mutate, MutationState._(_loading, _error));
+  Widget build(BuildContext context) => widget.builder(
+    context,
+    _mutate,
+    MutationState._(_loading, _error, _data),
+  );
 }
 
 /// Status of a [SubscriptionBuilder]'s connection.
