@@ -16,7 +16,7 @@ Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
-Suggested next picks: #25/#28 (small runtime/gen fixes), #17/#18
+Suggested next picks: #28 (small runtime/gen fixes), #17/#18
 (read-path allocations), #57 (conflicting fields across fragments).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -39,9 +39,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P3 — runtime configurability & correctness
 
-25. **Runtime — `Normalization.keyField` and generator `--key-field` must be
-    kept in sync by hand.** Emit the key field from the generator (constant in
-    the generated file) and have the client read it.
 26. **Runtime — `depKey` uses `'.'` as separator**; an id containing
     `.fieldname` could collide (only causes an extra rebuild, never a missed
     one). Use a non-printable separator or a record key.
@@ -140,6 +137,7 @@ Kept for number stability; see git history for details.
 53. Runtime — `SubscriptionBuilder<Subscription>` (`select` records once, opens post-frame, `SubscriptionState`), root from `SlingScope(schema:)` via `subscriptionRootOf`.
 31. Runtime/Gen — Unions & interfaces: `Selection.fragment` (inline fragments, transparent to cache paths), `Accessor.on`/`whenType`; generated `asType` getters + `when(...)` per `UNION`/`INTERFACE` (all branches recorded on the skeleton; keyed members and key-declaring interfaces normalize); `MockGraphQLServer` resolves `... on Type`; mock `Node` interface + `search: [SearchResult!]!` union, `node(id:)`; example Search tab + e2e test.
 24. Runtime — `QueryBuilder(scheduler:)` (default `frameEndScheduler`); when `microtaskScheduler` fits documented in `guides/batching-and-waterfalls`.
+25. Runtime/Gen — `slingSchema` carries `keyField` (always emitted, `SlingSchema<Query, Accessor>` without a Mutation type); `SlingClient(schema:)` supplies `rootFactory` + default cache normalization, asserts on a mismatching `cache:`; `SlingScope` falls back to `client.schema`.
 
 ## Explicitly not planned
 

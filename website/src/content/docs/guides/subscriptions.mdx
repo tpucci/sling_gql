@@ -91,8 +91,8 @@ SubscriptionBuilder<Subscription>(
 
 The connection opens at the end of the first frame — opening a socket is a
 side effect, not something a `build` should do — and closes in `dispose`.
-The root is resolved from `SlingScope(schema: slingSchema)`; pass `root:
-Subscription.root` to override.
+The root is resolved from the nearest `SlingScope` (its `schema:`, else the client's
+`SlingClient(schema: slingSchema)`); pass `root: Subscription.root` to override.
 
 <Aside type="tip" title="You rarely need the builder's value">
 The point of a subscription in a normalized cache is the *write*. The

@@ -64,8 +64,12 @@ launches(first: $first) {
 }
 ```
 
-`Normalization(keyField: 'uuid')` changes the field name (pass `--key-field uuid` to the
-generator too); `Normalization(identify: (obj) => …)` replaces the whole rule;
+The key field comes from the generator: `--key-field uuid` decides which types are keyed
+*and* is recorded in the generated `slingSchema`, so `SlingClient(schema: slingSchema)`
+builds its cache with `Normalization(keyField: 'uuid')` — nothing to keep in sync by hand.
+Passing your own `cache:` next to `schema:`? Build it with
+`Cache(normalization: slingSchema.normalization)`; a mismatching key field fails an assert.
+ `Normalization(identify: (obj) => …)` replaces the whole rule;
 `Normalization.none` turns it off and gives you the old path-addressed behaviour.
 
 ## Lookups: `launch(id:)` is served from the entity

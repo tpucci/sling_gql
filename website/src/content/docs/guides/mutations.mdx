@@ -74,15 +74,12 @@ MutationBuilder<Mutation>(
 ```
 
 `MutationBuilder` needs no root of its own: it resolves `Mutation.root` from the nearest
-`SlingScope`, which takes the generated `slingSchema` constant (or `mutationRoot:` for the
-root factory alone) alongside `client:`:
+`SlingScope`, which takes it from the client built with the generated `slingSchema`
+constant — or from its own `schema:` / `mutationRoot:` (the root factory alone):
 
 ```dart
-SlingScope<Query>(
-  client: client,
-  schema: slingSchema, // generated: SlingSchema(query: Query.root, mutation: Mutation.root)
-  child: const App(),
-)
+final client = SlingClient<Query>(endpoint: uri, schema: slingSchema);
+SlingScope<Query>(client: client, child: const App()) // roots from client.schema
 ```
 
 An explicit `root: Mutation.root` on `MutationBuilder` still works and always wins over the

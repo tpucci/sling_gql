@@ -190,8 +190,10 @@ helper signatures, update the generator **and** that test in the same change.
 The generator emits the `Mutation` root (with `.root`) and an
 `extension SlingMutations on SlingClient<Query>` providing `client.mutate(...)`,
 and likewise the `Subscription` root with `extension SlingSubscriptions`
-providing `client.subscribe(...)`; `slingSchema` carries all three roots, so no
-wiring is needed in app code.
+providing `client.subscribe(...)`; `slingSchema` carries all three roots and
+the `--key-field`, so `SlingClient(schema: slingSchema)` needs no other wiring
+(its default cache normalizes on that key field; `SlingScope` falls back to
+`client.schema` for its roots).
 
 The generator decides which types are *keyed* (have a scalar `--key-field`,
 default `id`) and which fields are *lookups* (single `id` argument returning a

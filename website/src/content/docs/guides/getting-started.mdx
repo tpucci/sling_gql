@@ -53,7 +53,7 @@ minor versions. Everything below works against any GraphQL endpoint that allows 
    void main() {
      final client = SlingClient<Query>(
        endpoint: Uri.parse('https://api.example.com/graphql'),
-       rootFactory: Query.root,
+       schema: slingSchema,                             // generated: roots + key field
        headers: {'Authorization': 'Bearer …'},          // optional; see Transport
        onOperation: (op) => debugPrint(op.document),    // optional: log every request
      );
