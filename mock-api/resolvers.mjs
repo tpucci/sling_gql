@@ -158,6 +158,14 @@ function paginateOffset(list, { limit, offset }) {
   return list.slice(o, o + l);
 }
 
+function typeOfId({ id }) {
+  if (id.startsWith("launch-")) return "Launch";
+  if (id.startsWith("rocket-")) return "Rocket";
+  if (id.startsWith("pad-")) return "Launchpad";
+  if (id.startsWith("astro-")) return "Astronaut";
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Resolvers
 // ---------------------------------------------------------------------------
@@ -213,6 +221,21 @@ export const resolvers = {
       agency: 'Sling Space',
       avatarInitials: 'MV',
     }),
+
+    search: (_root, { text, first }) => {
+      const needle = text.trim().toLowerCase();
+      if (!needle) return [];
+      const match = (x) => x.name.toLowerCase().includes(needle);
+      const hits = [
+        ...applyLaunchOrder(launches.filter(match), "DATE_DESC"),
+        ...rockets.filter(match),
+        ...astronauts.filter(match),
+      ];
+      return hits.slice(0, clamp(first ?? 20, 1, 100));
+    },
+
+    node: (_root, { id }) =>
+      findLaunch(id) ?? findRocket(id) ?? findLaunchpad(id) ?? findAstronaut(id),
 
     stats: () => {
       const total = launches.length;
@@ -280,6 +303,11 @@ export const resolvers = {
       resolve: (payload) => payload.launchScheduled,
     },
   },
+
+  // Abstract types: ids are prefixed per type (`launch-1`, `rocket-falcon9`,
+  // `pad-1`, `astro-1`).
+  Node: { __resolveType: typeOfId },
+  SearchResult: { __resolveType: typeOfId },
 
   Rocket: {
     launches: (rocket, { first, after }) => {

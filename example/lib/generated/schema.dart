@@ -109,6 +109,19 @@ class Query extends Accessor {
     lookup: 'Astronaut',
   );
   Stats? get stats => object('stats', Stats.new);
+
+  /// Launches, rockets and astronauts whose name contains `text`
+  /// (case-insensitive): launches first (newest first), then rockets, then
+  /// astronauts.
+  List<SearchResult>? search({required String text, int? first}) => list(
+    'search',
+    SearchResult.new,
+    args: {'text': Arg('String!', text), 'first': Arg('Int', first)},
+  );
+
+  /// Any launch, rocket, launchpad or astronaut by id.
+  Node? node({required String id}) =>
+      object('node', Node.new, args: {'id': Arg('ID!', id)}, keyed: true);
 }
 
 class Mutation extends Accessor {
@@ -474,6 +487,69 @@ class Viewer extends Accessor {
 
   /// Favourite launches, most recent first.
   List<Launch>? get favorites => list('favorites', Launch.new, keyed: true);
+}
+
+/// Anything with a stable, globally unique id (Relay-style).
+class Node extends Accessor {
+  Node(super.recorder, super.selection, super.path);
+
+  String? get id => scalar<String>('id');
+
+  /// The `... on Rocket` view of this object; `null` for another type.
+  Rocket? get asRocket => on('Rocket', Rocket.new, keyed: true);
+
+  /// The `... on Launchpad` view of this object; `null` for another type.
+  Launchpad? get asLaunchpad => on('Launchpad', Launchpad.new, keyed: true);
+
+  /// The `... on Astronaut` view of this object; `null` for another type.
+  Astronaut? get asAstronaut => on('Astronaut', Astronaut.new, keyed: true);
+
+  /// The `... on Launch` view of this object; `null` for another type.
+  Launch? get asLaunch => on('Launch', Launch.new, keyed: true);
+
+  /// Runs the branch for this object's `__typename`, [orElse] for a type
+  /// without one. On a skeleton every branch runs (so all record their
+  /// fields) and the first one's result is returned.
+  T? when<T>({
+    T Function(Rocket rocket)? rocket,
+    T Function(Launchpad launchpad)? launchpad,
+    T Function(Astronaut astronaut)? astronaut,
+    T Function(Launch launch)? launch,
+    T Function()? orElse,
+  }) => whenType({
+    if (rocket != null) 'Rocket': () => rocket(asRocket!),
+    if (launchpad != null) 'Launchpad': () => launchpad(asLaunchpad!),
+    if (astronaut != null) 'Astronaut': () => astronaut(asAstronaut!),
+    if (launch != null) 'Launch': () => launch(asLaunch!),
+  }, orElse: orElse);
+}
+
+/// One hit of `Query.search`.
+class SearchResult extends Accessor {
+  SearchResult(super.recorder, super.selection, super.path);
+
+  /// The `... on Launch` view of this object; `null` for another type.
+  Launch? get asLaunch => on('Launch', Launch.new, keyed: true);
+
+  /// The `... on Rocket` view of this object; `null` for another type.
+  Rocket? get asRocket => on('Rocket', Rocket.new, keyed: true);
+
+  /// The `... on Astronaut` view of this object; `null` for another type.
+  Astronaut? get asAstronaut => on('Astronaut', Astronaut.new, keyed: true);
+
+  /// Runs the branch for this object's `__typename`, [orElse] for a type
+  /// without one. On a skeleton every branch runs (so all record their
+  /// fields) and the first one's result is returned.
+  T? when<T>({
+    T Function(Launch launch)? launch,
+    T Function(Rocket rocket)? rocket,
+    T Function(Astronaut astronaut)? astronaut,
+    T Function()? orElse,
+  }) => whenType({
+    if (launch != null) 'Launch': () => launch(asLaunch!),
+    if (rocket != null) 'Rocket': () => rocket(asRocket!),
+    if (astronaut != null) 'Astronaut': () => astronaut(asAstronaut!),
+  }, orElse: orElse);
 }
 
 enum LaunchStatus {

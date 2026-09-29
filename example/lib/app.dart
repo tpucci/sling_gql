@@ -2,10 +2,11 @@ import 'package:flutter/cupertino.dart';
 
 import 'screens/launches_screen.dart';
 import 'screens/me_screen.dart';
+import 'screens/search_screen.dart';
 import 'theme.dart';
 
-/// Root widget — a dark-themed Cupertino app with two tabs:
-/// "Launches" and "Me".
+/// Root widget — a dark-themed Cupertino app with three tabs:
+/// "Launches", "Search" and "Me".
 ///
 /// Each tab is a [CupertinoTabView] with its own navigation stack, so opening
 /// a launch from the list keeps the tab bar visible and the Me tab's stack
@@ -27,6 +28,10 @@ class SlingApp extends StatelessWidget {
               label: 'Launches',
             ),
             BottomNavigationBarItem(
+              icon: Icon(CupertinoIcons.search),
+              label: 'Search',
+            ),
+            BottomNavigationBarItem(
               icon: Icon(CupertinoIcons.person_crop_circle),
               label: 'Me',
             ),
@@ -35,7 +40,8 @@ class SlingApp extends StatelessWidget {
         tabBuilder: (context, index) => CupertinoTabView(
           builder: (_) => switch (index) {
             0 => const LaunchesScreen(),
-            1 => const MeScreen(),
+            1 => const SearchScreen(),
+            2 => const MeScreen(),
             _ => const SizedBox.shrink(),
           },
         ),

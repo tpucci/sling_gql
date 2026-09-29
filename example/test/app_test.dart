@@ -574,4 +574,50 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'Search tab: a union list is one request covering every member type; '
+    'a hit opens the launch from the cache',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
+      await tester.tap(find.byIcon(CupertinoIcons.search));
+      await tester.pump();
+      await settle(tester);
+      expect(log.entries, hasLength(1), reason: 'empty query: no request');
+
+      // "al": 3 launches, Falcon 9, 2 astronauts in the mock data.
+      await tester.enterText(find.byType(CupertinoSearchTextField), 'al');
+      await tester.pump(const Duration(milliseconds: 350)); // debounce
+      await settle(tester);
+
+      expect(
+        log.entries,
+        hasLength(2),
+        reason: 'skeleton recorded all branches',
+      );
+      final document = log.entries.first.document;
+      expect(document, contains('... on Launch {'));
+      expect(document, contains('... on Rocket {'));
+      expect(document, contains('... on Astronaut {'));
+      expect(find.textContaining('Launch · '), findsNWidgets(3));
+      expect(find.textContaining('Rocket · '), findsOneWidget);
+      expect(find.textContaining('Astronaut · '), findsNWidgets(2));
+      expect(find.text('Falcon 9'), findsOneWidget);
+
+      // The launch hit is the `Launch:<id>` entity: the detail screen finds
+      // name and date in cache and only asks for what the hit did not carry.
+      await tester.tap(find.textContaining('Launch · ').first);
+      await settle(tester);
+      expect(log.entries, hasLength(3));
+      final detail = log.entries.first.document;
+      expect(detail, contains('launch('));
+      expect(detail, isNot(contains('date')), reason: 'came with the hit');
+      expect(
+        detail,
+        isNot(contains(RegExp(r'^    name$', multiLine: true))),
+        reason: "the launch's name came with the hit",
+      );
+    },
+  );
 }

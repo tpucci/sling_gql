@@ -25,6 +25,11 @@ enum RocketFamily {
   VULCAN
 }
 
+"Anything with a stable, globally unique id (Relay-style)."
+interface Node {
+  id: ID!
+}
+
 type PageInfo {
   hasNextPage: Boolean!
   hasPreviousPage: Boolean!
@@ -69,7 +74,7 @@ type Engine {
   thrustVacuumKN: Float!
 }
 
-type Rocket {
+type Rocket implements Node {
   id: ID!
   name: String!
   family: RocketFamily!
@@ -88,7 +93,7 @@ type Rocket {
   launches(first: Int = 10, after: String): LaunchConnection!
 }
 
-type Launchpad {
+type Launchpad implements Node {
   id: ID!
   name: String!
   fullName: String!
@@ -101,7 +106,7 @@ type Launchpad {
   launchSuccesses: Int!
 }
 
-type Astronaut {
+type Astronaut implements Node {
   id: ID!
   name: String!
   nationality: String!
@@ -128,7 +133,7 @@ type Links {
   flickrImages: [String!]!
 }
 
-type Launch {
+type Launch implements Node {
   id: ID!
   flightNumber: Int!
   name: String!
@@ -185,6 +190,9 @@ type YearCount {
   count: Int!
 }
 
+"One hit of `Query.search`."
+union SearchResult = Launch | Rocket | Astronaut
+
 type Stats {
   totalLaunches: Int!
   successRatePct: Float!
@@ -218,6 +226,14 @@ type Query {
   astronauts(first: Int = 20, after: String): AstronautConnection!
   astronaut(id: ID!): Astronaut
   stats: Stats!
+  """
+  Launches, rockets and astronauts whose name contains `text`
+  (case-insensitive): launches first (newest first), then rockets, then
+  astronauts.
+  """
+  search(text: String!, first: Int = 20): [SearchResult!]!
+  "Any launch, rocket, launchpad or astronaut by id."
+  node(id: ID!): Node
 }
 
 input ScheduleLaunchInput {
