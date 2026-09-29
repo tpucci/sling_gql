@@ -1,28 +1,30 @@
 ---
 /**
- * The example app's web build (`melos run build:web` → public/demo/) in a
- * phone-sized iframe, loaded only on click: the Flutter engine plus the app
- * are a few MB, and the mock API runs inside the iframe (every load starts
- * from fresh data; "Restart" reloads it).
+ * The example app (or one of its concept demos, `demo="batching"`) in a
+ * phone-sized frame, loaded only on click. "Restart" reloads it from fresh
+ * data.
  */
 interface Props {
-  /** Path under the demo, e.g. `#/` (reserved for per-concept demos, #59). */
-  path?: string;
+  /** A concept demo (`example/lib/demos/demos.dart`); the whole app if omitted. */
+  demo?: string;
   height?: number;
 }
-const { path = '', height = 760 } = Astro.props;
-const src = `${import.meta.env.BASE_URL}/demo/${path}`.replace(/\/{2,}/g, '/');
+const { demo, height = demo ? 600 : 760 } = Astro.props;
+const src =
+  `${import.meta.env.BASE_URL}/demo/`.replace(/\/{2,}/g, '/') +
+  (demo ? `?demo=${encodeURIComponent(demo)}` : '');
+const label = demo ? 'Run this demo' : 'Run the example app';
 ---
 
 <live-app data-src={src} style={`--live-app-height: ${height}px`}>
   <div class="live-app-frame">
     <button type="button" class="live-app-run">
-      <span><span aria-hidden="true">▶</span> Run the example app</span>
-      <small>Flutter web · a few MB · the mock API runs in your browser</small>
+      <span><span aria-hidden="true">▶</span> {label}</span>
+      <small>Runs in your browser</small>
     </button>
   </div>
   <div class="live-app-bar" hidden>
-    <button type="button" class="live-app-restart">↻ Restart (fresh data)</button>
+    <button type="button" class="live-app-restart">↻ Restart</button>
     <a href={src} target="_blank" rel="noopener">Open in a new tab ↗</a>
   </div>
 </live-app>
@@ -96,7 +98,6 @@ const src = `${import.meta.env.BASE_URL}/demo/${path}`.replace(/\/{2,}/g, '/');
       const iframe = document.createElement('iframe');
       iframe.src = this.dataset.src ?? '';
       iframe.title = 'sling_gql example app';
-      iframe.allow = 'clipboard-write';
       frame.replaceChildren(iframe);
       this.querySelector<HTMLElement>('.live-app-bar')?.removeAttribute('hidden');
     }

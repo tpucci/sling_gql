@@ -4,6 +4,8 @@ description: How sling_gql turns a whole frame into one request, why Flutter's f
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import LiveApp from '../../../components/LiveApp.astro';
+import DemoSource from '../../../components/DemoSource.astro';
 
 ## One frame, one request
 
@@ -83,16 +85,27 @@ knew about the problem.
 
 ### Anti-pattern 1 — conditional reads
 
-```dart del={2-4} ins={6-8}
-// ❌ ceo and successRatePct are only read once totalLaunches is non-null
-final text = stats?.totalLaunches == null
-    ? null
-    : '${stats!.totalLaunches} launches · ${stats.successRatePct}% · CEO ${company?.ceo}';
+❌ `successRatePct` and `ceo` are only read once `totalLaunches` has arrived, so they are
+only fetched then, in a second request:
 
-// ✅ read everything first, format second
-final total = stats?.totalLaunches, rate = stats?.successRatePct, ceo = company?.ceo;
-final text = total == null ? null : '$total launches · $rate% · CEO $ceo';
-```
+<DemoSource file="batching_demo.dart" region="conditional" />
+
+✅ Read everything first, format second:
+
+<DemoSource file="batching_demo.dart" region="top" />
+
+Try both. The screen is that header above a list of launches, each row its own widget
+reading its own fields:
+
+<LiveApp demo="batching" />
+
+- **Read at the top**: header, list and rows arrive together, in **1 request**.
+- **Read inside a condition**: the header shows `null` for the rate and the CEO for a
+  moment, until a **second request** fetches them. Look at what that request asks for:
+  only the two fields the condition hid.
+- **↻** throws the cache away and runs the screen again.
+
+<DemoSource file="batching_demo.dart" region="list" />
 
 ### Anti-pattern 2 — reads inside callbacks
 

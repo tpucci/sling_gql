@@ -18,7 +18,8 @@ not asserted.
   - lib/
     - app.dart             `SlingApp`: dark theme + three-tab scaffold
     - main.dart            client + `SlingScope` setup
-    - in_browser_api.dart  `http.Client`: network on iOS, in-page mock API on web
+    - in_browser_api.dart  where requests go: localhost on iOS, the page on web
+    - demos/               the small demos embedded in the guides
     - mock_latency.dart    latency picker, sent as a request header
     - network_log.dart     records every `PrintedOperation`
     - theme.dart           dark palette constants + `slingTheme()`
@@ -33,7 +34,6 @@ not asserted.
       - skeleton.dart      loading placeholders
     - generated/schema.dart  committed, generated — see Code generation
   - test/app_test.dart     the request-counting end-to-end tests
-  - web/index.html         loads `mock-api.js` (built, not committed) before Flutter
 </FileTree>
 
 ## Wiring
@@ -42,7 +42,7 @@ not asserted.
 void main() {
   final log = NetworkLog();
   final latency = MockLatencyController();
-  final httpClient = mockApiHttpClient(); // see "iOS and web" below
+  final httpClient = mockApiHttpClient(); // localhost on iOS, in the page on web
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
     schema: slingSchema,
@@ -71,24 +71,15 @@ The `cache:` line is what `schema: slingSchema` builds anyway (the code was
 generated with `--key-field id`); it is there to show where
 [`Normalization`](/sling_gql/guides/caching/) is configured.
 
-### iOS and web
+### On the web
 
-`mockApiHttpClient()` (`in_browser_api.dart`, a conditional import) is the only
-platform switch. On iOS it is a plain `http.Client`; the simulator reaches
-`npm start` on `localhost:4000`. On the web it is an `http.Client` that hands
-each request to the mock API bundled into the page (`web/mock-api.js`, from
-`npm run build:browser` in `mock-api/`) and streams the Fetch `Response` body
-back, so SSE subscriptions, the latency header and the network log behave
-exactly as on iOS. The endpoint URL stays the same; nothing else in the app
-knows which platform it runs on.
+On iOS the app talks to `npm start` on `localhost:4000`. The web version needs no
+server: it brings its own copy of the mock API, built first:
 
 ```sh
 cd mock-api && npm run build:browser   # → example/web/mock-api.js
 cd ../example && flutter run -d chrome
 ```
-
-`melos run build:web` does the release build for the docs site
-(`--base-href /sling_gql/demo/`, copied to `website/public/demo/`).
 
 ## Tab structure
 

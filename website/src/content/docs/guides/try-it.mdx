@@ -1,54 +1,33 @@
 ---
 title: Try it live
-description: The example app running in your browser — Flutter web, with the mock GraphQL API running in the page. No server, no install.
+description: The example app, running in your browser. Nothing to install.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
 import LiveApp from '../../../components/LiveApp.astro';
 
-This is the repository's [example app](/sling_gql/tooling/example-app/), built
-for the web. The [mock API](/sling_gql/tooling/mock-api/) runs **inside the
-page**: the same graphql-yoga resolvers as `npm start`, bundled for the browser.
-Nothing leaves your machine, and every load starts from the same fresh data;
-mutations and scheduled launches are yours alone.
+The repository's [example app](/sling_gql/tooling/example-app/): three tabs of launches,
+search and a profile, against a GraphQL API with ~180 launches. Everything runs in your
+browser, and the data is yours: favourite, schedule, break things. **↻ Restart** puts it
+back.
 
 <LiveApp />
 
 ## Things to try
 
-- **Watch the requests.** Tap the antenna icon (top right of Launches) to open
-  the network log: one batched document for the whole first screen, no matter
-  how many widgets read from it. See
+- **Count the requests.** Tap the antenna icon, top right of Launches: the header, the
+  list and every row on the first screen came in **one** request. Scroll down to load
+  more and check again: one more. See
   [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/).
-- **Make skeletons visible.** In the network log, set the latency to **2 s**,
-  then go back and switch to a status segment you have not opened yet, or
-  open a launch you have not seen. Loading states render from the same widget code — see
-  [Loading states & errors](/sling_gql/guides/loading-and-errors/).
-- **See the normalized cache.** The same screen shows live entity counts
-  (`cache.onChange`). Open a launch from the list: the detail screen renders
-  instantly from the entity the list already wrote, and only the missing
-  fields are fetched. See [Caching](/sling_gql/guides/caching/).
-- **Toggle a favourite.** The heart on a launch is a mutation with an
-  optimistic update; the Me tab's favourites follow without a refetch. See
-  [Mutations](/sling_gql/guides/mutations/).
-- **Schedule a launch.** The **+** on Launches schedules one; the "Live"
-  banner and the row follow its lift-off and landing over a GraphQL
-  subscription (SSE, streamed by the in-page API). See
+- **Slow the network down.** On that screen, set the latency to **2 s**, go back and open
+  a status segment you have not opened yet: placeholders, then data, from the same widget
+  code. See [Loading states & errors](/sling_gql/guides/loading-and-errors/).
+- **Open a launch.** Its name and status appear at once: the list already had them. Only
+  what the list did not show is fetched. The cache counts on the network log screen show
+  each launch stored once. See [Caching](/sling_gql/guides/caching/).
+- **Toggle a favourite.** The heart fills before the server answers. Go back: the list
+  row and the Me tab agree, with no refetch. See [Mutations](/sling_gql/guides/mutations/).
+- **Schedule a launch.** Tap **+** on Launches. The "Live" banner and the row follow it
+  through lift-off and landing as the server pushes updates. See
   [Subscriptions](/sling_gql/guides/subscriptions/).
 
-## How it works
-
-On the web, `example/lib/in_browser_api.dart` swaps the app's `http.Client`
-for one that hands each request to `globalThis.slingMockApi.fetch` — the
-bundled yoga — and streams the response body back, which is all
-`sseSubscriptionTransport` needs for subscriptions. The `SlingClient` wiring is
-otherwise identical to the iOS build: it still posts to
-`http://localhost:4000/graphql`, and the runtime does not know the difference.
-
-<Aside type="note" title="Build it yourself">
-`melos run build:web` bundles the mock API (`mock-api/`, `npm run build:browser`
-→ `example/web/mock-api.js`), runs `flutter build web --base-href
-/sling_gql/demo/` and copies the result to `website/public/demo/`. For local
-development: `npm run build:browser` in `mock-api/`, then `flutter run -d chrome`
-in `example/`.
-</Aside>
+Each guide also has a smaller demo of its own concept, next to the code it runs.

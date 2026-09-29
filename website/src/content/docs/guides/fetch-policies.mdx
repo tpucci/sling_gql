@@ -4,6 +4,8 @@ description: cache-first, cache-and-network, network-only per widget, and maxAge
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import LiveApp from '../../../components/LiveApp.astro';
+import DemoSource from '../../../components/DemoSource.astro';
 
 By default sling_gql is **cache-first**: a field that is in the cache is rendered and never
 asked for again; only what is missing is fetched. That is the right default for a client
@@ -72,6 +74,24 @@ one stale field alongside fresh ones revalidates its whole selection in one requ
 
 `maxAge` applies on top of any `fetchPolicy`. Without it (the default), cached data never
 expires: only `refetch()` gets fresh data.
+
+## Try it
+
+One widget showing a launch, under the policy picked at the top:
+
+<DemoSource file="fetch_policies_demo.dart" region="card" />
+
+<LiveApp demo="fetch-policies" />
+
+Close the widget, tap **Change it on the server** (someone else updates the launch's
+status), then open it again:
+
+- **cacheFirst** shows the old status, with no request. The cache has an answer, so
+  nothing is asked.
+- **cacheAndNetwork** shows the old status at once, *refreshing…*, then the new one.
+  Every opening costs a request.
+- **maxAge: 5 s** behaves like cacheFirst within 5 seconds of the last response. Wait
+  longer before opening: it shows the old status marked *stale*, and refreshes it.
 
 <Aside type="note">
 Stamps live in memory with the cache; `cache.snapshot` does not carry them. Data hydrated

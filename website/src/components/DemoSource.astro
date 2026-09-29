@@ -1,0 +1,33 @@
+---
+/**
+ * A region of a demo's source (`example/lib/demos/<file>`, between
+ * `// #region <name>` and `// #endregion`), read at build time: the code on
+ * the page is the code the demo next to it runs. A missing region fails the
+ * build.
+ */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { Code } from '@astrojs/starlight/components';
+
+interface Props {
+  file: string;
+  region: string;
+}
+const { file, region } = Astro.props;
+
+// `astro build` / `astro dev` run from website/.
+const source = readFileSync(join(process.cwd(), '..', 'example', 'lib', 'demos', file), 'utf8');
+const lines = source.split('\n');
+const start = lines.findIndex((l) => l.trim() === `// #region ${region}`);
+const end = lines.findIndex((l, i) => i > start && l.trim() === '// #endregion');
+if (start < 0 || end < 0) {
+  throw new Error(`DemoSource: no region "${region}" in example/lib/demos/${file}`);
+}
+const body = lines.slice(start + 1, end);
+const indent = Math.min(
+  ...body.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length),
+);
+const code = body.map((l) => l.slice(indent)).join('\n');
+---
+
+<Code code={code} lang="dart" title={`example/lib/demos/${file}`} />

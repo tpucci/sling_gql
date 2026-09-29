@@ -61,18 +61,13 @@ Every completed operation is logged to stdout as one line, root fields only:
 
 ### In the browser
 
-The server is split so it can also run without one: `app.mjs` exports
-`createMockYoga({typeDefs, latencyMs, sequenceMs})` (no Node APIs), `server.mjs`
-serves it over `node:http`, and `browser.mjs` exposes it as
-`globalThis.slingMockApi.fetch(url, init)`. `npm run build:browser` bundles the
-latter with esbuild (schema inlined) into `example/web/mock-api.js`, which the
-example's web build calls instead of the network — that is what runs on
-[Try it live](/sling_gql/guides/try-it/). Keep `resolvers.mjs` and `data.mjs`
-free of Node-only APIs (`Buffer`, `process`, `fs`) so both keep working.
+The same API also runs in the browser, with no server: that is what
+[Try it live](/sling_gql/guides/try-it/) and the demos in the guides use.
+`npm run build:browser` builds it for the example's web version.
 
 <Aside type="note">
-`schema.graphql` is loaded from disk at server start (`readFileSync`), and
-inlined into the browser bundle — it is never generated. It's the one hand-written contract in the whole pipeline;
+`schema.graphql` is loaded from disk at server start (`readFileSync`) — it is
+never generated. It's the one hand-written contract in the whole pipeline;
 everything else (introspection JSON, generated Dart) is derived from it.
 </Aside>
 

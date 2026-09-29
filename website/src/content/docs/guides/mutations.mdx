@@ -4,6 +4,8 @@ description: client.mutate and MutationBuilder — record the selection by readi
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import LiveApp from '../../../components/LiveApp.astro';
+import DemoSource from '../../../components/DemoSource.astro';
 
 ## The same idea as queries
 
@@ -115,6 +117,20 @@ resolve are written, so it never overwrites a value the server confirmed (see
 
 When the mutation succeeds, the response simply overwrites the optimistic value with the
 server's.
+
+### Try it
+
+<DemoSource file="optimistic_demo.dart" region="heart" />
+
+<LiveApp demo="optimistic" />
+
+The server takes 1.5 s to answer, so each step stays on screen long enough to see.
+
+- **Server succeeds**: tap the heart. It fills at once, *sending…*, then *confirmed*.
+  The line below is another widget reading the same launch: it changes in the same frame,
+  and nobody told it to.
+- **Server fails**: tap again. The heart flips, and when the error comes back it flips
+  back on its own (*failed: rolled back*), and so does the other widget.
 
 ## Errors
 
