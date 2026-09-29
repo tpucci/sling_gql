@@ -117,8 +117,8 @@ Two rules keep it from looping:
 calls **the scope's** scheduler with `_doFlush`. Two implementations ship:
 
 - `microtaskScheduler` — `scheduleMicrotask(flush)`. Default for `resolve()` and tests.
-- `frameEndScheduler` — `addPostFrameCallback(flush)` + `ensureVisualUpdate()`. Used by
-  `QueryBuilder`. Runs after layout, so children built by slivers during layout are in the
+- `frameEndScheduler` — `addPostFrameCallback(flush)` + `ensureVisualUpdate()`. Default
+  for `QueryBuilder` (override with `QueryBuilder(scheduler:)`). Runs after layout, so children built by slivers during layout are in the
   same batch; `ensureVisualUpdate` schedules a frame if the read happened outside one
   (Flutter's initial `attachRootWidget` build).
 

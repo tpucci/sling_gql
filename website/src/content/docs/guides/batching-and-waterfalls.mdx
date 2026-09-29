@@ -61,6 +61,13 @@ recorded their fields and triggered a second request. `QueryBuilder` scopes now 
 **post-frame callback** (`frameEndScheduler`), after layout, so lazily built children join
 their parents' request. Imperative `resolve()` keeps the microtask.
 
+`QueryBuilder(scheduler:)` overrides this per widget. Pass `microtaskScheduler` only when no
+frame is coming (a headless binding, a test that never pumps) or the widget's own build
+records everything it will ever read. Anything with slivers or lazily built children
+should keep the default: a microtask splits the screen into one request per task.
+Whichever scope schedules a batch first picks its scheduler; scopes that record later join
+that batch.
+
 <Aside type="note" title="Reads after the builder returned still count">
 Accessors hold a reference to their scope. A row widget that receives a `Launch` and reads
 `launch.name` in its own `build()` — or even inside an `onPressed` — records the miss and
