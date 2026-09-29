@@ -62,6 +62,14 @@ concrete type, it prints as `... on Launch { id … }` (`id` when the member is 
 it adds nothing to cache paths — `aliasPath` skips it, and fields inside it read at the
 enclosing object's location.
 
+A field read in two fragments of one object (or in a fragment and directly on it) is
+printed as `<alias>__<Type>: field` inside each fragment, so fields of different types
+never share a response name (GraphQL's *FieldsInSetCanMerge*). The printer returns the
+renames with the document; `PrintedOperation.toCacheKeys(data)` maps a response back to
+the aliases (merging a field selected both ways) after partial errors are pruned — error
+paths use the printed names — and before `writeResponse`. The cache never sees a
+type-qualified key.
+
 ### 2. `Cache` — entities, keyed by `__typename:id`
 
 A flat `Map<entityKey, fields>` where the operation roots (`ROOT_QUERY`) are entities too.

@@ -208,12 +208,15 @@ query ($text: String!) {
   (`node(id:): Node`) selects `id` on the field itself; its own fields (`id`) are plain
   getters next to the `asType` ones.
 
-<Aside type="caution" title="Same field name, different types">
+<Aside title="Same field name, different types">
 GraphQL rejects two fragments selecting the same response name with different types
 (`... on Launch { status }` is `LaunchStatus!`, `... on Launchpad { status }` is
-`String!`). sling_gql aliases fields by their arguments only, so reading both in one
-selection fails server-side validation. Read such a field in one branch per selection, or
-rename it in the schema.
+`String!`). When a field is read in more than one fragment of an object (or in a fragment
+and directly on it), the printer qualifies each fragment occurrence with its type —
+`status__Launch: status`, `status__Launchpad: status` — and maps the response back before
+caching, so the entity field is still `Launch:<id>.status`. Nothing to do on your side; the
+document is just a little longer (the search document prints `name__Launch: name` and
+friends, even though those `name`s share a type).
 </Aside>
 
 ## Reusing selections ("fragments")

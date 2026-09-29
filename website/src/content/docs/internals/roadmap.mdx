@@ -45,8 +45,8 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    inline fragments `... on Launch { … }`, every branch recorded on the skeleton so one
    request covers them all. Members normalize like any entity. The mock API has
    `search(text:): [SearchResult!]!` and `node(id:): Node`; the example's Search tab uses
-   them — see [Querying](/sling_gql/guides/querying/#unions-and-interfaces). Left:
-   aliasing same-named fields of conflicting types across fragments.
+   them — see [Querying](/sling_gql/guides/querying/#unions-and-interfaces). Same-named
+   fields across fragments are printed type-qualified and mapped back before caching.
 
 5. **Fine-grained rebuilds** — mostly done
 
