@@ -183,7 +183,7 @@ void main() {
       'a failed request keeps the scope on skeletons with the error',
       () async {
         final h = Harness(fail: true);
-        h.client.cache.writeResponse('query', Selection.root('query'), {
+        h.client.cache.writeResponse('query', {
           'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
         });
         String? seen;
@@ -308,7 +308,7 @@ void main() {
       'data with no stamp (hydrated snapshot, manual write) is stale',
       () async {
         final h = Harness(maxAge: const Duration(hours: 1));
-        h.client.cache.writeResponse('query', Selection.root('query'), {
+        h.client.cache.writeResponse('query', {
           'me': {'__typename': 'User', 'id': '1', 'name': 'Old'},
         });
         String? seen;
@@ -324,7 +324,7 @@ void main() {
 
     test('a failing revalidation is sticky: no refetch loop', () async {
       final h = Harness(maxAge: const Duration(minutes: 5), fail: true);
-      h.client.cache.writeResponse('query', Selection.root('query'), {
+      h.client.cache.writeResponse('query', {
         'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
       }, at: h.now);
       h.now = h.now.add(const Duration(minutes: 10));

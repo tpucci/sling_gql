@@ -39,10 +39,10 @@ void main() {
   group('dependency keys with dotted ids (#26)', () {
     test('an id containing ".field" does not share keys with another', () {
       final cache = NormalizedCache();
-      final a = cache.writeResponse('query', Selection.root('query'), {
+      final a = cache.writeResponse('query', {
         'a': {'__typename': 'User', 'id': 'x', 'name': 'Ada'},
       });
-      final b = cache.writeResponse('query', Selection.root('query'), {
+      final b = cache.writeResponse('query', {
         'b': {'__typename': 'User', 'id': 'x.name', 'name': 'Bob'},
       });
       expect(a, contains(depKey('User:x', 'name')));
@@ -51,7 +51,7 @@ void main() {
 
       final deps = <String>{};
       cache.read('query', ['a', 'name'], deps: deps);
-      final next = cache.writeResponse('query', Selection.root('query'), {
+      final next = cache.writeResponse('query', {
         'b': {'__typename': 'User', 'id': 'x.name', 'name': 'Grace'},
       });
       expect(next.intersection(deps), isEmpty);

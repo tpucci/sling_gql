@@ -55,7 +55,7 @@ void main() {
     );
     // Seed the cache as earlier queries would have: `me { friends }`,
     // `users(limit: 2)`, `users(limit: 3)` and a lone `User:c`.
-    client.cache.writeResponse('query', Selection.root('query'), {
+    client.cache.writeResponse('query', {
       ...meWithFriends(),
       _usersAlias(2): [_user('a', 'Bob'), _user('b', 'Cy')],
       _usersAlias(3): [_user('a', 'Bob')],
@@ -184,7 +184,7 @@ void main() {
     });
 
     test('a null parent gives a list handle whose edits are no-ops', () {
-      client.cache.writeResponse('query', Selection.root('query'), {
+      client.cache.writeResponse('query', {
         Selection.root('query').child('user', {'id': Arg('ID!', 'gone')}).alias:
             null,
       });

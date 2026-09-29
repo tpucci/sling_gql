@@ -535,10 +535,9 @@ class _BypassCache implements Cache {
   @override
   Set<String> writeResponse(
     String operation,
-    Selection selection,
     Map<String, Object?> data, {
     DateTime? at,
-  }) => _inner.writeResponse(operation, selection, data, at: at);
+  }) => _inner.writeResponse(operation, data, at: at);
   @override
   DateTime? fetchedAt(String depKey) => _inner.fetchedAt(depKey);
   @override
@@ -1231,7 +1230,6 @@ class SlingSubscription<T> {
     }
     final touched = _client.cache.writeResponse(
       'subscription',
-      _scope.root,
       operation.toCacheKeys(data),
       at: _client._now(),
     );
@@ -1696,7 +1694,7 @@ class SlingClient<Q extends Accessor> {
     SlingException? error;
     _mutationsInFlight++;
     try {
-      (touched, error) = await _send('mutation', scope.root, op);
+      (touched, error) = await _send('mutation', op);
     } catch (e) {
       _notify(_rollback(journal));
       rethrow;
@@ -1829,7 +1827,7 @@ class SlingClient<Q extends Accessor> {
     Object? error;
     Set<String> touched = {};
     try {
-      (touched, error) = await _send('query', tree, op);
+      (touched, error) = await _send('query', op);
       if (error != null) {
         _failedDocument = op.document;
         _failedAt = _now();
@@ -1896,7 +1894,6 @@ class SlingClient<Q extends Accessor> {
   /// returned alongside the touched keys.
   Future<(Set<String>, SlingException?)> _send(
     String operation,
-    Selection tree,
     PrintedOperation op,
   ) async {
     final (data, errors) = await _post(op);
@@ -1911,7 +1908,7 @@ class SlingClient<Q extends Accessor> {
       );
     }
     return (
-      cache.writeResponse(operation, tree, op.toCacheKeys(data), at: _now()),
+      cache.writeResponse(operation, op.toCacheKeys(data), at: _now()),
       error,
     );
   }

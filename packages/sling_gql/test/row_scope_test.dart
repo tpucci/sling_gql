@@ -20,18 +20,14 @@ void main() {
 
     test('an identical inline object touches nothing', () {
       final cache = NormalizedCache();
-      final root = Selection.root('query');
-      expect(cache.writeResponse('query', root, response()), {
-        'ROOT_QUERY.stats',
-      });
-      expect(cache.writeResponse('query', root, response()), isEmpty);
+      expect(cache.writeResponse('query', response()), {'ROOT_QUERY.stats'});
+      expect(cache.writeResponse('query', response()), isEmpty);
     });
 
     test('a changed leaf deep inside touches the field holding it', () {
       final cache = NormalizedCache();
-      final root = Selection.root('query');
-      cache.writeResponse('query', root, response());
-      expect(cache.writeResponse('query', root, response(hasNext: false)), {
+      cache.writeResponse('query', response());
+      expect(cache.writeResponse('query', response(hasNext: false)), {
         'ROOT_QUERY.stats',
       });
       expect(
@@ -42,16 +38,15 @@ void main() {
 
     test('a new key or a list of another length touches the field', () {
       final cache = NormalizedCache();
-      final root = Selection.root('query');
-      cache.writeResponse('query', root, response());
+      cache.writeResponse('query', response());
       expect(
-        cache.writeResponse('query', root, {
+        cache.writeResponse('query', {
           'stats': {'extra': 1},
         }),
         {'ROOT_QUERY.stats'},
       );
       expect(
-        cache.writeResponse('query', root, {
+        cache.writeResponse('query', {
           'stats': {
             'tags': ['a'],
           },
@@ -59,7 +54,7 @@ void main() {
         {'ROOT_QUERY.stats'},
       );
       expect(
-        cache.writeResponse('query', root, {
+        cache.writeResponse('query', {
           'stats': {
             'tags': ['a'],
           },
@@ -70,22 +65,20 @@ void main() {
 
     test('an entity changing inside a list touches the entity only', () {
       final cache = NormalizedCache();
-      final root = Selection.root('query');
-      cache.writeResponse('query', root, meWithFriends());
+      cache.writeResponse('query', meWithFriends());
       final next = meWithFriends();
       ((next['me'] as Map)['friends'] as List)[0] = {
         '__typename': 'User',
         'id': 'a',
         'name': 'Robert',
       };
-      expect(cache.writeResponse('query', root, next), {'User:a.name'});
+      expect(cache.writeResponse('query', next), {'User:a.name'});
     });
 
     test('without normalization, identical responses touch nothing', () {
       final cache = NormalizedCache(normalization: Normalization.none);
-      final root = Selection.root('query');
-      cache.writeResponse('query', root, meWithFriends());
-      expect(cache.writeResponse('query', root, meWithFriends()), isEmpty);
+      cache.writeResponse('query', meWithFriends());
+      expect(cache.writeResponse('query', meWithFriends()), isEmpty);
     });
   });
 

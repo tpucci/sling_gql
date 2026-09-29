@@ -3,7 +3,6 @@ import 'dart:collection';
 
 import 'package:meta/meta.dart';
 
-import '../selection.dart';
 import 'normalization.dart';
 import 'ref.dart';
 
@@ -94,7 +93,6 @@ abstract class Cache {
   @internal
   Set<String> writeResponse(
     String operation,
-    Selection selection,
     Map<String, Object?> data, {
     DateTime? at,
   });
@@ -358,7 +356,6 @@ class NormalizedCache implements Cache {
   @override
   Set<String> writeResponse(
     String operation,
-    Selection selection,
     Map<String, Object?> data, {
     DateTime? at,
   }) {

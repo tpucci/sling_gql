@@ -256,7 +256,7 @@ void main() {
       );
       addTearDown(c.dispose);
       // Seed the cache by hand.
-      c.cache.writeResponse('query', Selection.root('query'), meWithFriends());
+      c.cache.writeResponse('query', meWithFriends());
       expect(friends(c), ['Bob', 'Cy']);
       await expectLater(
         c.mutateWith(

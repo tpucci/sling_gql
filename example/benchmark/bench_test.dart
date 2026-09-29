@@ -120,7 +120,7 @@ void main() {
           (jsonDecode(body) as Map<String, Object?>)['data']
               as Map<String, Object?>;
       // ignore: invalid_use_of_internal_member
-      client.cache.writeResponse('query', scope.root, data);
+      client.cache.writeResponse('query', data);
     });
 
     // 3. Warm build: every read hits the cache. This is the per-frame cost.

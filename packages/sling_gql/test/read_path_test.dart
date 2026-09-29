@@ -93,7 +93,7 @@ void main() {
     late NormalizedCache cache;
     setUp(() {
       cache = NormalizedCache();
-      cache.writeResponse('query', Selection.root('query'), {
+      cache.writeResponse('query', {
         'me': {'__typename': 'User', 'id': '1', 'name': 'Ada', 'age': null},
         'page': {
           '__typename': 'Page',
@@ -157,7 +157,7 @@ void main() {
   group('Accessor.scalarAs memo (#17)', () {
     test('parses each wire value once, same result', () {
       final cache = NormalizedCache();
-      cache.writeResponse('query', Selection.root('query'), {
+      cache.writeResponse('query', {
         'a': '2026-01-02T00:00:00.000Z',
         'b': '2026-01-02T00:00:00.000Z',
         'c': '2027-01-02T00:00:00.000Z',
