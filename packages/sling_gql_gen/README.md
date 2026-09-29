@@ -61,6 +61,16 @@ Flags:
   (writing it would corrupt the entity key), every field of `PageInfo`, and
   `totalCount`/`pageInfo` on connection-shaped types (those with `pageInfo`
   plus `nodes` or `edges`).
+- One `class <Name> extends Accessor` per `UNION` and `INTERFACE` type:
+  the interface's own fields as above, one getter per possible type
+  (`Launch? get asLaunch => on('Launch', Launch.new, keyed: true);`, the
+  inline fragment `... on Launch`, `null` for another type) and
+  `T? when<T>({T Function(Launch launch)? launch, …, T Function()? orElse})`
+  dispatching on `__typename` through `Accessor.whenType` (every branch runs
+  on a skeleton, so one request covers all of them). An interface declaring
+  the key field is keyed like an object type (never a `lookup`). A getter
+  clashing with a field, or a parameter with a keyword, another parameter,
+  `orElse` or its own type, gets a trailing `$`.
 - `enum <EnumName> { value('VALUE'), …, unknown('') }` for each `ENUM`
   type. Constants are the lowerCamelCase of the wire name
   (`PARTIAL_FAILURE` → `partialFailure`); `graphqlName` is the wire value,

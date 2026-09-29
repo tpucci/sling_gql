@@ -85,12 +85,14 @@ class GqlType {
     this.fields = const [],
     this.inputFields = const [],
     this.enumValues = const [],
+    this.possibleTypes = const [],
   });
 
   factory GqlType.fromJson(Map<String, Object?> json) {
     final fields = json['fields'] as List?;
     final inputFields = json['inputFields'] as List?;
     final enumValues = json['enumValues'] as List?;
+    final possibleTypes = json['possibleTypes'] as List?;
     return GqlType(
       kind: json['kind']! as String,
       name: json['name']! as String,
@@ -110,6 +112,11 @@ class GqlType {
           : enumValues
                 .map((v) => GqlEnumValue.fromJson(v as Map<String, Object?>))
                 .toList(),
+      possibleTypes: possibleTypes == null
+          ? const []
+          : possibleTypes
+                .map((t) => (t as Map<String, Object?>)['name']! as String)
+                .toList(),
     );
   }
 
@@ -119,6 +126,12 @@ class GqlType {
   final List<GqlField> fields;
   final List<GqlInputValue> inputFields;
   final List<GqlEnumValue> enumValues;
+
+  /// Concrete object types of an `INTERFACE` or `UNION`, in schema order.
+  final List<String> possibleTypes;
+
+  /// `INTERFACE` or `UNION`: selected through inline fragments.
+  bool get isAbstract => kind == 'INTERFACE' || kind == 'UNION';
 }
 
 /// A parsed GraphQL introspection result (`{"__schema": {...}}`).

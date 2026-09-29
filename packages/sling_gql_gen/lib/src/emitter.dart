@@ -75,6 +75,10 @@ String generate(
     if (schema.mutationTypeName != null) schema.mutationTypeName!,
     if (schema.subscriptionTypeName != null) schema.subscriptionTypeName!,
   };
+  final abstractTypes = schema.types
+      .where((t) => t.isAbstract)
+      .where((t) => !t.name.startsWith('__'))
+      .toList();
   final enumTypes = schema.types
       .where((t) => t.kind == 'ENUM')
       .where((t) => !t.name.startsWith('__'))
@@ -149,6 +153,11 @@ String generate(
     _emitObjectClass(out, t, ctx, className: sanitizeTypeName(t.name));
   }
 
+  for (final t in abstractTypes) {
+    out.writeln();
+    _emitAbstractClass(out, t, ctx);
+  }
+
   for (final t in enumTypes) {
     out.writeln();
     _emitEnum(out, t);
@@ -189,10 +198,13 @@ class _EmitContext {
   final String keyField;
   final ScalarRegistry registry;
 
-  /// True when [typeName] is an object type with a scalar [keyField].
+  /// True when [typeName] is an object type with a scalar [keyField] / an
+  /// interface declaring one (every implementation has it too, so the key
+  /// can be selected on the interface field itself).
   bool isKeyed(String typeName) {
     final type = typesByName[typeName];
-    if (type == null || type.kind != 'OBJECT') return false;
+    if (type == null) return false;
+    if (type.kind != 'OBJECT' && type.kind != 'INTERFACE') return false;
     return type.fields.any(
       (f) =>
           f.name == keyField && f.args.isEmpty && f.type.named.kind == 'SCALAR',
@@ -373,6 +385,89 @@ void _emitObjectClass(
     _emitField(out, type, field, ctx);
   }
   out.writeln('}');
+}
+
+/// `lowerCamelCase` of a sanitized class name (`Launch` -> `launch`,
+/// `$Service` -> `$service`).
+String _lowerFirst(String className) {
+  if (className.startsWith(r'$') && className.length > 1) {
+    return '\$${className[1].toLowerCase()}${className.substring(2)}';
+  }
+  return className[0].toLowerCase() + className.substring(1);
+}
+
+/// A union or interface: an accessor over the abstract-typed object with the
+/// interface's own fields (none for a union), one `asType` getter per
+/// possible type (the inline fragment `... on Type`, `null` for another
+/// type) and a `when(...)` dispatching on `__typename` (every branch records
+/// on a skeleton, so one request covers whichever type comes back).
+void _emitAbstractClass(StringBuffer out, GqlType type, _EmitContext ctx) {
+  final className = sanitizeTypeName(type.name);
+  _emitDocAndDeprecation(out, indent: '', description: type.description);
+  out.writeln('class $className extends Accessor {');
+  out.writeln('  $className(super.recorder, super.selection, super.path);');
+  if (type.fields.isNotEmpty) out.writeln();
+  for (final field in type.fields) {
+    _emitField(out, type, field, ctx);
+  }
+
+  // Member names already taken on this class (fields, `when`).
+  final taken = <String>{
+    for (final f in type.fields) sanitizeIdentifier(f.name),
+    'when',
+  };
+  final members =
+      <(String typename, String cls, String getter, String param)>[];
+  final params = <String>{'orElse'};
+  for (final name in type.possibleTypes) {
+    final cls = sanitizeTypeName(name);
+    var getter =
+        'as${cls.startsWith(r'$') ? cls : cls[0].toUpperCase() + cls.substring(1)}';
+    while (!taken.add(getter)) {
+      getter = '$getter\$';
+    }
+    var param = sanitizeIdentifier(_lowerFirst(cls));
+    while (param == cls || !params.add(param)) {
+      param = '$param\$';
+    }
+    members.add((name, cls, getter, param));
+  }
+
+  if (members.isNotEmpty) out.writeln();
+  for (final (typename, cls, getter, _) in members) {
+    out.writeln(
+      '  /// The `... on $typename` view of this object; `null` for another type.',
+    );
+    final keyed = ctx.isKeyed(typename) ? ', keyed: true' : '';
+    out.writeln(
+      '  $cls? get $getter => on(${dartStringLiteral(typename)}, $cls.new$keyed);',
+    );
+  }
+
+  out
+    ..writeln()
+    ..writeln(
+      '  /// Runs the branch for this object\'s `__typename`, [orElse] for a type',
+    )
+    ..writeln(
+      '  /// without one. On a skeleton every branch runs (so all record their',
+    )
+    ..writeln('  /// fields) and the first one\'s result is returned.')
+    ..writeln('  T? when<T>({');
+  for (final (_, cls, _, param) in members) {
+    out.writeln('    T Function($cls $param)? $param,');
+  }
+  out
+    ..writeln('    T Function()? orElse,')
+    ..writeln('  }) => whenType({');
+  for (final (typename, _, getter, param) in members) {
+    out.writeln(
+      '    if ($param != null) ${dartStringLiteral(typename)}: () => $param($getter!),',
+    );
+  }
+  out
+    ..writeln('  }, orElse: orElse);')
+    ..writeln('}');
 }
 
 void _emitField(

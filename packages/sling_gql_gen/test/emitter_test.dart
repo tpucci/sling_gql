@@ -755,6 +755,177 @@ void main() {
     });
   });
 
+  group('unions and interfaces (#31)', () {
+    // Mirrors packages/sling_gql/test/fragments_test.dart.
+    Map<String, Object?> object(
+      String name,
+      List<Map<String, Object?>> fields,
+    ) => {
+      'kind': 'OBJECT',
+      'name': name,
+      'description': null,
+      'fields': fields,
+      'inputFields': null,
+      'enumValues': null,
+      'possibleTypes': null,
+    };
+    final id = _field('id', _nonNull(_type('SCALAR', 'ID')));
+    final json = {
+      '__schema': {
+        'queryType': {'name': 'Query'},
+        'mutationType': null,
+        'subscriptionType': null,
+        'types': [
+          object('Query', [
+            _field(
+              'search',
+              _nonNull(_list(_nonNull(_type('UNION', 'SearchResult')))),
+              args: [_arg('text', _nonNull(_type('SCALAR', 'String')))],
+            ),
+            _field('pinned', _type('UNION', 'SearchResult')),
+            _field(
+              'node',
+              _type('INTERFACE', 'Node'),
+              args: [_arg('id', _nonNull(_type('SCALAR', 'ID')))],
+            ),
+          ]),
+          object('User', [
+            id,
+            _field('name', _nonNull(_type('SCALAR', 'String'))),
+          ]),
+          object('Bot', [
+            id,
+            _field('model', _nonNull(_type('SCALAR', 'String'))),
+          ]),
+          object('Note', [_field('text', _nonNull(_type('SCALAR', 'String')))]),
+          {
+            'kind': 'INTERFACE',
+            'name': 'Node',
+            'description': null,
+            'fields': [id],
+            'possibleTypes': [_type('OBJECT', 'User'), _type('OBJECT', 'Bot')],
+          },
+          {
+            'kind': 'UNION',
+            'name': 'SearchResult',
+            'description': 'A search hit.',
+            'fields': null,
+            'possibleTypes': [
+              _type('OBJECT', 'User'),
+              _type('OBJECT', 'Bot'),
+              _type('OBJECT', 'Note'),
+            ],
+          },
+        ],
+      },
+    };
+    late String code;
+    setUpAll(() => code = generate(IntrospectionSchema.fromJson(json)));
+
+    test('fields returning abstract types use object/list', () {
+      expect(
+        code,
+        contains(
+          "List<SearchResult>? search({required String text}) => "
+          "list('search', SearchResult.new, args: {'text': Arg('String!', text)});",
+        ),
+      );
+      expect(
+        code,
+        contains(
+          "SearchResult? get pinned => object('pinned', SearchResult.new);",
+        ),
+      );
+      expect(
+        code,
+        contains(
+          "Node? node({required String id}) => object('node', Node.new, "
+          "args: {'id': Arg('ID!', id)}, keyed: true);",
+        ),
+        reason: 'an interface with the key field is keyed; never a lookup',
+      );
+    });
+
+    test('a union gets asType getters and when()', () {
+      expect(
+        code,
+        contains('/// A search hit.\nclass SearchResult extends Accessor {'),
+      );
+      expect(
+        code,
+        contains("User? get asUser => on('User', User.new, keyed: true);"),
+      );
+      expect(
+        code,
+        contains("Bot? get asBot => on('Bot', Bot.new, keyed: true);"),
+      );
+      expect(code, contains("Note? get asNote => on('Note', Note.new);"));
+      expect(
+        code,
+        contains('''
+  T? when<T>({
+    T Function(User user)? user,
+    T Function(Bot bot)? bot,
+    T Function(Note note)? note,
+    T Function()? orElse,
+  }) => whenType({
+    if (user != null) 'User': () => user(asUser!),
+    if (bot != null) 'Bot': () => bot(asBot!),
+    if (note != null) 'Note': () => note(asNote!),
+  }, orElse: orElse);'''),
+      );
+    });
+
+    test('an interface keeps its fields (key read-only) plus the casts', () {
+      final node = code.substring(code.indexOf('class Node extends Accessor'));
+      final body = node.substring(0, node.indexOf('\n}'));
+      expect(body, contains("String? get id => scalar<String>('id');"));
+      expect(body, isNot(contains('set id')));
+      expect(body, contains('User? get asUser'));
+      expect(body, contains('Bot? get asBot'));
+      expect(body, isNot(contains('asNote')));
+    });
+
+    test('no cache-access method for abstract types', () {
+      expect(
+        code,
+        contains("User? user(String id) => entity('User', id, User.new);"),
+      );
+      expect(code, isNot(contains("entity('Node'")));
+      expect(code, isNot(contains("entity('SearchResult'")));
+    });
+
+    test('cast getters and when params avoid clashes', () {
+      final clashing = {
+        '__schema': {
+          'queryType': {'name': 'Query'},
+          'types': [
+            object('Query', [_field('x', _type('INTERFACE', 'Thing'))]),
+            object('Class', [_field('n', _type('SCALAR', 'Int'))]),
+            object('OrElse', [_field('n', _type('SCALAR', 'Int'))]),
+            {
+              'kind': 'INTERFACE',
+              'name': 'Thing',
+              'fields': [_field('asClass', _type('SCALAR', 'Int'))],
+              'possibleTypes': [
+                _type('OBJECT', 'Class'),
+                _type('OBJECT', 'OrElse'),
+              ],
+            },
+          ],
+        },
+      };
+      final out = generate(IntrospectionSchema.fromJson(clashing));
+      expect(out, contains(r"Class? get asClass$ => on('Class', Class.new);"));
+      expect(out, contains(r'T Function(Class class$)? class$,'));
+      expect(out, contains(r'T Function(OrElse orElse$)? orElse$,'));
+      expect(
+        out,
+        contains(r"if (class$ != null) 'Class': () => class$(asClass$!),"),
+      );
+    });
+  });
+
   group('ScalarMapping.parseFlag', () {
     test('parses Name=DartType (built-in DateTime)', () {
       final m = ScalarMapping.parseFlag('DateTime=DateTime');
