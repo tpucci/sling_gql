@@ -127,7 +127,7 @@ class _InheritedClient extends InheritedWidget {
 
 /// Flushes at the end of the current (or next) frame, after layout, so that
 /// children built lazily by slivers and lists are part of the same request as
-/// their parents. Used by [QueryBuilder].
+/// their parents. The default `QueryBuilder.scheduler`.
 void frameEndScheduler(void Function() flush) {
   final binding = SchedulerBinding.instance;
   binding.addPostFrameCallback((_) => flush());
@@ -204,9 +204,26 @@ class QueryBuilder<Q extends Accessor> extends StatefulWidget {
     this.debugLabel,
     this.fetchPolicy,
     this.maxAge,
+    this.scheduler = frameEndScheduler,
   });
 
   final QueryWidgetBuilder<Q> builder;
+
+  /// When this widget's misses are flushed into a request (see
+  /// [FlushScheduler]). The default, [frameEndScheduler], waits for the end
+  /// of the frame so lazily built children (slivers, `ListView.builder`)
+  /// join their parent's request — keep it for anything rendered in a frame.
+  ///
+  /// [microtaskScheduler] flushes on the next microtask instead, without
+  /// waiting for a frame: right when no frame is coming (a widget test that
+  /// never pumps, a headless `WidgetsBinding`), or for a one-off widget
+  /// whose build is known to record everything. It splits a screen into
+  /// several requests when children build in a later task (slivers do).
+  ///
+  /// The first scheduler of a batch wins: scopes recording into a batch
+  /// already scheduled by another scope join it. Read when the scope is
+  /// created (first build); changing it later has no effect.
+  final FlushScheduler scheduler;
 
   /// How this widget combines cache and network (see [FetchPolicy]);
   /// defaults to `SlingClient.fetchPolicy`. `cacheAndNetwork` shows cached
@@ -246,7 +263,7 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
       _client = client;
       _scope = client.createScope(
         onChanged: _onChanged,
-        scheduler: frameEndScheduler,
+        scheduler: widget.scheduler,
         debugLabel: widget.debugLabel ?? widget.key?.toString(),
         fetchPolicy: widget.fetchPolicy,
         maxAge: widget.maxAge,
