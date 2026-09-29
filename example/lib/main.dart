@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:sling_gql/sling_gql.dart';
 
 import 'app.dart';
+import 'demos/demos.dart';
 import 'generated/schema.dart';
 import 'in_browser_api.dart';
 import 'list_rules.dart';
@@ -14,6 +15,11 @@ import 'network_log.dart';
 const endpoint = 'http://localhost:4000/graphql';
 
 void main() {
+  // `?demo=<name>`: one concept demo instead of the app (the website embeds
+  // them after each guide). Only the web build ever has a query string.
+  final demo = demoFor(Uri.base.queryParameters['demo'] ?? '');
+  if (demo != null) return runApp(DemoApp(demo: demo));
+
   final log = NetworkLog();
   final latency = MockLatencyController();
   final httpClient = mockApiHttpClient();
