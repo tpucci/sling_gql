@@ -58,13 +58,19 @@ int readList(Query q) {
   return n;
 }
 
+/// Fastest of 5 rounds of [iterations] calls, after one warm-up round (the
+/// JIT and GC make single rounds swing by 2× on a laptop).
 Duration timeIt(int iterations, void Function() body) {
-  body(); // warm-up
-  final sw = Stopwatch()..start();
-  for (var i = 0; i < iterations; i++) {
-    body();
+  Duration? best;
+  for (var round = 0; round < 6; round++) {
+    final sw = Stopwatch()..start();
+    for (var i = 0; i < iterations; i++) {
+      body();
+    }
+    sw.stop();
+    if (round > 0 && (best == null || sw.elapsed < best)) best = sw.elapsed;
   }
-  return sw.elapsed;
+  return best!;
 }
 
 String us(Duration d, int n) =>
