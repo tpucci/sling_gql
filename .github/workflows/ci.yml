@@ -65,6 +65,11 @@ jobs:
       - name: Example tests (mock API)
         run: melos run test:example --no-select
 
+      # The example also targets the web (with the mock API bundled into the
+      # page); the docs site's Try-it page ships this build.
+      - name: Example web build
+        run: node scripts/build-web-demo.mjs --no-copy
+
   # Gate 4: the docs site builds. Deploy stays in website.yml.
   website:
     name: website build

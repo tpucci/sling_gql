@@ -1,0 +1,105 @@
+---
+/**
+ * The example app's web build (`melos run build:web` → public/demo/) in a
+ * phone-sized iframe, loaded only on click: the Flutter engine plus the app
+ * are a few MB, and the mock API runs inside the iframe (every load starts
+ * from fresh data; "Restart" reloads it).
+ */
+interface Props {
+  /** Path under the demo, e.g. `#/` (reserved for per-concept demos, #59). */
+  path?: string;
+  height?: number;
+}
+const { path = '', height = 760 } = Astro.props;
+const src = `${import.meta.env.BASE_URL}/demo/${path}`.replace(/\/{2,}/g, '/');
+---
+
+<live-app data-src={src} style={`--live-app-height: ${height}px`}>
+  <div class="live-app-frame">
+    <button type="button" class="live-app-run">
+      <span><span aria-hidden="true">▶</span> Run the example app</span>
+      <small>Flutter web · a few MB · the mock API runs in your browser</small>
+    </button>
+  </div>
+  <div class="live-app-bar" hidden>
+    <button type="button" class="live-app-restart">↻ Restart (fresh data)</button>
+    <a href={src} target="_blank" rel="noopener">Open in a new tab ↗</a>
+  </div>
+</live-app>
+
+<style>
+  live-app {
+    display: block;
+    max-width: 420px;
+    margin-inline: auto;
+  }
+  .live-app-frame {
+    height: var(--live-app-height);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 1.5rem;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background: var(--sl-color-gray-6);
+  }
+  .live-app-frame :global(iframe) {
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .live-app-run {
+    display: grid;
+    gap: 0.4rem;
+    padding: 1rem 1.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--sl-color-accent);
+    background: var(--sl-color-accent-low);
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-lg);
+    cursor: pointer;
+  }
+  .live-app-run small {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-2);
+  }
+  .live-app-bar {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: var(--sl-text-sm);
+  }
+  .live-app-bar[hidden] {
+    display: none;
+  }
+  .live-app-restart {
+    background: none;
+    border: 0;
+    color: var(--sl-color-text-accent);
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+  }
+</style>
+
+<script>
+  // A custom element, so it works across Astro <ClientRouter /> navigations
+  // without an `astro:page-load` listener.
+  class LiveApp extends HTMLElement {
+    connectedCallback() {
+      this.querySelector('.live-app-run')?.addEventListener('click', () => this.load());
+      this.querySelector('.live-app-restart')?.addEventListener('click', () => this.load());
+    }
+
+    load() {
+      const frame = this.querySelector('.live-app-frame');
+      if (!frame) return;
+      const iframe = document.createElement('iframe');
+      iframe.src = this.dataset.src ?? '';
+      iframe.title = 'sling_gql example app';
+      iframe.allow = 'clipboard-write';
+      frame.replaceChildren(iframe);
+      this.querySelector<HTMLElement>('.live-app-bar')?.removeAttribute('hidden');
+    }
+  }
+  if (!customElements.get('live-app')) customElements.define('live-app', LiveApp);
+</script>

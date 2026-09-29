@@ -66,7 +66,7 @@ packages/sling_gql/      runtime: Accessor, Selection, Cache, SlingClient, Query
 packages/sling_gql_gen/  CLI: introspection JSON → Dart accessor classes
 packages/sling_gql_test/ test helpers: in-memory GraphQL server, pumpUntilSettled
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
-example/                 iOS-only Flutter app talking to the mock API
+example/                 Flutter app (iOS + web) talking to the mock API
 ```
 
 ## Setup
@@ -81,7 +81,13 @@ melos run test:runtime                         # or one gate at a time
 
 cd mock-api && npm install && npm start        # http://localhost:4000/graphql (GraphiQL), for `flutter run`
 cd example && flutter run -d <ios-simulator>
+
+# Web: the mock API runs in the page, no server needed
+cd mock-api && npm run build:browser && cd ../example && flutter run -d chrome
+melos run build:web                            # release build for the website (Try it page)
 ```
+
+Or just [try it live](https://tpucci.github.io/sling_gql/guides/try-it/) on the website.
 
 The packages are on pub.dev:
 [`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),

@@ -13,7 +13,7 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
     - sling_gql_gen/  generator — introspection JSON → Dart
     - sling_gql_test/  test helpers — MockGraphQLServer, pumpUntilSettled
   - mock-api/  graphql-yoga server the example and its tests run against
-  - example/  iOS-only Flutter app
+  - example/  Flutter app (iOS + web)
   - website/  this site (Astro + Starlight)
   - AGENTS.md  conventions and design decisions, read it first
 </FileTree>
@@ -55,6 +55,8 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
    ```sh
    cd example && flutter run -d <ios-simulator-id>
+   # or, from the repo root, with the mock API in the page (no server):
+   (cd mock-api && npm run build:browser) && cd example && flutter run -d chrome
    ```
 
    Every request is printed to the console and listed in-app (antenna icon).

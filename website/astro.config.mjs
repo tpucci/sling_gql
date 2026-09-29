@@ -28,6 +28,7 @@ export default defineConfig({
           items: [
             { label: 'Why sling_gql?', slug: 'guides/why' },
             { label: 'Getting started', slug: 'guides/getting-started' },
+            { label: 'Try it live', slug: 'guides/try-it' },
           ],
         },
         {

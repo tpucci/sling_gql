@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      # The Try-it page embeds the example's web build.
+      - 'example/**'
+      - 'mock-api/**'
+      - 'packages/sling_gql/**'
+      - 'scripts/build-web-demo.mjs'
       - '.github/workflows/website.yml'
   workflow_dispatch:
 
@@ -22,11 +27,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          echo "flutter=$(awk '/^flutter/ {print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+          channel: stable
+          cache: true
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .tool-versions
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            mock-api/package-lock.json
+
+      # The example's web build with the in-browser mock API, copied to
+      # website/public/demo/ (served at /sling_gql/demo/, embedded by Try it).
+      - name: Build the web demo (Try it live)
+        run: |
+          flutter pub get
+          node scripts/build-web-demo.mjs
+
       - run: npm ci
         working-directory: website
       - run: npm run build

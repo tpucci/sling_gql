@@ -84,6 +84,12 @@ melos:
       packageFilters:
         scope: sling_gql_example
 
+    build:web:
+      description: >-
+        Web build of the example with the in-browser mock API, copied to
+        website/public/demo/ (the site's Try-it page).
+      run: node scripts/build-web-demo.mjs
+
     test:website:
       description: Build the docs site.
       run: cd website && npm ci --no-audit --no-fund && npm run build
