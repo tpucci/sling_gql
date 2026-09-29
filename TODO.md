@@ -18,8 +18,9 @@ pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API s
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
 Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
 and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
-#27, #29, #38, #39, #40 done; P3 and P4 are empty. Suggested next picks:
-#22 (`gc()` trigger), #46 (in-app request overlay).
+#27, #29, #38, #39, #40 done; P3 is empty. Decided: the example also
+targets web, to run live on the website (#58, then #59). Suggested next
+picks: #58 (example on the web), #22 (`gc()` trigger), #46 (request overlay).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -31,6 +32,41 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     persistence adapters will need debouncing and incremental snapshots.
 22. **Perf — `gc()` is manual.** Entities dropped from a replaced list stay
     until `gc()`; decide on a trigger (after N writes, on app pause).
+
+## P4 — example app & tooling
+
+58. **Example — Run the example on the web, live on the website (v1,
+    start simple).** Decided: the example gets a `web` platform (next to
+    iOS; no other platforms), and the mock API runs *in the visitor's
+    browser*, so the site stays static on GitHub Pages and every visitor
+    has their own data (no shared in-memory state to drift).
+    - `mock-api/`: split `server.mjs` into a runtime-free
+      `app.mjs` (`createMockYoga({latencyMs, sequenceMs})` over the existing
+      `resolvers.mjs`/`data.mjs`/`schema.graphql`) and a thin Node wrapper;
+      an esbuild script bundles `app.mjs` (schema inlined) to
+      `mock-api.browser.js`. One set of resolvers for iOS, tests and web.
+    - Example: `flutter create --platforms=web .`; on web only (conditional
+      import), `main.dart` wires a `dart:js_interop` `Transport` and
+      `SubscriptionTransport` that call the bundled yoga's `fetch` (SSE
+      streamed from its `Response` body; `x-mock-latency-ms` from #40 still
+      works). iOS keeps `http://localhost:4000`. No `dart:io` in the
+      runtime or example today — keep it that way.
+    - Website: `website.yml` builds `flutter build web --base-href
+      /sling_gql/demo/`, copies it and the bundle into `website/public/demo/`
+      before `astro build`; one "Try it" page embedding the whole app in a
+      lazily loaded iframe ("▶ Run" button — the Flutter engine is
+      ~2 MB) with the network log / cache stats / latency picker visible.
+    - CI: `flutter build web` for the example; `app_test.dart` unchanged.
+      Update AGENTS.md ("iOS only") and `tooling/example-app` in the same
+      change.
+59. **Docs — A live demo after each concept** (after #58). Demo routes in
+    the example (`#/demo/<concept>`), sources marked `// #region snippet`
+    and pulled into the MDX code blocks (shown code = running code, CI
+    proves it compiles), an Astro `<LiveDemo demo="..." />` component
+    (lazy iframe, reset-data button, side panel with the network log).
+    Start with three: batching/waterfalls, fetch policies + SWR, optimistic
+    mutation with rollback; then one per guide. Later: Flutter multi-view
+    embedding (one engine for all demos of a page) instead of iframes.
 
 ## P5 — docs & repo hygiene
 

@@ -44,8 +44,9 @@ on the code.
     `pumpUntilSettled` (on `SlingClient.isIdle`/`whenIdle`),
     `useRealNetwork`, `disposeAfterTest`. Tests: `flutter test`. Prefer it
     over hand-rolled `MockClient` + alias regexes in new tests.
-  - `example` — Flutter app, **iOS only** (`flutter create --platforms=ios`).
-    Do not add other platforms.
+  - `example` — Flutter app, **iOS only** today (`flutter create --platforms=ios`).
+    Web is approved and tracked as TODO #58 (in-browser mock API, live on the
+    website); add it only as part of that item. No other platforms.
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
   `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,
