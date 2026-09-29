@@ -67,7 +67,9 @@ enclosing object's location.
 A flat `Map<entityKey, fields>` where the operation roots (`ROOT_QUERY`) are entities too.
 `read(operation, path, deps:)` walks `Map`/`List` nodes, derefs `Ref`s transparently,
 records every `entity.field` dependency it crosses into `deps`, and returns the `missing`
-sentinel when a key is absent — distinct from a stored `null`. `writeResponse` normalizes
+sentinel when a key is absent — distinct from a stored `null`. Generated getters go
+through `readField(operation, path, field, deps:)`, the same walk without allocating the
+joined path; dependency keys are interned per `(entity, field)`. `writeResponse` normalizes
 identifiable objects into entities and merges the rest inline; `write` sets a single path
 for optimistic updates. Both return the dependency keys they touched. `Cache` is an
 interface with one implementation, `NormalizedCache`. Apps see the interface through
