@@ -86,9 +86,14 @@ An explicit `root: Mutation.root` on `MutationBuilder` still works and always wi
 scope — useful for a widget wired to a different schema than the one above it.
 
 `mutate` returns `Future<T?>`: the body's value on success, `null` on failure with the error
-on `state.error`. `state.isLoading` is true while the request is in flight. The widget does
-**not** rebuild on data changes — it has nothing to do with data; the `QueryBuilder` around it
-does that, because the accessor `launch` it reads is bound to the query scope.
+on `state.error`. A failure never throws, so tell it apart from a `null` result by
+`state.error` (or call `client.mutate` to get the exception). `state.isLoading` is true while
+the request is in flight. `state.data` holds the value of the last call that succeeded; it
+stays while a new call is loading and is cleared by a failure. It is `Object?` because each
+call may return a different type, so cast it or use the awaited value. When calls overlap,
+the state describes the latest one, and an older call finishing late never overwrites it.
+The widget does **not** rebuild on data changes — it has nothing to do with data; the
+`QueryBuilder` around it does that, because the accessor `launch` it reads is bound to the query scope.
 
 ## Optimistic writes and rollback
 

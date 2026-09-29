@@ -16,7 +16,7 @@ Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
-Suggested next picks: #28 (small runtime/gen fixes), #17/#18
+Suggested next picks: #17/#18
 (read-path allocations), #57 (conflicting fields across fragments).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -44,9 +44,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     one). Use a non-printable separator or a record key.
 27. **Runtime — `Cache.writeResponse` takes an unused `selection`
     parameter.** Either use it (typed merge policies) or drop it.
-28. **Runtime — `MutationState` has no `data`**; `mutate` returns `null` on
-    error and swallows the exception into `state.error`. Document, and expose
-    the last result.
 29. **Runtime — Partial mutation errors** write the resolved fields then
     reject; document the semantics or make it a policy.
 33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
@@ -138,6 +135,7 @@ Kept for number stability; see git history for details.
 31. Runtime/Gen — Unions & interfaces: `Selection.fragment` (inline fragments, transparent to cache paths), `Accessor.on`/`whenType`; generated `asType` getters + `when(...)` per `UNION`/`INTERFACE` (all branches recorded on the skeleton; keyed members and key-declaring interfaces normalize); `MockGraphQLServer` resolves `... on Type`; mock `Node` interface + `search: [SearchResult!]!` union, `node(id:)`; example Search tab + e2e test.
 24. Runtime — `QueryBuilder(scheduler:)` (default `frameEndScheduler`); when `microtaskScheduler` fits documented in `guides/batching-and-waterfalls`.
 25. Runtime/Gen — `slingSchema` carries `keyField` (always emitted, `SlingSchema<Query, Accessor>` without a Mutation type); `SlingClient(schema:)` supplies `rootFactory` + default cache normalization, asserts on a mismatching `cache:`; `SlingScope` falls back to `client.schema`.
+28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
 
 ## Explicitly not planned
 
