@@ -201,7 +201,7 @@ query {
       (q, v) => {
         'me': {
           '__typename': 'User',
-          'friends_1n0h7gq': [
+          'friends_1jl0zck1sgqbl6': [
             {'__typename': 'User', 'id': 'a', 'name': 'Bob'},
             {'__typename': 'User', 'id': 'b', 'name': 'Cy'},
           ],
@@ -220,7 +220,7 @@ query {
     final alias = RegExp(r'(friends_\w+): friends')
         .firstMatch(op.document)!
         .group(1);
-    expect(alias, 'friends_1n0h7gq');
+    expect(alias, 'friends_1jl0zck1sgqbl6');
     expect(names, ['Bob', 'Cy']);
   });
 

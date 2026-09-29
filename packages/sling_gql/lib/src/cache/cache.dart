@@ -11,7 +11,12 @@ export 'normalization.dart';
 export 'ref.dart';
 
 /// Dependency key for `field` on entity `entity` — the currency used to tell
-/// scopes what changed (`ROOT_QUERY.launches_1qouruf`, `Launch:launch-181.name`).
+/// scopes what changed (`ROOT_QUERY.launches_c0y93u18lig6v`, `Launch:launch-181.name`).
+///
+/// Unambiguous even when an id contains dots (`User:a.name` + `id` vs
+/// `User:a` + `name`): [field] is a cache alias — a GraphQL name, optionally
+/// with an `_<hash>` suffix — and never contains `.`, so the entity is always
+/// everything before the *last* dot (what list rules rely on) (#26).
 String depKey(String entity, String field) => '$entity.$field';
 
 /// Description of one manual write (`launch.favorite = true`), enough to undo

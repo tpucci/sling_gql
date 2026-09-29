@@ -111,7 +111,7 @@ class Harness {
   final sent = <PrintedOperation>[];
 }
 
-const searchAlias = 'search_ul8qin';
+const searchAlias = 'search_jo0dpl1kgtlq7';
 
 Map<String, Object?> searchResponse() => {
   searchAlias: [
@@ -237,13 +237,13 @@ query (\$text: String!) {
   test('interface: common fields on the node, keyed at the field', () async {
     final h = Harness(
       (_) => {
-        'node_p4k0nx': {'__typename': 'Bot', 'id': 'b1', 'model': 'R2'},
+        'node_1fqm5qj1yt11y5': {'__typename': 'Bot', 'id': 'b1', 'model': 'R2'},
       },
     );
     final aliasOfNode = Selection.root('query')
         .child('node', {'id': Arg('ID!', 'b1')})
         .alias;
-    expect(aliasOfNode, 'node_p4k0nx');
+    expect(aliasOfNode, 'node_1fqm5qj1yt11y5');
 
     final out = await h.client.resolve((q) {
       final n = q.node(id: 'b1')!;
@@ -252,7 +252,7 @@ query (\$text: String!) {
     expect(out, ('b1', 'R2'));
     expect(h.sent.single.document, '''
 query (\$id: ID!) {
-  node_p4k0nx: node(id: \$id) {
+  node_1fqm5qj1yt11y5: node(id: \$id) {
     __typename
     id
     ... on User {

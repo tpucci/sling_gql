@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:meta/meta.dart';
+
 /// A typed GraphQL argument. The [graphqlType] is the *GraphQL* type literal
 /// (e.g. `Int`, `String!`, `LaunchFind`), used to declare the variable in the
 /// operation document. Values are always sent as JSON variables, so enums and
@@ -177,16 +179,33 @@ class Selection {
     if (present.isEmpty) return field;
     final keys = present.keys.toList()..sort();
     final canonical = jsonEncode({for (final k in keys) k: present[k]});
-    return '${field}_${_fnv1a(canonical)}';
+    return '${field}_${fnv1a64(canonical)}';
   }
 
-  static String _fnv1a(String s) {
-    var hash = 0x811c9dc5;
+  /// 64-bit FNV-1a of [s]'s UTF-16 code units, base 36 (#33: with 32 bits,
+  /// a few thousand `launch(id:)` aliases in one app lifetime already had a
+  /// ~1% chance of two arg sets silently sharing a cache entry).
+  ///
+  /// Computed on two 32-bit halves with arithmetic that stays below 2^53, so
+  /// it gives the same result on the web (JS numbers, 32-bit bitwise ops) as
+  /// on native.
+  @visibleForTesting
+  static String fnv1a64(String s) {
+    const two32 = 0x100000000;
+    // Offset basis 0xcbf29ce484222325, prime 0x100000001b3 = 2^40 + 0x1b3.
+    var hi = 0xcbf29ce4, lo = 0x84222325;
     for (final unit in s.codeUnits) {
-      hash ^= unit;
-      hash = (hash * 0x01000193) & 0xffffffff;
+      // lo ^= unit, on the low 16 bits only (units are < 2^16).
+      final low16 = lo % 0x10000;
+      lo = lo - low16 + (low16 ^ unit);
+      // (hi·2^32 + lo) · (2^40 + 0x1b3) mod 2^64.
+      final loProduct = lo * 0x1b3;
+      final carry = loProduct ~/ two32;
+      final hiProduct = hi * 0x1b3 + carry + (lo % 0x1000000) * 0x100;
+      lo = loProduct % two32;
+      hi = hiProduct % two32;
     }
-    return hash.toRadixString(36);
+    return hi.toRadixString(36) + lo.toRadixString(36).padLeft(7, '0');
   }
 
   @override
