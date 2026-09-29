@@ -109,7 +109,9 @@ updates in the same frame, before the network answers. The client journals each 
 the previous value (`CacheWrite`). If the mutation fails — transport error, or `errors[]` in
 the response — the journal is undone in reverse order and the affected scopes rebuild. A
 field that was never fetched goes back to *missing* (not `null`), so it is re-fetched rather
-than shown as empty.
+than shown as empty. On a partial failure the rollback runs *before* the fields that did
+resolve are written, so it never overwrites a value the server confirmed (see
+[Partial errors](#partial-errors)).
 
 When the mutation succeeds, the response simply overwrites the optimistic value with the
 server's.
@@ -119,9 +121,33 @@ server's.
 - **Transport / HTTP errors** and **GraphQL errors** both reject the `mutate` future with a
   `SlingException` (transport errors with the underlying exception). With `MutationBuilder`,
   they surface on `state.error` instead.
-- **Partial GraphQL errors** (data *and* errors) still write the fields that resolved, prune
-  the `null`s at errored paths, then reject.
+- **Partial GraphQL errors** (data *and* errors) are failures too, but the cache keeps what
+  the server resolved — see below.
 - Mutations have no sticky-error behaviour — every call is a fresh request.
+
+### Partial errors
+
+A response with both `data` and `errors` counts as a failed mutation. There is no policy
+knob; the semantics are:
+
+- **The call fails.** `client.mutate` rejects with a `SlingException` whose `graphqlErrors`
+  holds the server's errors; with `MutationBuilder`, `mutate` resolves `null`, the exception
+  is on `state.error` and `state.data` is cleared. The body is not run a second time, and
+  `refetchQueries` are not refetched.
+- **Optimistic writes are undone first.** Every write the `optimistic` callback made
+  (setters, list edits) is rolled back, exactly as for a total failure.
+- **Then the resolved fields are written.** What the server did resolve is normalized into
+  the cache over the rolled-back state, so a field the server confirmed shows the server's
+  value even if the optimistic callback wrote it too. Every widget reading a changed field
+  rebuilds once, for the rollback and the resolved fields together.
+- **Errored paths are pruned.** The `null` the server puts at an errored path is not a real
+  `null`: the field keeps its pre-mutation value (or stays missing).
+- **Nothing is pinned.** The payload's root field is dropped from `ROOT_MUTATION`, as on
+  success.
+
+To read what did resolve, go through the entities: `client.cacheScope.launch(id)?.favorite`.
+A transport error, an HTTP error or a response without `data` writes nothing — only the
+rollback applies.
 
 ## Updating lists after a mutation
 

@@ -149,7 +149,8 @@ The first scheduler of a batch wins; everything recorded before it fires goes in
 runs `body` once against a `MutationScope` to record the selection, POSTs it alone, writes
 the response through the same `writeResponse` as queries, and runs `body` again to compute
 the return value. Optimistic writes made through generated setters are journaled as
-`CacheWrite`s (path + previous value) while `optimistic` runs and undone on failure.
+`CacheWrite`s (path + previous value) while `optimistic` runs and undone on failure — on a
+partial GraphQL error, before the fields that resolved are written, so the server's values win.
 
 `SubscriptionBuilder<S>` runs `select` once against a `SubscriptionScope` (via
 `client.subscribeWith`) to record the document, listens to the resulting
