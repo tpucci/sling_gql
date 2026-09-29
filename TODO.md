@@ -17,8 +17,9 @@ Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
 Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
-and key/alias collisions (#26, #33) done. Suggested next picks: #27
-(unused `writeResponse` selection), #29 (partial mutation errors).
+and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
+#27, #29, #38, #39, #40 done; P3 and P4 are empty. Suggested next picks:
+#22 (`gc()` trigger), #46 (in-app request overlay).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -30,24 +31,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     persistence adapters will need debouncing and incremental snapshots.
 22. **Perf — `gc()` is manual.** Entities dropped from a replaced list stay
     until `gc()`; decide on a trigger (after N writes, on app pause).
-
-## P3 — runtime configurability & correctness
-
-27. **Runtime — `Cache.writeResponse` takes an unused `selection`
-    parameter.** Either use it (typed merge policies) or drop it.
-29. **Runtime — Partial mutation errors** write the resolved fields then
-    reject; document the semantics or make it a policy.
-
-## P4 — example app & tooling
-
-38. **Example — Show more of the API**: `client.resolve()` (imperative
-    prefetch) is never used or documented in the example; `Normalization`
-    config, `cache.snapshot`, `onChange` likewise.
-39. **Example — `.vscode/` is ignored by a global gitignore** on this machine,
-    so the launch configs are not shared. Force-add them (`git add -f`) or
-    document the setup in README.
-40. **Example — `LATENCY_MS` toggle in-app** to make skeletons visible on
-    demand. (The per-row half is done: `LaunchRow` is a `SlingRow`, #19.)
 
 ## P5 — docs & repo hygiene
 
@@ -122,6 +105,11 @@ Kept for number stability; see git history for details.
 28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
 57. Runtime — Same response name across fragments: printed `<alias>__<Type>: field` per fragment when repeated (type-free, conservative), `PrintedOperation.toCacheKeys` maps responses back (merging direct + fragment selections) after error pruning, for queries, mutations and subscriptions.
 26. Runtime — `depKey` separator: not a bug — cache field aliases never contain `.`, so `entity.field` splits unambiguously at the last dot; documented on `depKey`, test with dotted ids.
+27. Runtime — `Cache.writeResponse(operation, data, {at})`: unused `selection` parameter dropped.
+29. Runtime — Partial mutation errors: optimistic writes are rolled back *before* the resolved fields are written (server values win), `ROOT_MUTATION` fields removed on failure too; still a failure (throws / `state.error`, no body re-run, no `refetchQueries`). Documented on `mutateWith` + guides/mutations.
+38. Example — `LaunchScreen.open` prefetches the detail query with `client.resolve()`; explicit `Normalization(keyField: 'id')`; live `CacheStats` (`snapshot`/`onChange`) on the network log screen.
+39. Example — `.vscode/` launch/tasks/settings are tracked (nothing to do).
+40. Example — Latency picker (Server/Off/500 ms/2 s) on the network log screen; `x-mock-latency-ms` header honoured per request by the mock API, injected by the example's transport.
 33. Runtime — 64-bit FNV-1a aliases (`Selection.fnv1a64`, on 32-bit halves so web = native); all hashed aliases changed once (persisted caches, if any, start cold).
 
 ## Explicitly not planned

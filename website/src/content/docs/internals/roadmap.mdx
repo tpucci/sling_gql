@@ -26,7 +26,8 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    [Mutations](/sling_gql/guides/mutations/). Also done: `refetchQueries` sugar, typed cache
    access (`client.cacheScope`), and list membership after a mutation
    (`cacheScope.list((q) => q.me?.favorites).append/remove`, `evict`) — see
-   [Caching](/sling_gql/guides/caching/). Left for later: connection-aware type policies so
+   [Caching](/sling_gql/guides/caching/). Partial errors fail the call but keep what the
+   server resolved, over the rolled-back optimistic writes. Left for later: connection-aware type policies so
    paginated/filtered lists update without `refetchQueries`.
 
 3. **Subscriptions** — done
@@ -36,7 +37,8 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    stream (`SlingClient(subscriptionTransport:)` to swap the protocol), and write each
    event through the same `writeResponse` as a query — see
    [Subscriptions](/sling_gql/guides/subscriptions/). `MockGraphQLServer(subscription:)`
-   takes `Stream`s. Left for later: reconnection policies, a `graphql-ws` transport.
+   takes `Stream`s. Reconnection (`subscriptionRetryAfter`, `reconnect()`) is done. Left for
+   later: a `graphql-ws` transport.
 
 4. **Unions and interfaces** — done
 
@@ -74,7 +76,9 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    caused a second round trip; `Accessor.isFetched` + `QueryState.isSkeleton` for the
    three-meanings-of-`null` story; `refetchQueries` on mutations; `--scalar` mapping;
    `MutationBuilder` resolving its root from `SlingScope(schema:)`; the `sling_gql_test`
-   package (`MockGraphQLServer`, `pumpUntilSettled` — see [Testing](/sling_gql/guides/testing/)). Next: the in-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
+   package (`MockGraphQLServer`, `pumpUntilSettled` — see [Testing](/sling_gql/guides/testing/));
+   example dev tools (latency picker, live cache stats, `resolve()` prefetch — see
+   [Example app](/sling_gql/tooling/example-app/)). Next: the in-app overlay attributing each request to the widgets that recorded it; a `pixel`-style
    log line per operation; `flutter_hooks` adapter (`useSlingQuery`).
 
 8. **Transport options** — hook done
