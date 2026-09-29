@@ -19,14 +19,10 @@ import 'package:sling_gql/sling_gql.dart';
 final endpoint = Uri.parse('https://example.com/graphql');
 
 void main() {
-  final client = SlingClient<Query>(
-    endpoint: endpoint,
-    rootFactory: Query.root,
-  );
+  final client = SlingClient<Query>(endpoint: endpoint, schema: slingSchema);
   runApp(
     SlingScope<Query>(
       client: client,
-      schema: slingSchema,
       child: const MaterialApp(home: ProfilePage()),
     ),
   );

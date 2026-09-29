@@ -72,6 +72,7 @@ const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
   subscription: Subscription.root,
+  keyField: 'id',
 );
 
 /// `me` with two friends, as the mock endpoint would answer.

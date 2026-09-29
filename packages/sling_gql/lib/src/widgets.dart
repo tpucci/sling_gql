@@ -13,7 +13,8 @@ import 'selection.dart';
 /// when they aren't given an explicit `root:` — pass either [mutationRoot]
 /// directly (the generated `Mutation.root` constructor) or [schema] (the
 /// generated `slingSchema` constant, which also carries the query and
-/// subscription roots); passing both is an error.
+/// subscription roots); passing both is an error. With neither, the roots
+/// come from the client's own `SlingClient.schema`, if it was built from one.
 class SlingScope<Q extends Accessor> extends StatelessWidget {
   const SlingScope({
     super.key,
@@ -100,8 +101,8 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _InheritedClient(
     client: client,
-    mutationRoot: mutationRoot ?? schema?.mutation,
-    subscriptionRoot: schema?.subscription,
+    mutationRoot: mutationRoot ?? (schema ?? client.schema)?.mutation,
+    subscriptionRoot: (schema ?? client.schema)?.subscription,
     child: child,
   );
 }

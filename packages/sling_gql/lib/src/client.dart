@@ -32,15 +32,30 @@ typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
 /// `QueryBuilder` (via the client's `rootFactory`), `MutationBuilder` (via
 /// `SlingScope.mutationRootOf`) and `SubscriptionBuilder` (via
 /// `SlingScope.subscriptionRootOf`) from it.
+///
+/// Also carries the facts the runtime must agree on with the generated code:
+/// [keyField] (`--key-field`). `SlingClient(schema: slingSchema)` builds its
+/// default cache from it, so the two never have to be kept in sync by hand.
 class SlingSchema<Q extends Accessor, M extends Accessor> {
   const SlingSchema({
     required this.query,
-    required this.mutation,
+    this.mutation,
     this.subscription,
+    this.keyField = 'id',
   });
 
   final RootFactory<Q> query;
-  final RootFactory<M> mutation;
+
+  /// The generated `Mutation.root`, when the schema has a mutation type.
+  final RootFactory<M>? mutation;
+
+  /// The key field the generator was run with (`--key-field`, default
+  /// `id`): keyed types were decided by it, and keyed selections must fetch
+  /// it. See [Normalization.keyField].
+  final String keyField;
+
+  /// The cache normalization matching the generated code.
+  Normalization get normalization => Normalization(keyField: keyField);
 
   /// The generated `Subscription.root`, when the schema has a subscription
   /// type.
@@ -1249,7 +1264,8 @@ class SlingSubscription<T> {
 class SlingClient<Q extends Accessor> {
   SlingClient({
     required this.endpoint,
-    required this.rootFactory,
+    RootFactory<Q>? rootFactory,
+    this.schema,
     Cache? cache,
     http.Client? httpClient,
     Transport? transport,
@@ -1266,7 +1282,25 @@ class SlingClient<Q extends Accessor> {
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
-  }) : cache = cache ?? Cache(),
+  }) : assert(
+         rootFactory != null || schema != null,
+         'SlingClient: pass schema: (the generated slingSchema) or '
+         'rootFactory:.',
+       ),
+       assert(
+         schema == null ||
+             cache == null ||
+             cache.normalization.keyField.isEmpty ||
+             cache.normalization.keyField == schema.keyField,
+         'SlingClient: the cache normalizes on '
+         '"${cache.normalization.keyField}" but the code was generated '
+         'with --key-field ${schema.keyField}. Build the cache with '
+         'Cache(normalization: slingSchema.normalization) or regenerate.',
+       ),
+       rootFactory = rootFactory ?? schema!.query,
+       cache =
+           cache ??
+           Cache(normalization: schema?.normalization ?? const Normalization()),
        _listRules = List.of(listRules),
        _http = httpClient ?? http.Client(),
        // ignore: prefer_initializing_formals
@@ -1280,6 +1314,13 @@ class SlingClient<Q extends Accessor> {
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
+
+  /// The generated `slingSchema`, when the client was built from it.
+  /// Supplies [rootFactory], the default [cache]'s key field, and the
+  /// mutation/subscription roots of a `SlingScope` that is not given its
+  /// own `schema:`.
+  final SlingSchema<Q, Accessor>? schema;
+
   final Cache cache;
 
   /// Static headers added to every request (before [transport] sees it).

@@ -58,11 +58,10 @@ query {
    void main() {
      final client = SlingClient<Query>(
        endpoint: Uri.parse('https://example.com/graphql'),
-       rootFactory: Query.root,
+       schema: slingSchema, // generated: roots + key field
      );
      runApp(SlingScope<Query>(
        client: client,
-       schema: slingSchema,
        child: const MyApp(),
      ));
    }
