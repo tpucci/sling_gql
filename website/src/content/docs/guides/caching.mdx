@@ -23,13 +23,13 @@ their parent. The operation roots are entities like any other (`ROOT_QUERY`, `RO
   "ROOT_QUERY": {
     "company": { "__typename": "Company", "name": "Sling Space", "ceo": "Alex Corren" },
     "stats": { "__typename": "Stats", "totalLaunches": 181, "successRatePct": 89.8 },
-    "launches_1qouruf": {
+    "launches_c0y93u18lig6v": {
       "__typename": "LaunchConnection",
       "nodes": [ { "__ref": "Launch:launch-181" }, { "__ref": "Launch:launch-180" } ],
       "pageInfo": { "__typename": "PageInfo", "hasNextPage": true, "endCursor": "Y3Vyc29yOjE5" },
       "totalCount": 181
     },
-    "launch_18di94z": { "__ref": "Launch:launch-181" }
+    "launch_1ov936k1qddray": { "__ref": "Launch:launch-181" }
   },
   "Launch:launch-181": {
     "__typename": "Launch", "id": "launch-181", "name": "Crew-5",
@@ -41,7 +41,7 @@ their parent. The operation roots are entities like any other (`ROOT_QUERY`, `RO
 
 Field keys are still the selection **alias** (field name + hash of the arguments), so a
 response merges without any lookup table. Every `Accessor` is a `(selection node, cache
-path)` pair — `["launches_1qouruf", "nodes", 0, "rocket"]` for the rocket of the first row.
+path)` pair — `["launches_c0y93u18lig6v", "nodes", 0, "rocket"]` for the rocket of the first row.
 `read` walks the path and **derefs a `Ref` transparently** whenever it meets one; the
 generated code never sees references. A path may also start with a `Ref` to address an
 entity directly: `["Launch:launch-181" as Ref, "name"]`.
@@ -75,14 +75,14 @@ Passing your own `cache:` next to `schema:`? Build it with
 ## Lookups: `launch(id:)` is served from the entity
 
 A root field whose only argument is the key and which returns a keyed type
-(`launch(id: ID!): Launch`) is emitted with `lookup: 'Launch'`. When `launch_18di94z` is not
+(`launch(id: ID!): Launch`) is emitted with `lookup: 'Launch'`. When `launch_1ov936k1qddray` is not
 in `ROOT_QUERY` yet but `Launch:launch-181` exists, the accessor is redirected to the
 entity. Fields the entity already has are read from cache; fields it lacks miss
 individually and are fetched — **only those**:
 
 ```graphql title="Detail screen opened after the list"
 query ($id: ID!) {
-  launch_18di94z: launch(id: $id) {
+  launch_1ov936k1qddray: launch(id: $id) {
     __typename
     id
     details        # not in the list → fetched
@@ -120,7 +120,7 @@ mutation, let the response overwrite, refetch on error.
 
 ## Typed cache access: `client.cacheScope`
 
-`cache.read('query', ['launches_1qouruf', 'nodes', 0])` works, but nobody can type a hashed
+`cache.read('query', ['launches_c0y93u18lig6v', 'nodes', 0])` works, but nobody can type a hashed
 alias. Outside a widget build — in an `optimistic:` callback, after `await client.mutate(...)`,
 in a push-notification handler — use the typed scope instead:
 
@@ -239,7 +239,7 @@ Membership is set-like; the position of a joining entity is `prepend`/`append`, 
 
 ## Notification: per entity field
 
-Every read records the **dependency keys** it traversed — `ROOT_QUERY.launches_1qouruf`,
+Every read records the **dependency keys** it traversed — `ROOT_QUERY.launches_c0y93u18lig6v`,
 `Launch:launch-181.name` — on the scope that made it (`entity.field`, see `depKey`). Every
 write returns the keys it touched. A scope rebuilds when the two intersect, so:
 

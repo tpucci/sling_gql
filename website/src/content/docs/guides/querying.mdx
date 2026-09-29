@@ -98,11 +98,11 @@ final page = query.launches(
 
 ```graphql title="generated"
 query ($id: ID!, $first: Int, $filter: LaunchFilter, $orderBy: LaunchOrder) {
-  launch_18di94z: launch(id: $id) {
+  launch_1ov936k1qddray: launch(id: $id) {
     __typename
     # …
   }
-  launches_5c0z2wq: launches(first: $first, filter: $filter, orderBy: $orderBy) {
+  launches_1rkvr9g04jfq12: launches(first: $first, filter: $filter, orderBy: $orderBy) {
     __typename
     # …
   }
@@ -119,7 +119,7 @@ later) distinct value gets a numeric suffix (`$first`, `$first2`).
 
 Arguments always travel as **variables**, so input objects and enums need no client-side
 serialization beyond `toJson()`, which the generated input classes implement. The
-**alias** (`launches_5c0z2wq`) is a stable hash of the argument values and is also the
+**alias** (`launches_1rkvr9g04jfq12`) is a stable hash of the argument values and is also the
 **cache key**: `launches(first: 20)` and `launches(first: 40)` are different cache entries
 that can coexist in one document. This is what makes
 [pagination](/sling_gql/guides/pagination/) fall out naturally.
@@ -170,21 +170,21 @@ final hits = (query.search(text: text) ?? const <SearchResult>[]).map(
 
 ```graphql title="generated"
 query ($text: String!) {
-  search_1faojcn: search(text: $text) {
+  search_1f9qgg312ufxyv: search(text: $text) {
     __typename
     ... on Launch {
       id
-      name
+      name__Launch: name
       date
     }
     ... on Rocket {
       id
-      name
+      name__Rocket: name
       stages
     }
     ... on Astronaut {
       id
-      name
+      name__Astronaut: name
       agency
     }
   }

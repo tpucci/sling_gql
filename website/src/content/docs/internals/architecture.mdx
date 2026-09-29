@@ -44,9 +44,11 @@ Accessor.scalar('name')   client._doFlush()        cache.writeResponse()
 ### 1. `Selection` — the tree
 
 A `Selection` node is a field name, its arguments, and children. Its **alias** is
-`field` when there are no arguments, otherwise `field_<fnv1a(json(args))>`. The alias is
-used both as the GraphQL alias in the printed document and as the key in the cache, so the
-response can be merged without a lookup table.
+`field` when there are no arguments, otherwise `field_<fnv1a64(json(args))>` (64-bit
+FNV-1a of the canonical JSON — sorted keys, `null`s dropped — in base 36; computed on
+32-bit halves so web and native agree). The alias is used both as the GraphQL alias in the
+printed document and as the key in the cache, so the response can be merged without a
+lookup table (the one exception, fields repeated across fragments, is below).
 
 `PrintedOperation.from(root)` walks the tree, emits `alias: field(arg: $first)` lines, adds
 `__typename` to every object node (and `id` to keyed ones), and collects arguments into variables with their
