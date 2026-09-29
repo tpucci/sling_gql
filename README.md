@@ -93,7 +93,8 @@ with cursor pagination and a launch-status segment filter, and a **Me** tab
 showing the viewer profile and their favourite launches. It prints every
 GraphQL document it sends to the console and shows them in-app (antenna icon,
 top right). Server latency is `LATENCY_MS` (default 400 ms) so skeletons are
-visible.
+visible; the log screen also has a latency picker (an `x-mock-latency-ms`
+header per request) and a live view of the cache.
 
 Regenerate the example's schema classes after editing `mock-api/schema.graphql`:
 

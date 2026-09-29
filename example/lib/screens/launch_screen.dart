@@ -20,9 +20,32 @@ import '../widgets/status_icon.dart';
 ///   is optimistic (`launch.favorite = !favorite`), the response is normalized
 ///   into the same `Launch:<id>` entity, so the star on the list row behind
 ///   this screen updates too — nobody tells the list; it just reads the entity.
+/// - Rows open it with [LaunchScreen.open], which prefetches with
+///   `client.resolve` before pushing the route.
 class LaunchScreen extends StatefulWidget {
   const LaunchScreen({super.key, required this.id});
   final String id;
+
+  /// Pushes the detail screen for [id], starting its request first.
+  ///
+  /// `client.resolve` is the imperative query: it runs `prepare` on a
+  /// throwaway scope and fetches what the cache misses — here on tap, before
+  /// the route exists. The screen's own [QueryBuilder] builds a frame later,
+  /// finds the same fields in flight and waits for that request instead of
+  /// sending one: still one request, sent a frame earlier. Awaiting it
+  /// before `push` would open the screen fully populated instead (a route
+  /// "loader"), at the price of a tap that does nothing for a round trip.
+  static void open(BuildContext context, String id) {
+    SlingScope.of<Query>(context)
+        .resolve((query) {
+          final launch = query.launch(id: id);
+          if (launch != null) _LaunchScreenState.prepare(launch);
+        })
+        // The screen surfaces a failure itself (its scope gets the error).
+        .ignore();
+    Navigator.of(context)
+        .push(CupertinoPageRoute<void>(builder: (_) => LaunchScreen(id: id)));
+  }
 
   @override
   State<LaunchScreen> createState() => _LaunchScreenState();

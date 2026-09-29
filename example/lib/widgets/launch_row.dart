@@ -31,6 +31,7 @@ class LaunchRow extends StatelessWidget {
     // Read here so the row depends on `Launch:<id>.favorite` and rebuilds
     // when the detail screen's mutation updates the entity.
     final favorite = launch.favorite ?? false;
+    final id = launch.id;
 
     return CupertinoListTile(
       leading: launch.isSkeleton
@@ -56,13 +57,7 @@ class LaunchRow extends StatelessWidget {
           const CupertinoListTileChevron(),
         ],
       ),
-      onTap: launch.id == null
-          ? null
-          : () => Navigator.of(context).push(
-              CupertinoPageRoute<void>(
-                builder: (_) => LaunchScreen(id: launch.id!),
-              ),
-            ),
+      onTap: id == null ? null : () => LaunchScreen.open(context, id),
     );
   }
 }

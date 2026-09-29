@@ -181,11 +181,7 @@ class _HitTile extends StatelessWidget {
       trailing: launchId == null ? null : const CupertinoListTileChevron(),
       onTap: launchId == null
           ? null
-          : () => Navigator.of(context).push(
-              CupertinoPageRoute<void>(
-                builder: (_) => LaunchScreen(id: launchId),
-              ),
-            ),
+          : () => LaunchScreen.open(context, launchId),
     );
   }
 }

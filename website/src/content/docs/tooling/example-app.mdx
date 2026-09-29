@@ -1,6 +1,6 @@
 ---
 title: Example app
-description: A two-tab iOS app against the mock API — Launches list with a status filter, a Me profile screen with favourites, in-app network log, and request-counting tests.
+description: A two-tab iOS app against the mock API — Launches list with a status filter, a Me profile screen with favourites, in-app network log with latency and cache dev tools, and request-counting tests.
 ---
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
@@ -17,6 +17,7 @@ not asserted.
   - lib/
     - app.dart             `SlingApp`: dark theme + three-tab scaffold
     - main.dart            client + `SlingScope` setup
+    - mock_latency.dart    latency picker, sent as a request header
     - network_log.dart     records every `PrintedOperation`
     - theme.dart           dark palette constants + `slingTheme()`
     - screens/
@@ -26,6 +27,7 @@ not asserted.
       - me_screen.dart         viewer profile + favourites list
     - widgets/
       - launch_row.dart    shared row used by both tabs
+      - cache_stats.dart   live entity counts via `cache.onChange`
       - skeleton.dart      loading placeholders
     - generated/schema.dart  committed, generated — see Code generation
   - test/app_test.dart     the request-counting end-to-end tests
@@ -36,17 +38,25 @@ not asserted.
 ```dart title="example/lib/main.dart"
 void main() {
   final log = NetworkLog();
+  final latency = MockLatencyController();
+  final httpClient = http.Client();
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
     schema: slingSchema,
+    // The default, spelled out: `__typename` + `id` → one `Launch:<id>` entity.
+    cache: Cache(normalization: const Normalization(keyField: 'id')),
+    httpClient: httpClient,
+    transport: latency.transport(httpClient), // x-mock-latency-ms
     onOperation: log.add,
+    listRules: listRules,
+    subscriptionRetryAfter: const Duration(seconds: 3),
   );
 
   runApp(SlingScope<Query>(
     client: client,
-    child: NetworkLogScope(
-      log: log,
-      child: const SlingApp(),
+    child: MockLatencyScope(
+      latency: latency,
+      child: NetworkLogScope(log: log, child: const SlingApp()),
     ),
   ));
 }
@@ -54,6 +64,9 @@ void main() {
 
 `onOperation: log.add` is the only hook the app needs to capture every
 request — `SlingClient` calls it once per flushed operation, batched or not.
+The `cache:` line is what `schema: slingSchema` builds anyway (the code was
+generated with `--key-field id`); it is there to show where
+[`Normalization`](/sling_gql/guides/caching/) is configured.
 
 ## Tab structure
 
@@ -132,6 +145,29 @@ Pull-to-refresh always reflects the current server state.
 >   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
 >   is a `lookup` field that resolves straight to the entity. Only the fields
 >   the list never selected go over the wire (open the network log).
+
+Rows (Launches, Me and Search tabs) open it with `LaunchScreen.open`, which
+prefetches before pushing the route:
+
+```dart title="example/lib/screens/launch_screen.dart"
+static void open(BuildContext context, String id) {
+  SlingScope.of<Query>(context)
+      .resolve((query) {
+        final launch = query.launch(id: id);
+        if (launch != null) _LaunchScreenState.prepare(launch);
+      })
+      .ignore(); // the screen surfaces a failure itself
+  Navigator.of(context).push(
+    CupertinoPageRoute<void>(builder: (_) => LaunchScreen(id: id)),
+  );
+}
+```
+
+`client.resolve` is the imperative query: the request leaves on tap, before
+the route is built. The screen's own `QueryBuilder` builds a frame later, finds
+the same fields in flight and waits for that request — still one request.
+Awaiting `resolve` before `push` would open the screen fully populated
+instead, at the price of a tap that does nothing for a round trip.
 
 `prepare` is a static method, passed to `QueryBuilder.prepare`, that reads
 every field the screen might show — including the payload list that starts
@@ -271,6 +307,22 @@ tree; `NetworkLogButton` in the nav bar shows the running count and opens
 the whole debugging story for the PoC — no devtools extension, just "read
 what was actually sent."
 
+### Dev tools: latency and cache
+
+The top of `NetworkLogScreen` has two more tools:
+
+- **Mock API latency** — Server / Off / 500 ms / 2 s. `MockLatencyController`
+  (`mock_latency.dart`) is a `ValueNotifier` whose `transport(httpClient)`
+  adds an `x-mock-latency-ms` header to every request, which the mock API
+  honours over `LATENCY_MS` ("Server" sends no header). Pick 2 s, pull to
+  refresh or switch segments, and the skeletons stay on screen long enough
+  to look at. Subscriptions do not go through `transport`.
+- **Cache** — `CacheStats` (`widgets/cache_stats.dart`) counts the entities
+  per type in `client.cache.entityKeys` and the size of `cache.snapshot`
+  (what a persistence layer would store), and rebuilds on every
+  `cache.onChange` event, so the numbers move while the screens behind it
+  fetch, mutate or receive subscription events.
+
 ## Skeletons
 
 `widgets/skeleton.dart` is two widgets, and the comment on `SkeletonText`
@@ -310,7 +362,9 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
   and rebuilds only the list body; only `launches(first: 20, after: <new
   cursor>)` is new, so only that page is fetched.
 - **1 more request for the detail screen.** Opening a launch triggers
-  `prepare`, which selects everything the screen needs in one shot.
+  `prepare`, which selects everything the screen needs in one shot. The
+  request is already in the log right after the tap, before the route is
+  built (`LaunchScreen.open`'s `resolve`), and the screen adds none.
 - **0 requests to expand payloads.** `prepare` paid for them up front.
 
 ### Test 3 — subscriptions over SSE
@@ -347,6 +401,13 @@ without the `name` and `date` the hit already cached.
   new cache entry; the variable carries `{status: SUCCESS}`.
 - **0 requests switching back to All.** All pages are still in cache.
 - Every row in the Success segment shows the success icon.
+
+### Test 6 — dev tools
+
+Opening the log costs nothing; picking "2 s" makes the next request take at
+least two seconds (the header reached the server, whose `LATENCY_MS` is 400),
+and the entity count shown updates as that request writes `Launchpad`
+entities — through `cache.onChange`, without leaving the screen.
 
 <Aside type="note">
 The tests wait with `tester.pumpUntilSettled(client)` rather than

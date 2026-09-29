@@ -7,7 +7,9 @@ import 'package:sling_gql/sling_gql.dart';
 import 'package:sling_gql_example/app.dart';
 import 'package:sling_gql_example/generated/schema.dart';
 import 'package:sling_gql_example/list_rules.dart';
+import 'package:sling_gql_example/mock_latency.dart';
 import 'package:sling_gql_example/network_log.dart';
+import 'package:sling_gql_example/screens/launch_screen.dart';
 import 'package:sling_gql_example/widgets/launch_row.dart';
 import 'package:sling_gql_test/sling_gql_test.dart';
 
@@ -18,16 +20,21 @@ void main() {
   useRealNetwork();
 
   late NetworkLog log;
+  late MockLatencyController latency;
   late SlingClient<Query> client;
 
   setUp(() {
     log = NetworkLog();
+    latency = MockLatencyController(); // no header until a test picks one
+    final httpClient = http.Client();
     // Disposed after each test: keep-alive connections would otherwise be
     // reported as pending timers by the test binding.
     client = disposeAfterTest(
       SlingClient<Query>(
         endpoint: Uri.parse('http://localhost:4000/graphql'),
         schema: slingSchema,
+        httpClient: httpClient,
+        transport: latency.transport(httpClient),
         onOperation: log.add,
         listRules: listRules,
         subscriptionRetryAfter: const Duration(seconds: 3),
@@ -39,7 +46,10 @@ void main() {
     await tester.pumpWidget(
       SlingScope<Query>(
         client: client,
-        child: NetworkLogScope(log: log, child: const SlingApp()),
+        child: MockLatencyScope(
+          latency: latency,
+          child: NetworkLogScope(log: log, child: const SlingApp()),
+        ),
       ),
     );
     // CupertinoTabView wraps each tab in its own Navigator; that Navigator
@@ -103,13 +113,26 @@ void main() {
           )
           .data!;
       await tester.tap(tappedRow);
+      expect(
+        log.entries,
+        hasLength(3),
+        reason: 'LaunchScreen.open prefetched with client.resolve on tap',
+      );
+      expect(
+        find.byType(LaunchScreen),
+        findsNothing,
+        reason: 'the request left before the route was built',
+      );
       await settle(tester);
 
       expect(
         log.entries,
         hasLength(3),
-        reason: 'detail screen: exactly one request',
+        reason:
+            'detail screen: exactly one request (its QueryBuilder joined the '
+            'in-flight prefetch)',
       );
+      expect(find.byType(LaunchScreen), findsOneWidget);
       final detail = log.entries.first.document;
       expect(detail, contains('launch('));
       expect(
@@ -617,6 +640,61 @@ void main() {
         isNot(contains(RegExp(r'^    name$', multiLine: true))),
         reason: "the launch's name came with the hit",
       );
+    },
+  );
+  testWidgets(
+    'network log screen: the latency picker sets x-mock-latency-ms per '
+    'request; cache stats follow Cache.onChange live',
+    (tester) async {
+      await pumpApp(tester);
+      await settle(tester);
+
+      await tester.tap(find.byType(NetworkLogButton).hitTestable().first);
+      await settle(tester);
+      expect(log.entries, hasLength(1), reason: 'opening the log is free');
+
+      String stats() =>
+          tester.widget<Text>(find.byKey(const ValueKey('cache-stats'))).data!;
+      int typeCount(String type) =>
+          client.cache.entityKeys.where((k) => k.startsWith('$type:')).length;
+      final entitiesBefore = client.cache.entityKeys
+          .where((k) => k.contains(':'))
+          .length;
+      expect(stats(), startsWith('$entitiesBefore entities · snapshot '));
+      expect(typeCount('Launchpad'), 0, reason: 'the list never selects one');
+
+      expect(latency.value, MockLatency.serverDefault);
+      await tester.tap(find.text(MockLatency.twoSeconds.label));
+      await tester.pump();
+      expect(latency.value, MockLatency.twoSeconds);
+
+      // A request made now carries the header: the server waits 2 s instead
+      // of its LATENCY_MS.
+      final elapsed = await tester.runAsync(() async {
+        final stopwatch = Stopwatch()..start();
+        await client.resolve(
+          (q) => [for (final p in q.launchpads ?? const <Launchpad>[]) p.name],
+        );
+        return stopwatch.elapsed;
+      });
+      expect(
+        elapsed,
+        // A little slack for timer granularity; LATENCY_MS is 400.
+        greaterThanOrEqualTo(const Duration(milliseconds: 1900)),
+        reason: 'x-mock-latency-ms: 2000 was honoured',
+      );
+      expect(log.entries, hasLength(2));
+
+      // The open screen was told by onChange, no navigation needed.
+      await tester.pump();
+      final launchpads = typeCount('Launchpad');
+      expect(launchpads, greaterThan(0));
+      expect(
+        stats(),
+        startsWith('${entitiesBefore + launchpads} entities · snapshot '),
+      );
+      expect(find.textContaining('Launchpad $launchpads'), findsOneWidget);
+      expect(find.textContaining('change(s) since opened'), findsOneWidget);
     },
   );
 }

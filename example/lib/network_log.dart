@@ -2,6 +2,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:sling_gql/sling_gql.dart';
 
+import 'mock_latency.dart';
+import 'widgets/cache_stats.dart';
+
 /// Keeps every GraphQL document the client sent, newest first. The whole point
 /// of the PoC is to *see* what queries the widgets produce.
 ///
@@ -41,7 +44,8 @@ class NetworkLogScope extends InheritedNotifier<NetworkLog> {
       context.dependOnInheritedWidgetOfExactType<NetworkLogScope>()!.notifier!;
 }
 
-/// Nav-bar button showing the request count; taps open the log.
+/// Nav-bar button showing the request count; taps open the log (with the
+/// latency picker and cache stats on top).
 class NetworkLogButton extends StatelessWidget {
   const NetworkLogButton({super.key});
 
@@ -81,9 +85,12 @@ class NetworkLogScreen extends StatelessWidget {
       child: SafeArea(
         child: ListView.separated(
           padding: const EdgeInsets.all(12),
-          itemCount: log.entries.length + log.subscriptions.length,
+          // Dev tools on top, then the log.
+          itemCount: 1 + log.entries.length + log.subscriptions.length,
           separatorBuilder: (_, _) => const SizedBox(height: 16),
-          itemBuilder: (context, i) {
+          itemBuilder: (context, index) {
+            if (index == 0) return const _DevTools();
+            final i = index - 1;
             // Subscriptions first (they are open), then requests newest first.
             final isSubscription = i < log.subscriptions.length;
             final op = isSubscription
@@ -110,6 +117,31 @@ class NetworkLogScreen extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Mock latency (to watch skeletons) and a live view of the cache.
+class _DevTools extends StatelessWidget {
+  const _DevTools();
+
+  @override
+  Widget build(BuildContext context) {
+    final latency = MockLatencyScope.maybeOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (latency != null) ...[
+          const Text(
+            'Mock API latency',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          MockLatencyPicker(latency: latency),
+          const SizedBox(height: 16),
+        ],
+        const CacheStats(),
+      ],
     );
   }
 }
