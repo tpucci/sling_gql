@@ -29,7 +29,7 @@ npm start        # or: npm run dev  (restarts on file change)
 
 ```
 Mock GraphQL API ready at http://0.0.0.0:4000/graphql
-Artificial latency: 400ms per request
+Artificial latency: 400ms per request (override: x-mock-latency-ms header)
 ```
 
 Open [http://localhost:4000/graphql](http://localhost:4000/graphql) for
@@ -46,6 +46,12 @@ reaches the same `localhost:4000` unchanged.
 
 Turn latency up to actually *see* skeleton placeholders instead of a flash;
 turn it down (`LATENCY_MS=0`) to make widget tests fast.
+
+A single request can override it with an `x-mock-latency-ms` header
+(milliseconds; `0` for none, an invalid value falls back to `LATENCY_MS`). It
+is per request rather than server state, so clients and parallel tests never
+see each other's setting. The example app's latency picker sends it through
+`SlingClient(transport:)` — see [Example app](/sling_gql/tooling/example-app/#dev-tools-latency-and-cache).
 
 Every completed operation is logged to stdout as one line, root fields only:
 

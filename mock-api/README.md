@@ -26,6 +26,16 @@ GraphiQL: http://localhost:4000/graphql
 | `LATENCY_MS` | `400`   | Artificial delay awaited once per HTTP request.      |
 | `SEQUENCE_MS` | `4000` | Launch sequence step: `scheduleLaunch` → `IN_FLIGHT` after one step, `SUCCESS`/`FAILURE` after two (name containing "fail" fails), each published on `launchStatusChanged`. |
 
+A request can override `LATENCY_MS` for itself with an `x-mock-latency-ms`
+header (milliseconds, `0` for none; an invalid value falls back to
+`LATENCY_MS`). The example app's latency picker sends it; being per request,
+it never affects other clients or parallel tests.
+
+```sh
+curl -s localhost:4000/graphql -H 'content-type: application/json' \
+  -H 'x-mock-latency-ms: 2000' -d '{"query":"{ __typename }"}'
+```
+
 Each operation is logged to stdout as it completes, e.g.:
 
 ```
