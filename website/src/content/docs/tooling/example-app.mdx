@@ -6,8 +6,8 @@ description: A two-tab iOS app against the mock API — Launches list with a sta
 import { Aside, FileTree } from '@astrojs/starlight/components';
 
 `example/` is a small **iOS-only** Cupertino app (`flutter create
---platforms=ios`; don't add other platforms) built against the mock API. Two
-tabs — Launches and Me — plus an in-app log of every GraphQL document sent.
+--platforms=ios`; don't add other platforms) built against the mock API. Three
+tabs — Launches, Search and Me — plus an in-app log of every GraphQL document sent.
 Its purpose isn't to be a real app — it's to be something you can point at
 the network log and a widget test and see sling_gql's batching claims proven,
 not asserted.
@@ -15,13 +15,14 @@ not asserted.
 <FileTree>
 - example/
   - lib/
-    - app.dart             `SlingApp`: dark theme + two-tab scaffold
+    - app.dart             `SlingApp`: dark theme + three-tab scaffold
     - main.dart            client + `SlingScope` setup
     - network_log.dart     records every `PrintedOperation`
     - theme.dart           dark palette constants + `slingTheme()`
     - screens/
       - launches_screen.dart   paginated list + status segments
       - launch_screen.dart     detail + `toggleFavorite` mutation
+      - search_screen.dart     `search(text:)`: a union list via `when(...)`
       - me_screen.dart         viewer profile + favourites list
     - widgets/
       - launch_row.dart    shared row used by both tabs
@@ -56,12 +57,13 @@ request — `SlingClient` calls it once per flushed operation, batched or not.
 
 ## Tab structure
 
-`SlingApp` (in `app.dart`) is a `CupertinoTabScaffold` with two tabs:
+`SlingApp` (in `app.dart`) is a `CupertinoTabScaffold` with three tabs:
 
 | Index | Icon | Screen |
 | --- | --- | --- |
 | 0 | 🚀 | `LaunchesScreen` |
-| 1 | 👤 | `MeScreen` |
+| 1 | 🔍 | `SearchScreen` |
+| 2 | 👤 | `MeScreen` |
 
 The scaffold uses `CupertinoTabScaffold`'s lazy-build mechanism
 (`shouldBuildTab`), so the Me tab's `QueryBuilder` is not created — and no
@@ -236,6 +238,19 @@ toggles), but inserting or removing the launch from the paginated list would
 require a write policy. Pull-to-refresh (`state.refetch`) always shows the
 current server state. See the [roadmap](/sling_gql/internals/roadmap/).
 
+## Search tab
+
+`search_screen.dart` debounces a `CupertinoSearchTextField` and reads
+`query.search(text:)`, a `[SearchResult!]!` union of `Launch | Rocket |
+Astronaut`. Each hit goes through the generated `when(launch: …, rocket: …,
+astronaut: …)`, and each branch reads the fields its tile shows *inside the
+branch* into a plain `_Hit` record. On the skeleton every branch runs once, so
+the first build prints all three inline fragments and one request answers
+whatever comes back; a branch that only returned a widget reading its fields
+later would cost a round trip per type. Tapping a launch hit opens the detail
+screen, which finds the hit's `Launch:<id>` entity in cache. See
+[Querying](/sling_gql/guides/querying/#unions-and-interfaces).
+
 ## Network log
 
 `network_log.dart`'s `NetworkLog` is a `ChangeNotifier` that keeps every
@@ -315,6 +330,13 @@ appear on the detail screen — **0 requests** — and goes back: the launch is 
 and absent from "Scheduled" — still **0 requests**, both segments were cached and the
 [list rules](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities)
 moved it.
+
+### Test 5 — Search tab
+
+An empty field sends nothing; typing "al" sends **1 request** containing
+`... on Launch {`, `... on Rocket {` and `... on Astronaut {`, and renders 3
+launch, 1 rocket and 2 astronaut hits. Opening a launch hit sends **1** more,
+without the `name` and `date` the hit already cached.
 
 ### Test 2 — Me tab, Success segment
 

@@ -92,6 +92,16 @@ Design decisions worth knowing before changing things:
   yet" are told apart by `Accessor.isSkeleton` / `QueryState.hasMissingData`.
 - **Skeleton lists have exactly one element** so `.map((e) => e.name)` still
   records the element selection during the first build.
+- **Unions/interfaces are inline fragments.** `Accessor.on(typename, ctor,
+  keyed:)` records a fragment node (`Selection.fragment`, alias
+  `... on Type`, skipped by `aliasPath`) and returns an accessor at the
+  *same* cache path; `null` when the cached `__typename` differs, a skeleton
+  when the object is missing. `whenType` (behind the generated `when`) runs
+  every branch on a skeleton so one build records all fragments. Generated
+  `asType` getters + `when(...)` per `UNION`/`INTERFACE`; the hand-written
+  contract is at the top of `packages/sling_gql/test/fragments_test.dart`.
+  Aliases do not include the type, so same-named fields of conflicting types
+  in two fragments fail server validation (TODO #57).
 - **Normalization is driven by codegen flags.** `object(..., keyed: true)` /
   `list(..., keyed: true)` make the printer add `id` next to `__typename`;
   `object(..., lookup: 'Launch')` lets `launch(id:)` resolve to `Launch:<id>`
@@ -173,7 +183,8 @@ Design decisions worth knowing before changing things:
 
 Input: introspection JSON. Output: one Dart file. Rules are documented in the
 package README; the contract it must satisfy is the hand-written example at the
-top of `packages/sling_gql/test/core_test.dart`. If you change `Accessor`'s
+top of `packages/sling_gql/test/core_test.dart` (unions/interfaces:
+`packages/sling_gql/test/fragments_test.dart`). If you change `Accessor`'s
 helper signatures, update the generator **and** that test in the same change.
 
 The generator emits the `Mutation` root (with `.root`) and an

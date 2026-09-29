@@ -139,8 +139,8 @@ export const gqlSnippet = `query {
 
 <section class="landing-section">
   <h2>Proof-of-concept status</h2>
-  <p class="lead">Queries, the normalized cache, mutations and subscriptions are solid. Unions
-  are the roadmap, not a promise.</p>
+  <p class="lead">Queries, the normalized cache, mutations, subscriptions and unions are
+  solid. Persistence is the roadmap, not a promise.</p>
 
   | Capability | Status |
   | --- | --- |
@@ -153,7 +153,7 @@ export const gqlSnippet = `query {
   | Normalized cache (`__typename` + `id`), entity lookups, per-field rebuilds | <span class="pill pill-ok">done</span> |
   | Mutations (`client.mutate`, `MutationBuilder`, optimistic + rollback) | <span class="pill pill-ok">done</span> |
   | Subscriptions (`client.subscribe`, `SubscriptionBuilder`, SSE transport) | <span class="pill pill-ok">done</span> |
-  | Unions / interfaces (`$on`) | <span class="pill pill-no">not started</span> |
+  | Unions / interfaces (`asLaunch`, `when(...)`, inline fragments) | <span class="pill pill-ok">done</span> |
   | Fetch policies, `maxAge` stale-while-revalidate | <span class="pill pill-ok">done</span> |
   | Persistence adapters | <span class="pill pill-no">not started</span> |
 

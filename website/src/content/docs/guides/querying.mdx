@@ -143,6 +143,79 @@ query.launchesPage(limit: 10, offset: 0, filter: filter);
 `LaunchFilter` is a plain `const` class with a `toJson()` that omits `null`s. Nested inputs
 and lists of inputs are serialized recursively.
 
+## Unions and interfaces
+
+A field returning a union or an interface gives you an accessor for the abstract type.
+Each possible type is an `asType` getter (the inline fragment `... on Type`), and
+`when(...)` dispatches on `__typename`:
+
+```dart title="search_screen.dart (excerpt)"
+final hits = (query.search(text: text) ?? const <SearchResult>[]).map(
+  (hit) => hit.when(
+    launch: (l) {
+      final (name, date) = (l.name, l.date);
+      return _Hit(title: name, subtitle: date == null ? null : formatDate(date));
+    },
+    rocket: (r) {
+      final (name, stages) = (r.name, r.stages);
+      return _Hit(title: name, subtitle: '$stages stages');
+    },
+    astronaut: (a) {
+      final (name, agency) = (a.name, a.agency);
+      return _Hit(title: name, subtitle: agency);
+    },
+  ),
+);
+```
+
+```graphql title="generated"
+query ($text: String!) {
+  search_1faojcn: search(text: $text) {
+    __typename
+    ... on Launch {
+      id
+      name
+      date
+    }
+    ... on Rocket {
+      id
+      name
+      stages
+    }
+    ... on Astronaut {
+      id
+      name
+      agency
+    }
+  }
+}
+```
+
+- **On a skeleton, every branch runs** and the first branch's result is returned (it
+  renders from skeleton accessors, like any skeleton UI). That is how one build records all
+  three fragments and one request serves whichever types come back — the same trick as
+  one-element skeleton lists. Once the data is there only the matching branch runs, and
+  `orElse:` handles a type added to the schema after you generated (without it, `when`
+  returns `null`).
+- **Read what a branch shows inside the branch** (into locals, as above), not in a child
+  widget built from it: on the skeleton only the returned widget is built, so fields read
+  in the *other* branches' widgets would cost a second round trip.
+- **`asLaunch` is `null` for another type**, a skeleton `Launch` before data arrives. Use
+  it when you care about one member: `hit.asLaunch?.name`.
+- **Members are entities.** A keyed member (`Launch`, with an `id`) gets its `id` inside
+  its fragment and is normalized like anywhere else, so the detail screen opened from a
+  search hit finds `name` and `date` in cache. An interface declaring the key field
+  (`node(id:): Node`) selects `id` on the field itself; its own fields (`id`) are plain
+  getters next to the `asType` ones.
+
+<Aside type="caution" title="Same field name, different types">
+GraphQL rejects two fragments selecting the same response name with different types
+(`... on Launch { status }` is `LaunchStatus!`, `... on Launchpad { status }` is
+`String!`). sling_gql aliases fields by their arguments only, so reading both in one
+selection fails server-side validation. Read such a field in one branch per selection, or
+rename it in the schema.
+</Aside>
+
 ## Reusing selections ("fragments")
 
 A function that reads fields is a fragment. Call it from any widget or from `prepare`:

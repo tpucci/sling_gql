@@ -38,10 +38,15 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    [Subscriptions](/sling_gql/guides/subscriptions/). `MockGraphQLServer(subscription:)`
    takes `Stream`s. Left for later: reconnection policies, a `graphql-ws` transport.
 
-4. **Unions and interfaces (`$on`)**
+4. **Unions and interfaces** — done
 
-   Generator emits `PetOn get $on` with one getter per possible type; printer emits inline
-   fragments `... on Cat { meows }`. Add a union to the mock schema first.
+   The generator emits one accessor per union/interface with an `asType` getter per member
+   (`hit.asLaunch?.name`) and `when(launch: …, rocket: …, orElse: …)`; the printer emits
+   inline fragments `... on Launch { … }`, every branch recorded on the skeleton so one
+   request covers them all. Members normalize like any entity. The mock API has
+   `search(text:): [SearchResult!]!` and `node(id:): Node`; the example's Search tab uses
+   them — see [Querying](/sling_gql/guides/querying/#unions-and-interfaces). Left:
+   aliasing same-named fields of conflicting types across fragments.
 
 5. **Fine-grained rebuilds** — mostly done
 

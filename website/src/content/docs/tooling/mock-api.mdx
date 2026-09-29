@@ -124,6 +124,29 @@ type Query {
   stats: Stats!
   "The signed-in user (static in the mock)."
   me: Viewer!
+  "Launches, rockets and astronauts whose name contains `text`."
+  search(text: String!, first: Int = 20): [SearchResult!]!
+  "Any launch, rocket, launchpad or astronaut by id."
+  node(id: ID!): Node
+}
+```
+
+### Unions and interfaces
+
+`Launch`, `Rocket`, `Launchpad` and `Astronaut` implement `interface Node { id: ID! }`;
+`union SearchResult = Launch | Rocket | Astronaut`. `search(text:)` matches names
+case-insensitively (launches newest first, then rockets, then astronauts; the example's
+Search tab); `node(id:)` resolves any of the four by id. Both resolve the concrete type
+from the id prefix (`launch-`, `rocket-`, `pad-`, `astro-`):
+
+```graphql
+{
+  search(text: "al") {
+    __typename
+    ... on Launch { id name date }
+    ... on Rocket { id name stages }
+    ... on Astronaut { id name agency }
+  }
 }
 ```
 

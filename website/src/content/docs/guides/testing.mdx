@@ -99,8 +99,11 @@ counts the ones still open — assert `0` after the widget is gone. See
 
 <Aside type="note">
 The parser handles what the client prints — one operation, aliases,
-arguments as variables or literals, nested selections — and hand-written
-documents of the same shape. No fragments or directives.
+arguments as variables or literals, nested selections, inline fragments — and
+hand-written documents of the same shape. `... on Launch { }` applies to objects whose
+`__typename` is `Launch` (the mock has no schema, so a fragment on an interface never
+matches; the client only prints fragments on concrete types), and
+`request.selects('search.on Launch.name')` checks one. No named fragments or directives.
 </Aside>
 
 ## `pumpUntilSettled`

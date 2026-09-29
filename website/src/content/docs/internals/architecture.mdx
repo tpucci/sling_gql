@@ -56,6 +56,12 @@ different value in one operation gets a numeric suffix (`$first`, `$first2`). Ob
 without children — a list that was read but whose rows were not built — still print
 `{ __typename }` so the document is valid.
 
+An **inline fragment** is a node too (`Selection.fragment('Launch')`, alias
+`... on Launch`, which no field alias can spell): its children are fields of that
+concrete type, it prints as `... on Launch { id … }` (`id` when the member is keyed), and
+it adds nothing to cache paths — `aliasPath` skips it, and fields inside it read at the
+enclosing object's location.
+
 ### 2. `Cache` — entities, keyed by `__typename:id`
 
 A flat `Map<entityKey, fields>` where the operation roots (`ROOT_QUERY`) are entities too.
@@ -81,6 +87,8 @@ generated getter needs:
 | `scalarList<T>(field)` | leaf | `[null]` + `onMiss` |
 | `object(field, ctor, keyed:, lookup:)` | object node (+ `id`) | entity via `lookup`, else skeleton accessor + `onMiss` |
 | `list(field, ctor, keyed:)` | object node (+ `id`) | `[skeleton]` + `onMiss` |
+| `on(typename, ctor, keyed:)` | fragment node (+ `id`) | skeleton accessor (every member type); `null` for a cached object of another type |
+| `whenType(cases, orElse:)` | via the branches | runs *every* branch, returns the first's result |
 | `write(field, value)` | — | writes cache, `onWrite(CacheWrite)` (journaled during a mutation's optimistic phase) |
 
 `Recorder` is the interface an accessor talks to: the current operation, its selection

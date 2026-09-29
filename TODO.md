@@ -9,14 +9,15 @@ while building the normalized cache and mutations, and the roadmap (website
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · fine-grained rebuilds done but #54 ·
-~~expiry/SWR~~ · ~~subscriptions~~ · unions #31 · dev experience #46, #47 ·
+~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ (#57 left) · dev experience #46, #47 ·
 `gql_link` #48.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
-Per-row rebuilds (#19, #20) done. Suggested next picks: #31 (unions),
-#24/#25/#28 (small runtime/gen fixes), #17/#18 (read-path allocations).
+Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
+Suggested next picks: #24/#25/#28 (small runtime/gen fixes), #17/#18
+(read-path allocations), #57 (conflicting fields across fragments).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -53,10 +54,15 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     the last result.
 29. **Runtime — Partial mutation errors** write the resolved fields then
     reject; document the semantics or make it a policy.
-31. **Runtime/Gen — Unions & interfaces (`$on`).** Add one to the mock schema
-    first.
 33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
     two arg sets silently; consider 64-bit or include a length/checksum.
+
+57. **Runtime/Gen — Same response name, conflicting types across
+    fragments.** `... on Launch { status }` (`LaunchStatus!`) next to
+    `... on Launchpad { status }` (`String!`) fails GraphQL validation
+    (FieldsInSetCanMerge): aliases are derived from arguments only. Needs a
+    type-aware alias (the generator knows the field types) that still maps
+    back to the entity field name when writing to the cache.
 
 ## P4 — example app & tooling
 
@@ -134,6 +140,7 @@ Kept for number stability; see git history for details.
 19. Perf — Per-row rebuilds: `SlingRow(value, ctor: Launch.new, builder:)` over `RowScope` (`QueryScope.row`, own deps; misses/writes/selections go to the parent; freshness checks include rows' deps). Example `LaunchRow` is one.
 20. Perf — Inline containers compared structurally while merging (`_normalize` flags real changes): identical `stats`/`pageInfo`/lists touch nothing.
 53. Runtime — `SubscriptionBuilder<Subscription>` (`select` records once, opens post-frame, `SubscriptionState`), root from `SlingScope(schema:)` via `subscriptionRootOf`.
+31. Runtime/Gen — Unions & interfaces: `Selection.fragment` (inline fragments, transparent to cache paths), `Accessor.on`/`whenType`; generated `asType` getters + `when(...)` per `UNION`/`INTERFACE` (all branches recorded on the skeleton; keyed members and key-declaring interfaces normalize); `MockGraphQLServer` resolves `... on Type`; mock `Node` interface + `search: [SearchResult!]!` union, `node(id:)`; example Search tab + e2e test.
 
 ## Explicitly not planned
 
