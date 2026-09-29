@@ -19,8 +19,9 @@ Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
 Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
 and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 #27, #29, #38, #39, #40 done; P3 is empty. The example runs on the web and
-live on the website (#58, 2026-09-29). Suggested next picks: #59 (a live demo
-per concept), #22 (`gc()` trigger), #46 (request overlay).
+live on the website (#58), with a live demo in the batching, fetch-policies
+and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
+the other guides), #22 (`gc()` trigger), #46 (request overlay).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -35,15 +36,14 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-59. **Docs — A live demo after each concept** (builds on #58's
-    `LiveApp.astro` and `demo/` build). Demo routes in the example
-    (`#/demo/<concept>`), sources marked `// #region snippet`
-    and pulled into the MDX code blocks (shown code = running code, CI
-    proves it compiles), an Astro `<LiveDemo demo="..." />` component
-    (lazy iframe, reset-data button, side panel with the network log).
-    Start with three: batching/waterfalls, fetch policies + SWR, optimistic
-    mutation with rollback; then one per guide. Later: Flutter multi-view
-    embedding (one engine for all demos of a page) instead of iframes.
+60. **Docs — Live demos for the other guides** (after #59: add a widget
+    to `example/lib/demos/` with `// #region` markers, register it in
+    `demos.dart`, embed `<DemoSource>` + `<LiveApp demo>`, assert what the
+    guide says to try in `example/test/demos_test.dart`). Candidates:
+    loading states & sticky errors, pagination (`PaginatedQueryBuilder`),
+    caching (normalization, `SlingRow`), subscriptions. Later: Flutter
+    multi-view embedding (one engine for every demo of a page) instead of
+    one iframe each.
 
 ## P5 — docs & repo hygiene
 
@@ -126,6 +126,7 @@ Kept for number stability; see git history for details.
 33. Runtime — 64-bit FNV-1a aliases (`Selection.fnv1a64`, on 32-bit halves so web = native); all hashed aliases changed once (persisted caches, if any, start cold).
 
 58. Example — Web platform + in-browser mock API: `mock-api/app.mjs` (`createMockYoga`, Node-free) served by `server.mjs` and bundled from `browser.mjs` (`npm run build:browser` → `example/web/mock-api.js`); `example/lib/in_browser_api.dart` swaps the `http.Client` on web (queries, mutations, SSE streamed from the Fetch `Response`); `melos run build:web` → `website/public/demo/`; site page `guides/try-it` with `LiveApp.astro` (click-to-load iframe, restart); CI builds the web target, `website.yml` ships it.
+59. Docs — Live demo per concept: `example/lib/demos/` (`DemoHarness`: own client per run, request panel; `?demo=batching|fetch-policies|optimistic`), `DemoSource.astro` pulls `// #region` blocks into the guides (shown code = running code), `LiveApp demo=`; embedded in batching, fetch-policies and mutations guides; `example/test/demos_test.dart`. Found and fixed on the way: a builder saw the previous run's `isStale` / background `isLoading` (the scope now re-runs once when they change).
 
 ## Explicitly not planned
 

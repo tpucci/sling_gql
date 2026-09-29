@@ -57,6 +57,11 @@ on the code.
     web --base-href /sling_gql/demo/` and copies it to `website/public/demo/`
     (gitignored; `website.yml` does it before `astro build`). Keep
     `dart:io` out of the runtime and the example.
+    `lib/demos/` holds the small demos the guides embed (`?demo=<name>`,
+    `demos.dart`); the guides show their `// #region` blocks through
+    `website/src/components/DemoSource.astro`, so renaming or removing a
+    region breaks the site build. What each guide tells the reader to try
+    is asserted in `test/demos_test.dart`.
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
   `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,
@@ -189,6 +194,9 @@ Design decisions worth knowing before changing things:
   by `writeResponse(at:)` for every key a response writes, changed or not)
   and enqueues the whole selection when any is stale. All three go through
   `_errorBlocksFetch()` so a failing server never loops.
+  `isStale` and a background `isLoading` are only known after the body ran
+  (the builder saw the previous run's values): `run()` schedules one more
+  `onChanged` (microtask) when they differ from what the body saw.
 - **Notification is per entity field** (`Launch:launch-181.name`). Inline
   objects and lists notify at the granularity of the entity field that
   contains them.
