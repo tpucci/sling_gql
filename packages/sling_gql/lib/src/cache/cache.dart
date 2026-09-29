@@ -61,6 +61,16 @@ abstract class Cache {
   @internal
   Object? read(String operation, List<Object> path, {Set<String>? deps});
 
+  /// [read] of `[...path, field]` without allocating the joined path: the
+  /// accessors' hot path (one call per generated getter).
+  @internal
+  Object? readField(
+    String operation,
+    List<Object> path,
+    String field, {
+    Set<String>? deps,
+  });
+
   /// Writes an optimistic/manual value at a path, creating containers as
   /// needed. Returns the dependency keys touched.
   @internal
@@ -134,7 +144,13 @@ class NormalizedCache implements Cache {
   /// Set while a stamped [writeResponse] runs: every key written is added.
   Set<String>? _writing;
 
-  static String rootKey(String operation) => 'ROOT_${operation.toUpperCase()}';
+  static String rootKey(String operation) => switch (operation) {
+    // Constant for the three operations: `read` runs this on every getter.
+    'query' => 'ROOT_QUERY',
+    'mutation' => 'ROOT_MUTATION',
+    'subscription' => 'ROOT_SUBSCRIPTION',
+    _ => 'ROOT_${operation.toUpperCase()}',
+  };
   static bool isRootKey(String key) => key.startsWith('ROOT_');
 
   // ---------------------------------------------------------------------------
@@ -142,7 +158,33 @@ class NormalizedCache implements Cache {
   // ---------------------------------------------------------------------------
 
   @override
-  Object? read(String operation, List<Object> path, {Set<String>? deps}) {
+  Object? read(String operation, List<Object> path, {Set<String>? deps}) =>
+      _walk(operation, path, null, deps);
+
+  @override
+  Object? readField(
+    String operation,
+    List<Object> path,
+    String field, {
+    Set<String>? deps,
+  }) => _walk(operation, path, field, deps);
+
+  /// Interned dependency keys per `(entity, field)`: reads add the same
+  /// strings to scopes' deps build after build, so they are built once
+  /// (hash cached, identical on lookup) instead of on every read (#17).
+  final Map<String, Map<String, String>> _depKeys = {};
+
+  String _internedDep(String entity, String field) =>
+      (_depKeys[entity] ??= {})[field] ??= depKey(entity, field);
+
+  /// Walks [path] (then [last], when given) from the operation root.
+  /// Allocation-free: this runs once per generated getter.
+  Object? _walk(
+    String operation,
+    List<Object> path,
+    String? last,
+    Set<String>? deps,
+  ) {
     var start = 0;
     String entityKey;
     if (path.isNotEmpty && path.first is Ref) {
@@ -154,17 +196,22 @@ class NormalizedCache implements Cache {
 
     Object? node = _entities[entityKey];
     var atEntity = true;
-    for (var i = start; i < path.length; i++) {
-      final key = path[i];
+    final length = path.length;
+    final end = last == null ? length : length + 1;
+    for (var i = start; i < end; i++) {
+      final key = i < length ? path[i] : last!;
       if (node is Ref) {
         entityKey = node.key;
         node = _entities[entityKey];
         atEntity = true;
       }
       if (key is String) {
-        if (atEntity) deps?.add(depKey(entityKey, key));
-        if (node is! Map || !node.containsKey(key)) return missing;
-        node = node[key];
+        if (atEntity && deps != null) deps.add(_internedDep(entityKey, key));
+        if (node is! Map) return missing;
+        final value = node[key];
+        // One lookup on a hit; `containsKey` only to tell `null` from absent.
+        if (value == null && !node.containsKey(key)) return missing;
+        node = value;
       } else if (key is int) {
         if (node is! List || key >= node.length) return missing;
         node = node[key];
@@ -404,6 +451,7 @@ class NormalizedCache implements Cache {
   Set<String> evict(String key) {
     final touched = <String>{};
     final removed = _entities.remove(key);
+    _depKeys.remove(key);
     if (removed == null) return touched;
     for (final field in removed.keys) {
       final dep = depKey(key, field);
@@ -468,7 +516,10 @@ class NormalizedCache implements Cache {
       mark(_entities[key]);
     }
     final dead = _entities.keys.where((k) => !live.contains(k)).toSet();
-    dead.forEach(_entities.remove);
+    for (final key in dead) {
+      _entities.remove(key);
+      _depKeys.remove(key);
+    }
     return dead;
   }
 
@@ -534,6 +585,7 @@ class NormalizedCache implements Cache {
         for (final field in e.value.keys) depKey(e.key, field),
     };
     _entities.clear();
+    _depKeys.clear();
     _fetchedAt.clear();
     _emit(touched);
   }

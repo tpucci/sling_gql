@@ -21,8 +21,8 @@ class Arg {
 /// arguments so that the same field queried with different arguments can live
 /// side by side in one document *and* in the cache.
 class Selection {
-  Selection._(this.field, this.args, this.parent)
-    : alias = _aliasFor(field, args),
+  Selection._(this.field, this.args, this.parent, [String? alias])
+    : alias = alias ?? _aliasFor(field, args),
       typeCondition = null;
 
   Selection._fragment(String typename, this.parent)
@@ -53,6 +53,11 @@ class Selection {
 
   final Map<String, Selection> _children = {};
 
+  /// Arg-bearing children by structural value of their (non-null) arguments,
+  /// so a rebuild finds `launches(first: 10)` again without re-running
+  /// `jsonEncode` + FNV on a freshly allocated args map (#18).
+  Map<_ArgsKey, Selection>? _byArgs;
+
   /// Set when the field was accessed as an object or list of objects. Such a
   /// node must be printed with braces even if no sub-field was read yet.
   bool isObject = false;
@@ -77,8 +82,18 @@ class Selection {
   }
 
   Selection child(String field, [Map<String, Arg> args = const {}]) {
+    if (args.isEmpty) {
+      return _children[field] ??= Selection._(field, args, this, field);
+    }
+    final key = _ArgsKey(field, args);
+    final byArgs = _byArgs ??= {};
+    final known = byArgs[key];
+    if (known != null) return known;
     final alias = _aliasFor(field, args);
-    return _children.putIfAbsent(alias, () => Selection._(field, args, this));
+    return byArgs[key] = _children.putIfAbsent(
+      alias,
+      () => Selection._(field, args, this, alias),
+    );
   }
 
   /// Like [child], flagged as an object selection. [keyField] marks the
@@ -176,6 +191,82 @@ class Selection {
 
   @override
   String toString() => 'Selection($alias, children: ${_children.keys})';
+}
+
+/// Lookup key for an arg-bearing child: the field name plus the non-null
+/// argument values, compared deeply (JSON-like values: maps, lists, scalars).
+/// Argument order does not matter; `null` arguments are ignored, as in the
+/// alias.
+class _ArgsKey {
+  _ArgsKey(this.field, this.args) : hashCode = _hashArgs(field, args);
+
+  final String field;
+  final Map<String, Arg> args;
+
+  @override
+  final int hashCode;
+
+  static int _hashArgs(String field, Map<String, Arg> args) {
+    var h = 0;
+    for (final e in args.entries) {
+      final v = e.value.value;
+      // Order-independent over entries.
+      if (v != null) h = (h + Object.hash(e.key, _deepHash(v))) & 0x3fffffff;
+    }
+    return Object.hash(field, h);
+  }
+
+  static int _deepHash(Object? v) => switch (v) {
+    List() => Object.hashAll(v.map(_deepHash)),
+    Map() => v.entries.fold(
+      0,
+      (h, e) => (h + Object.hash(e.key, _deepHash(e.value))) & 0x3fffffff,
+    ),
+    _ => v.hashCode,
+  };
+
+  static bool _deepEquals(Object? a, Object? b) {
+    if (identical(a, b)) return true;
+    if (a is List && b is List) {
+      if (a.length != b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!_deepEquals(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (a is Map && b is Map) {
+      if (a.length != b.length) return false;
+      for (final e in a.entries) {
+        if (!b.containsKey(e.key) || !_deepEquals(e.value, b[e.key])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (a is List || a is Map || b is List || b is Map) return false;
+    // `1 == 1.0` in Dart but they print differently in JSON (and alias
+    // differently): keep them apart.
+    if (a is num && b is num) return a == b && (a is int) == (b is int);
+    return a == b;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! _ArgsKey || other.hashCode != hashCode) return false;
+    if (other.field != field) return false;
+    var count = 0;
+    for (final e in args.entries) {
+      final v = e.value.value;
+      if (v == null) continue;
+      count++;
+      if (!_deepEquals(v, other.args[e.key]?.value)) return false;
+    }
+    var otherCount = 0;
+    for (final a in other.args.values) {
+      if (a.value != null) otherCount++;
+    }
+    return count == otherCount;
+  }
 }
 
 /// Prints a selection tree as an operation document, collecting arguments as

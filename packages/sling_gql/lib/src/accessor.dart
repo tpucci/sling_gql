@@ -88,10 +88,12 @@ abstract class Accessor {
         keyed ? recorder.cache.normalization.selectedKeyField : null,
       );
 
-  Object? _read(Selection sel) => recorder.cache.read(recorder.operation, [
-    ...path,
+  Object? _read(Selection sel) => recorder.cache.readField(
+    recorder.operation,
+    path,
     sel.alias,
-  ], deps: recorder.deps);
+    deps: recorder.deps,
+  );
 
   /// True when the cache holds a value for [field] on this object —
   /// including an explicit server `null` — false when it was never fetched.
@@ -105,7 +107,7 @@ abstract class Accessor {
   /// (see `QueryState.error`) also reads as not fetched here.
   bool isFetched(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
-    return recorder.cache.read(recorder.operation, [...path, sel.alias]) !=
+    return recorder.cache.readField(recorder.operation, path, sel.alias) !=
         missing;
   }
 
@@ -136,13 +138,35 @@ abstract class Accessor {
   /// usually `String`) is converted to a richer Dart type [T] by [parse].
   /// Backs both [enumValue] and a generator `--scalar` mapping (e.g.
   /// `DateTime`). Same miss/skeleton semantics as [scalar].
+  ///
+  /// Parsed values are memoized per `(parse, wire value)`, so a rebuild does
+  /// not re-run `DateTime.parse` for every row (it cost more than all other
+  /// reads of a list row together): [parse] must be pure and its results
+  /// should be immutable, since equal wire values share one instance.
   T? scalarAs<T, W>(
     String field,
     T Function(W) parse, {
     Map<String, Arg>? args,
   }) {
     final raw = scalar<W>(field, args: args);
-    return raw == null ? null : parse(raw);
+    return raw == null ? null : _parseMemoized(parse, raw);
+  }
+
+  static final Map<Function, Map<Object, Object?>> _parsed = {};
+
+  static T _parseMemoized<T, W>(T Function(W) parse, W raw) {
+    var memo = _parsed[parse];
+    if (memo == null) {
+      if (_parsed.length >= 64) _parsed.clear(); // non-canonical closures
+      memo = _parsed[parse] = <Object, Object?>{};
+    }
+    final key = raw as Object;
+    final hit = memo[key];
+    if (hit != null || memo.containsKey(key)) return hit as T;
+    if (memo.length >= 4096) memo.clear();
+    final value = parse(raw);
+    memo[key] = value;
+    return value;
   }
 
   /// Reads a list of such values (see [scalarAs]). Same miss/skeleton
@@ -153,7 +177,9 @@ abstract class Accessor {
     Map<String, Arg>? args,
   }) {
     final raw = scalarList<W>(field, args: args);
-    return raw?.map((e) => e == null ? null : parse(e)).toList();
+    return raw
+        ?.map((e) => e == null ? null : _parseMemoized(parse, e))
+        .toList();
   }
 
   /// Reads an enum field: the cached wire `String` mapped through [parse]
@@ -162,7 +188,12 @@ abstract class Accessor {
     String field,
     T Function(String) parse, {
     Map<String, Arg>? args,
-  }) => scalarAs<T, String>(field, parse, args: args);
+  }) {
+    // Not memoized: the generated `fromGraphQL` is a switch, as cheap as a
+    // lookup.
+    final raw = scalar<String>(field, args: args);
+    return raw == null ? null : parse(raw);
+  }
 
   /// Reads a list of enums, mapping each wire `String` through [parse].
   /// Same miss/skeleton semantics as [scalarList].
@@ -240,10 +271,12 @@ abstract class Accessor {
 
   /// `__typename` of this object in cache, or [missing] (skeleton). Records
   /// the dependency, so a scope rebuilds if the object changes type.
-  Object? _cachedTypename() => recorder.cache.read(recorder.operation, [
-    ...path,
+  Object? _cachedTypename() => recorder.cache.readField(
+    recorder.operation,
+    path,
     '__typename',
-  ], deps: recorder.deps);
+    deps: recorder.deps,
+  );
 
   /// Views this object as the concrete type [typename] (the inline fragment
   /// `... on Typename`): fields read through the result are selected inside
