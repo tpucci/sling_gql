@@ -31,11 +31,14 @@ class Hit extends Accessor {
 class Person extends Accessor {
   Person(super.recorder, super.selection, super.path);
   String? get name => scalar<String>('name');
+  // `kind: PersonKind!` (an enum) vs `Place.kind: String` (#57).
+  String? get kind => scalar<String>('kind');
 }
 
 class Place extends Accessor {
   Place(super.recorder, super.selection, super.path);
   String? get city => scalar<String>('city');
+  String? get kind => scalar<String>('kind');
 }
 
 void main() {
@@ -65,5 +68,27 @@ void main() {
       'id': 'p1',
       'name': 'Ada',
     });
+  });
+
+  test('a field repeated across fragments round-trips (#57)', () async {
+    final server = MockGraphQLServer(
+      query: {
+        'hits': [
+          {'__typename': 'Person', 'id': 'p1', 'kind': 'HUMAN'},
+          {'__typename': 'Place', 'city': 'Turin', 'kind': 'city'},
+        ],
+      },
+    );
+    final client = server.client(Q.root);
+
+    final out = await client.resolve(
+      (q) => q.hits!
+          .map((h) => h.when(person: (p) => p.kind, place: (p) => p.kind))
+          .toList(),
+    );
+    expect(out, ['HUMAN', 'city']);
+    expect(server.lastRequest.document, contains('kind__Person: kind'));
+    expect(server.lastRequest.document, contains('kind__Place: kind'));
+    expect(client.cache.entity('Person:p1')?['kind'], 'HUMAN');
   });
 }
