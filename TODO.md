@@ -17,7 +17,8 @@ Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
 Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
-done. Suggested next picks: #26/#33 (key/alias collisions).
+and key/alias collisions (#26, #33) done. Suggested next picks: #27
+(unused `writeResponse` selection), #29 (partial mutation errors).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -32,15 +33,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P3 — runtime configurability & correctness
 
-26. **Runtime — `depKey` uses `'.'` as separator**; an id containing
-    `.fieldname` could collide (only causes an extra rebuild, never a missed
-    one). Use a non-printable separator or a record key.
 27. **Runtime — `Cache.writeResponse` takes an unused `selection`
     parameter.** Either use it (typed merge policies) or drop it.
 29. **Runtime — Partial mutation errors** write the resolved fields then
     reject; document the semantics or make it a policy.
-33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
-    two arg sets silently; consider 64-bit or include a length/checksum.
 
 ## P4 — example app & tooling
 
@@ -125,6 +121,8 @@ Kept for number stability; see git history for details.
 18. Perf — `Selection.child`: no-args fast path, arg-bearing children memoized by structural args key (`_ArgsKey`, deep equality, order-free, nulls ignored, `10` ≠ `10.0`), `jsonEncode` + FNV only on a node's first creation.
 28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
 57. Runtime — Same response name across fragments: printed `<alias>__<Type>: field` per fragment when repeated (type-free, conservative), `PrintedOperation.toCacheKeys` maps responses back (merging direct + fragment selections) after error pruning, for queries, mutations and subscriptions.
+26. Runtime — `depKey` separator: not a bug — cache field aliases never contain `.`, so `entity.field` splits unambiguously at the last dot; documented on `depKey`, test with dotted ids.
+33. Runtime — 64-bit FNV-1a aliases (`Selection.fnv1a64`, on 32-bit halves so web = native); all hashed aliases changed once (persisted caches, if any, start cold).
 
 ## Explicitly not planned
 
