@@ -271,11 +271,113 @@ class _ArgsKey {
 
 /// Prints a selection tree as an operation document, collecting arguments as
 /// variables.
+///
+/// A field is printed under its [Selection.alias] (the cache key) except
+/// when the same alias is selected in two inline fragments of one object, or
+/// in a fragment and directly on the object: GraphQL requires fields sharing
+/// a response name to have the same shape (FieldsInSetCanMerge), and
+/// `... on Launch { status }` (an enum) next to `... on Launchpad { status }`
+/// (a `String`) does not. Each fragment occurrence is then printed as
+/// `<alias>__<Type>: field`, and [toCacheKeys] maps the response back to the
+/// aliases before it is cached, so the entity field is still `status`.
 class PrintedOperation {
-  PrintedOperation(this.document, this.variables);
+  PrintedOperation(this.document, this.variables) : _keys = null;
+
+  PrintedOperation._(this.document, this.variables, this._keys);
 
   final String document;
   final Map<String, Object?> variables;
+
+  /// Response keys that differ from their cache alias, per object; `null`
+  /// when the document prints every field under its alias.
+  final _ResponseKeys? _keys;
+
+  /// True when some field is printed under a response key other than its
+  /// cache alias (see the class comment).
+  bool get renamesFields => _keys != null;
+
+  /// [data] (a response's `data`, with the document's response keys) with
+  /// every renamed key mapped back to its cache alias. Returns [data] itself
+  /// when nothing was renamed. Values selected both directly and through a
+  /// renamed fragment field are merged.
+  Map<String, Object?> toCacheKeys(Map<String, Object?> data) {
+    final keys = _keys;
+    return keys == null ? data : _remapObject(data, keys);
+  }
+
+  static Object? _remapValue(Object? value, _ResponseKeys? keys) => keys == null
+      ? value
+      : switch (value) {
+          Map() => _remapObject(value, keys),
+          List() => [for (final e in value) _remapValue(e, keys)],
+          _ => value,
+        };
+
+  static Map<String, Object?> _remapObject(Map data, _ResponseKeys keys) {
+    final out = <String, Object?>{};
+    for (final MapEntry(:key, :value) in data.entries) {
+      final k = key as String;
+      final mapped = keys.fields[k];
+      final alias = mapped?.alias ?? k;
+      final v = mapped == null ? value : _remapValue(value, mapped.sub);
+      out[alias] = out.containsKey(alias) ? _merge(out[alias], v) : v;
+    }
+    return out;
+  }
+
+  /// Deep merge of two responses for the same field (one selected directly,
+  /// one through a renamed fragment field): same objects, different subsets
+  /// of fields.
+  static Object? _merge(Object? a, Object? b) {
+    if (a is Map && b is Map) {
+      final out = <String, Object?>{...a.cast<String, Object?>()};
+      for (final MapEntry(:key, :value) in b.entries) {
+        final k = key as String;
+        out[k] = out.containsKey(k) ? _merge(out[k], value) : value;
+      }
+      return out;
+    }
+    if (a is List && b is List && a.length == b.length) {
+      return [for (var i = 0; i < a.length; i++) _merge(a[i], b[i])];
+    }
+    return b ?? a;
+  }
+
+  /// Fields inside the fragments of [object] that must be printed under a
+  /// type-qualified response key: their alias is also selected directly on
+  /// [object] or in another fragment. The key field a keyed fragment prints
+  /// and `__typename` are never renamed (the cache needs them verbatim).
+  static Map<Selection, String> _fragmentKeys(Selection object) {
+    final direct = <String>{'__typename', ?object.keyField};
+    final counts = <String, int>{};
+    final fields = <(Selection, String)>[];
+    var hasFragments = false;
+    void walk(Selection node, String? typename) {
+      if (typename != null) {
+        hasFragments = true;
+        if (node.keyField case final k?) counts[k] = (counts[k] ?? 0) + 1;
+      }
+      for (final c in node.children) {
+        if (c.isFragment) {
+          walk(c, c.typeCondition);
+        } else if (typename == null) {
+          direct.add(c.alias);
+        } else if (c.field != '__typename' &&
+            !(c.field == node.keyField && c.args.isEmpty)) {
+          fields.add((c, typename));
+          counts[c.alias] = (counts[c.alias] ?? 0) + 1;
+        }
+      }
+    }
+
+    walk(object, null);
+    if (!hasFragments) return const {};
+    return {
+      for (final (c, typename) in fields)
+        if (direct.contains(c.alias) || counts[c.alias]! > 1)
+          c: '${c.alias}__$typename',
+    };
+  }
 
   static PrintedOperation from(Selection root) {
     final variables = <String, Object?>{};
@@ -302,30 +404,54 @@ class PrintedOperation {
       return name;
     }
 
-    String printNode(Selection node, int depth) {
-      final indent = '  ' * depth;
-      final buf = StringBuffer(indent);
-      if (node.isFragment) {
-        // `__typename` is already selected on the enclosing object.
-        buf.writeln('... on ${node.typeCondition} {');
+    final out = StringBuffer();
+    late final _ResponseKeys? Function(Selection, int, String) printField;
+
+    _ResponseKeys? printSet(Selection object, int depth) {
+      final renames = _fragmentKeys(object);
+      _ResponseKeys? keys;
+
+      void body(Selection node, int depth) {
+        final indent = '  ' * depth;
+        // A fragment's `__typename` is already selected on the object.
+        if (!node.isFragment && !node.isRoot) {
+          out.writeln('${indent}__typename');
+        }
         final keyField = node.keyField;
-        if (keyField != null) buf.writeln('$indent  $keyField');
+        if (keyField != null) out.writeln('$indent$keyField');
         for (final c in node.children) {
+          // The key field is already printed above; skip a plain duplicate.
           if (c.field == keyField && c.args.isEmpty) continue;
-          buf.writeln(printNode(c, depth + 1));
+          if (c.isFragment) {
+            out.writeln('$indent... on ${c.typeCondition} {');
+            body(c, depth + 1);
+            if (c.isLeaf && c.keyField == null) {
+              out.writeln('$indent  __typename'); // no empty selection sets
+            }
+            out.writeln('$indent}');
+            continue;
+          }
+          final key = renames[c] ?? c.alias;
+          final sub = printField(c, depth, key);
+          if (key != c.alias || sub != null) {
+            (keys ??= _ResponseKeys()).fields[key] = (alias: c.alias, sub: sub);
+          }
         }
-        if (node.isLeaf && keyField == null) {
-          buf.writeln('$indent  __typename'); // no empty selection sets
-        }
-        buf.write('$indent}');
-        return buf.toString();
       }
-      if (node.alias != node.field) buf.write('${node.alias}: ');
-      buf.write(node.field);
+
+      body(object, depth);
+      return keys;
+    }
+
+    printField = (Selection node, int depth, String key) {
+      final indent = '  ' * depth;
+      out.write(indent);
+      if (key != node.field) out.write('$key: ');
+      out.write(node.field);
       final args = node.args.entries.where((e) => e.value.value != null);
       if (args.isNotEmpty) {
-        buf.write('(');
-        buf.write(
+        out.write('(');
+        out.write(
           args
               .map((e) {
                 final name = nameFor(e.key, e.value.value, e.value.graphqlType);
@@ -333,27 +459,29 @@ class PrintedOperation {
               })
               .join(', '),
         );
-        buf.write(')');
+        out.write(')');
       }
-      if (!node.isLeaf || node.isObject) {
-        buf.writeln(' {');
-        buf.writeln('$indent  __typename');
-        final keyField = node.keyField;
-        if (keyField != null) buf.writeln('$indent  $keyField');
-        for (final c in node.children) {
-          // The key field is already printed above; skip a plain duplicate.
-          if (c.field == keyField && c.args.isEmpty) continue;
-          buf.writeln(printNode(c, depth + 1));
-        }
-        buf.write('$indent}');
+      if (node.isLeaf && !node.isObject) {
+        out.writeln();
+        return null;
       }
-      return buf.toString();
-    }
+      out.writeln(' {');
+      final sub = printSet(node, depth + 1);
+      out.writeln('$indent}');
+      return sub;
+    };
 
-    final body = root.children.map((c) => printNode(c, 1)).join('\n');
+    final keys = printSet(root, 1);
+    final body = out.toString().trimRight();
     final header = varDefs.isEmpty
         ? root.field
         : '${root.field} (${varDefs.join(', ')})';
-    return PrintedOperation('$header {\n$body\n}', variables);
+    return PrintedOperation._('$header {\n$body\n}', variables, keys);
   }
+}
+
+/// Response keys of one object's fields that need remapping: renamed ones
+/// (see [PrintedOperation]) and object fields with renames further down.
+final class _ResponseKeys {
+  final Map<String, ({String alias, _ResponseKeys? sub})> fields = {};
 }

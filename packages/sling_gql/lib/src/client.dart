@@ -1232,7 +1232,7 @@ class SlingSubscription<T> {
     final touched = _client.cache.writeResponse(
       'subscription',
       _scope.root,
-      data,
+      operation.toCacheKeys(data),
       at: _client._now(),
     );
     _client._notify(touched);
@@ -1910,7 +1910,10 @@ class SlingClient<Q extends Accessor> {
         graphqlErrors: errors,
       );
     }
-    return (cache.writeResponse(operation, tree, data, at: _now()), error);
+    return (
+      cache.writeResponse(operation, tree, op.toCacheKeys(data), at: _now()),
+      error,
+    );
   }
 
   /// Removes the value at a GraphQL error `path` (aliases and list indices)

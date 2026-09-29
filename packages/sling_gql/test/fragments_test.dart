@@ -73,6 +73,8 @@ class User extends Accessor {
   String? get id => scalar<String>('id');
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
+  // `status: UserStatus!` — an enum — while `Bot.status` is a `String` (#57).
+  String? get status => scalar<String>('status');
 }
 
 class Bot extends Accessor {
@@ -80,6 +82,7 @@ class Bot extends Accessor {
 
   String? get id => scalar<String>('id');
   String? get model => scalar<String>('model');
+  String? get status => scalar<String>('status');
 }
 
 class Note extends Accessor {
@@ -317,5 +320,164 @@ query (\$id: ID!) {
       PrintedOperation.from(a).document,
     );
     expect(PrintedOperation.from(b).document, contains('... on User {'));
+  });
+
+  group('same field in several fragments (#57)', () {
+    test('printed type-qualified, cached under the field alias', () async {
+      final h = Harness(
+        (_) => {
+          searchAlias: [
+            {'__typename': 'User', 'id': 'u1', 'status__User': 'ACTIVE'},
+            {'__typename': 'Bot', 'id': 'b1', 'status__Bot': 'idle'},
+          ],
+        },
+      );
+      String? status(SearchResult r) =>
+          r.when<String?>(user: (u) => u.status, bot: (b) => b.status);
+
+      final out = await h.client.resolve(
+        (q) => q.search(text: 'a')!.map(status).toList(),
+      );
+      expect(out, ['ACTIVE', 'idle']);
+      expect(h.sent.single.document, '''
+query (\$text: String!) {
+  $searchAlias: search(text: \$text) {
+    __typename
+    ... on User {
+      id
+      status__User: status
+    }
+    ... on Bot {
+      id
+      status__Bot: status
+    }
+  }
+}''');
+      expect(h.sent.single.renamesFields, isTrue);
+      final cache = h.client.cache;
+      expect(cache.read('query', [Ref('User:u1'), 'status']), 'ACTIVE');
+      expect(cache.read('query', [Ref('Bot:b1'), 'status']), 'idle');
+    });
+
+    test('a field in one fragment only keeps its plain name', () {
+      final root = Selection.root('query');
+      final pinned = root.objectChild('pinned');
+      pinned.fragment('User', 'id').child('name');
+      pinned.fragment('Bot', 'id').child('model');
+      final op = PrintedOperation.from(root);
+      expect(op.renamesFields, isFalse);
+      final data = <String, Object?>{'pinned': <String, Object?>{}};
+      expect(identical(op.toCacheKeys(data), data), isTrue);
+    });
+
+    test('direct and fragment selections of one field are merged', () {
+      final root = Selection.root('query');
+      final node = root.objectChild('node');
+      node.objectChild('owner').child('a');
+      node.fragment('User').objectChild('owner').child('b');
+      final op = PrintedOperation.from(root);
+      expect(op.document, '''
+query {
+  node {
+    __typename
+    owner {
+      __typename
+      a
+    }
+    ... on User {
+      owner__User: owner {
+        __typename
+        b
+      }
+    }
+  }
+}''');
+      expect(
+        op.toCacheKeys({
+          'node': {
+            '__typename': 'User',
+            'owner': {'__typename': 'O', 'a': 1},
+            'owner__User': {'__typename': 'O', 'b': 2},
+          },
+        }),
+        {
+          'node': {
+            '__typename': 'User',
+            'owner': {'__typename': 'O', 'a': 1, 'b': 2},
+          },
+        },
+      );
+    });
+
+    test('renames below lists and nested objects are mapped back', () {
+      final root = Selection.root('query');
+      final item = root.objectChild('items').objectChild('inner');
+      item.fragment('User').child('status');
+      item.fragment('Bot').child('status');
+      final op = PrintedOperation.from(root);
+      expect(
+        op.toCacheKeys({
+          'items': [
+            {
+              'inner': {'__typename': 'User', 'status__User': 'A'},
+            },
+            {
+              'inner': {'__typename': 'Bot', 'status__Bot': 'b'},
+            },
+            {'inner': null},
+          ],
+        }),
+        {
+          'items': [
+            {
+              'inner': {'__typename': 'User', 'status': 'A'},
+            },
+            {
+              'inner': {'__typename': 'Bot', 'status': 'b'},
+            },
+            {'inner': null},
+          ],
+        },
+      );
+    });
+
+    test(
+      'a partial error at a renamed path is pruned before caching',
+      () async {
+        final client = SlingClient<Query>(
+          endpoint: Uri.parse('http://test/graphql'),
+          rootFactory: Query.root,
+          httpClient: MockClient(
+            (req) async => http.Response(
+              jsonEncode({
+                'data': {
+                  'pinned': {
+                    '__typename': 'User',
+                    'id': 'u1',
+                    'status__User': null,
+                  },
+                },
+                'errors': [
+                  {
+                    'message': 'boom',
+                    'path': ['pinned', 'status__User'],
+                  },
+                ],
+              }),
+              200,
+            ),
+          ),
+        );
+        final scope = client.createScope(onChanged: () {});
+        scope.run((q) => (q.pinned?.asUser?.status, q.pinned?.asBot?.status));
+        await scope.whenSettled;
+        expect(scope.error, isNotNull);
+        expect(
+          client.cache.read('query', [Ref('User:u1'), 'status']),
+          missing,
+          reason: 'the errored null is not a real null',
+        );
+      },
+    );
   });
 }
