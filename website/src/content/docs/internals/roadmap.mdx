@@ -45,9 +45,11 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
 
 5. **Fine-grained rebuilds** — mostly done
 
-   Scopes now rebuild on `entity.field` intersection instead of root aliases. Remaining:
-   list-index granularity for inline lists, and skipping rebuilds when a written value is
-   equal to the cached one inside inline objects.
+   Scopes rebuild on `entity.field` intersection instead of root aliases; inline objects
+   and lists are compared structurally, so identical responses touch nothing; `SlingRow`
+   gives a list row its own dependency set, so a write to one entity rebuilds that row, not
+   the list (see [Caching](/sling_gql/guides/caching/#per-row-rebuilds-slingrow)).
+   Remaining: list-index granularity for inline lists.
 
 6. **Cache expiry and SWR** — done
 

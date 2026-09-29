@@ -245,6 +245,44 @@ write returns the keys it touched. A scope rebuilds when the two intersect, so:
 
 This is what replaced the coarse root-alias intersection of the first PoC iteration.
 
+A key is touched only when its value **changed**. That includes inline objects and lists
+(`stats`, `pageInfo`, a connection without an `id`): they are compared structurally as
+they are merged, so a refetch that returns the same `pageInfo` rebuilds nobody who reads
+it. A changed field inside a referenced entity touches that entity's key
+(`Launch:launch-181.name`), not the list holding the reference.
+
+### Per-row rebuilds: `SlingRow`
+
+The unit of rebuilding is the **scope**, and a `QueryBuilder` is one scope. Rows that are
+plain child widgets record their reads there too, so a write to one launch rebuilds the
+whole list — every visible row included. Wrap the row in a `SlingRow` to give it its own
+dependency set:
+
+```dart
+SliverList.builder(
+  itemCount: launches.length,
+  itemBuilder: (context, i) => SlingRow(
+    launches[i],
+    ctor: Launch.new, // the generated constructor tear-off
+    builder: (context, launch) => LaunchTile(
+      name: launch.name,
+      favorite: launch.favorite ?? false,
+    ),
+  ),
+)
+```
+
+The row still fetches through the list's request (misses go to the enclosing
+`QueryBuilder`, which also keeps the loading and error state), but the keys it reads
+(`Launch:launch-181.favorite`) are its own: toggling a favourite, a subscription event or
+an optimistic setter rebuilds that row only. The list keeps depending on the list itself,
+so adding and removing rows works as before. Read the row's fields through the accessor
+the builder receives; reads through the parent's copy still land on the parent. The
+example's `LaunchRow` is built this way.
+
+`SlingRow` is worth it for long lists and busy entities (live status updates); a short
+screen that rebuilds as a whole is cheaper to write and just as fast.
+
 ## Persistence hooks
 
 Reads are synchronous — they happen inside `build()` — so the store is in memory and stays
