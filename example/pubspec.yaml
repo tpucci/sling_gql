@@ -1,5 +1,5 @@
 name: sling_gql_example
-description: "sling_gql example — SpaceX GraphQL, iOS only."
+description: "sling_gql example — SpaceX GraphQL, iOS and web."
 publish_to: none
 version: 1.0.0+1
 
@@ -15,6 +15,7 @@ dependencies:
   http: ^1.2.0
   sling_gql:
     path: ../packages/sling_gql
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

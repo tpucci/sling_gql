@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Built from ../mock-api (npm run build:browser)
+/web/mock-api.js

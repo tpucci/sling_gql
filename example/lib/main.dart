@@ -1,21 +1,22 @@
 import 'package:flutter/cupertino.dart';
-import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
 
 import 'app.dart';
 import 'generated/schema.dart';
+import 'in_browser_api.dart';
 import 'list_rules.dart';
 import 'mock_latency.dart';
 import 'network_log.dart';
 
 /// The mock API in `../mock-api` (`npm start`). The iOS simulator shares the
-/// host network, so `localhost` works as-is.
+/// host network, so `localhost` works as-is. On the web the same URL is
+/// answered by the mock API bundled into the page (`in_browser_api.dart`).
 const endpoint = 'http://localhost:4000/graphql';
 
 void main() {
   final log = NetworkLog();
   final latency = MockLatencyController();
-  final httpClient = http.Client();
+  final httpClient = mockApiHttpClient();
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
     schema: slingSchema, // roots + key field, from the generator

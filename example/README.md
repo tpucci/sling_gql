@@ -1,13 +1,22 @@
 # sling_gql example
 
-An iOS-only Cupertino app (Launches, Search and Me tabs) against the mock API
-in `../mock-api`. The full tour is on the website:
-[Example app](https://tpucci.github.io/sling_gql/tooling/example-app/).
+A Cupertino app (Launches, Search and Me tabs) for iOS and web, against the
+mock API in `../mock-api`. The full tour is on the website:
+[Example app](https://tpucci.github.io/sling_gql/tooling/example-app/); the
+web build runs there: [Try it live](https://tpucci.github.io/sling_gql/guides/try-it/).
 
 ```sh
+# iOS: against `npm start` on localhost:4000
 cd ../mock-api && npm install && npm start   # http://localhost:4000/graphql
 cd ../example && flutter run -d <ios-simulator>
+
+# Web: the mock API is bundled into the page (web/mock-api.js, not committed)
+cd ../mock-api && npm install && npm run build:browser
+cd ../example && flutter run -d chrome
 ```
+
+`lib/in_browser_api.dart` is the only platform switch: a plain `http.Client`
+on iOS, one that answers from the in-page mock API on the web.
 
 Worth a look:
 
