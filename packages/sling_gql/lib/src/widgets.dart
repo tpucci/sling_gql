@@ -443,8 +443,10 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 ///
 /// `mutate` resolves to the body's value, or to `null` when the call fails —
 /// it never throws; the exception is in [MutationState.error] (the optimistic
-/// writes are already rolled back). Tell a failure from a `null` result by
-/// `state.error`, or call `client.mutate` directly to get the exception.
+/// writes are already rolled back). A partial GraphQL error is a failure too,
+/// though the fields that resolved are cached (see `SlingClient.mutateWith`).
+/// Tell a failure from a `null` result by `state.error`, or call
+/// `client.mutate` directly to get the exception.
 class MutationBuilder<M extends Accessor> extends StatefulWidget {
   const MutationBuilder({super.key, this.root, required this.builder});
 

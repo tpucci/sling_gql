@@ -1655,6 +1655,16 @@ class SlingClient<Q extends Accessor> {
   /// journaled and undone if the mutation fails. Generated code exposes this
   /// as `client.mutate(...)` with the schema's `Mutation` type bound.
   ///
+  /// Any GraphQL error fails the call, partial ones included (`data` *and*
+  /// `errors`): the future rejects with a [SlingException] carrying
+  /// [SlingException.graphqlErrors], [body] is not run again and
+  /// [refetchQueries] are not refetched. The cache still takes what the
+  /// server resolved: the optimistic writes are undone first, then the
+  /// resolved fields are written over them (the server's values win), while
+  /// errored paths are pruned and keep their pre-mutation value. Widgets
+  /// showing the resolved entities rebuild as on success. An HTTP or
+  /// transport error, or a response without `data`, writes nothing.
+  ///
   /// [refetchQueries] names root **query** field names (`'me'`, `'launches'`
   /// — not aliases, so arguments and aliasing do not matter) to refetch once
   /// the mutation has succeeded and written its response: every live
@@ -1694,7 +1704,13 @@ class SlingClient<Q extends Accessor> {
     SlingException? error;
     _mutationsInFlight++;
     try {
-      (touched, error) = await _send('mutation', op);
+      final Map<String, Object?> data;
+      (data, error) = await _receive(op);
+      // Partial failure: undo the optimistic writes *before* writing the
+      // fields that resolved, so the server's values win over the rollback.
+      final undone = error == null ? const <String>{} : _rollback(journal);
+      touched = cache.writeResponse('mutation', data, at: _now());
+      touched = touched.union(undone);
     } catch (e) {
       _notify(_rollback(journal));
       rethrow;
@@ -1703,7 +1719,8 @@ class SlingClient<Q extends Accessor> {
       _checkIdle();
     }
     if (error != null) {
-      _notify(touched.union(_rollback(journal)));
+      _removeMutationRoot(scope.root);
+      _notify(touched);
       throw error;
     }
     _notify(touched);
@@ -1718,12 +1735,16 @@ class SlingClient<Q extends Accessor> {
     }
 
     final result = body(root(scope));
-    // The payload lives on in the entities it referenced; the root fields
-    // would only pin them in memory.
-    for (final alias in scope.root.childAliases) {
+    _removeMutationRoot(scope.root);
+    return result;
+  }
+
+  /// The payload lives on in the entities it referenced; the root fields
+  /// would only pin them in memory.
+  void _removeMutationRoot(Selection root) {
+    for (final alias in root.childAliases) {
       cache.remove('mutation', [alias]);
     }
-    return result;
   }
 
   List<CacheWrite>? _journal;
@@ -1888,12 +1909,21 @@ class SlingClient<Q extends Accessor> {
     }
   }
 
-  /// POSTs [op] and writes `data` under [operation]'s root. On partial
-  /// failure the fields that resolved are kept, the `null`s the server put at
-  /// errored paths are pruned (they are not real nulls), and the error is
-  /// returned alongside the touched keys.
+  /// POSTs [op] and writes `data` under [operation]'s root; see [_receive]
+  /// for partial failures.
   Future<(Set<String>, SlingException?)> _send(
     String operation,
+    PrintedOperation op,
+  ) async {
+    final (data, error) = await _receive(op);
+    return (cache.writeResponse(operation, data, at: _now()), error);
+  }
+
+  /// POSTs [op] and returns `data` keyed by cache aliases. On partial failure
+  /// the fields that resolved are kept, the `null`s the server put at errored
+  /// paths are pruned (they are not real nulls), and the error is returned
+  /// alongside.
+  Future<(Map<String, Object?>, SlingException?)> _receive(
     PrintedOperation op,
   ) async {
     final (data, errors) = await _post(op);
@@ -1907,10 +1937,7 @@ class SlingClient<Q extends Accessor> {
         graphqlErrors: errors,
       );
     }
-    return (
-      cache.writeResponse(operation, op.toCacheKeys(data), at: _now()),
-      error,
-    );
+    return (op.toCacheKeys(data), error);
   }
 
   /// Removes the value at a GraphQL error `path` (aliases and list indices)
