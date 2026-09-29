@@ -1,3 +1,8 @@
+## 0.1.2
+
+ - **FEAT**(sling_gql_gen): emit unions and interfaces ([#31](https://github.com/tpucci/sling_gql/issues/31)). ([c0553a6d](https://github.com/tpucci/sling_gql/commit/c0553a6d6fd304d82489231c3390b8b4645c3ea2))
+ - **FEAT**(sling_gql_gen): emit the Subscription root and client.subscribe. ([93c2af75](https://github.com/tpucci/sling_gql/commit/93c2af750352033d3025d6cd19263f24710609e1))
+
 ## 0.1.1
 
 - `example/README.md`: schema → CLI → generated output walkthrough, shown on the pub.dev Example tab.
