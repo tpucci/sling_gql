@@ -14,7 +14,7 @@ void main() {
   final log = NetworkLog();
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
-    rootFactory: Query.root,
+    schema: slingSchema, // roots + key field, from the generator
     onOperation: log.add,
     listRules: listRules,
     // A dropped subscription (server restarted) reopens itself.
@@ -24,7 +24,6 @@ void main() {
   runApp(
     SlingScope<Query>(
       client: client,
-      schema: slingSchema,
       child: NetworkLogScope(log: log, child: const SlingApp()),
     ),
   );

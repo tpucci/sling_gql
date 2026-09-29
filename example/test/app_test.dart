@@ -27,7 +27,7 @@ void main() {
     client = disposeAfterTest(
       SlingClient<Query>(
         endpoint: Uri.parse('http://localhost:4000/graphql'),
-        rootFactory: Query.root,
+        schema: slingSchema,
         onOperation: log.add,
         listRules: listRules,
         subscriptionRetryAfter: const Duration(seconds: 3),
@@ -39,7 +39,6 @@ void main() {
     await tester.pumpWidget(
       SlingScope<Query>(
         client: client,
-        schema: slingSchema,
         child: NetworkLogScope(log: log, child: const SlingApp()),
       ),
     );

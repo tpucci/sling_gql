@@ -190,10 +190,13 @@ extension SlingSubscriptions on SlingClient<Query> {
   }) => subscribeWith(Subscription.root, body, retryAfter: retryAfter);
 }
 
+/// Pass to `SlingClient(schema: slingSchema)`: query/mutation/subscription
+/// roots and the key field this file was generated with.
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
   subscription: Subscription.root,
+  keyField: 'id',
 );
 
 /// Typed, non-fetching cache access for this schema's keyed types:
