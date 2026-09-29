@@ -42,6 +42,22 @@ Each operation is logged to stdout as it completes, e.g.:
 [14:03:21] query launches, stats  (401ms)
 ```
 
+## In the browser
+
+| File | Role |
+| --- | --- |
+| `app.mjs` | `createMockYoga({typeDefs, latencyMs, sequenceMs})`: the yoga instance, no Node APIs. |
+| `server.mjs` | Node: reads `schema.graphql`, env vars, serves `app.mjs` over `node:http`. |
+| `browser.mjs` | Browser: `globalThis.slingMockApi.fetch(url, init)`. |
+
+```sh
+npm run build:browser   # browser.mjs (schema inlined) -> ../example/web/mock-api.js
+```
+
+The example's web build loads the bundle and sends every request to it (no
+server; each tab has its own data). Keep `resolvers.mjs` / `data.mjs` free of
+Node-only APIs (`Buffer`, `process`, `fs`).
+
 ## Schema highlights
 
 ### `Viewer` and `me`

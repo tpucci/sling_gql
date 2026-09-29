@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
-    "introspect": "node introspect.mjs"
+    "introspect": "node introspect.mjs",
+    "build:browser": "esbuild browser.mjs --bundle --format=iife --platform=browser --target=es2022 --minify --loader:.graphql=text --outfile=../example/web/mock-api.js"
   },
   "keywords": [],
   "author": "",
@@ -15,5 +16,8 @@
   "dependencies": {
     "graphql": "^17.0.2",
     "graphql-yoga": "^5.24.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

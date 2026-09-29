@@ -16,20 +16,20 @@ import {
 
 // ---------------------------------------------------------------------------
 // Launch sequence: what makes subscriptions worth watching. A scheduled
-// launch lifts off and lands on its own, one status step per SEQUENCE_MS.
+// launch lifts off and lands on its own, one status step per `sequenceMs`
+// (from the context, see app.mjs; SEQUENCE_MS in Node).
 // ---------------------------------------------------------------------------
 
-const SEQUENCE_MS = Number(process.env.SEQUENCE_MS ?? 4000);
-
-function runLaunchSequence(launch, pubsub) {
+function runLaunchSequence(launch, pubsub, sequenceMs) {
   const step = (status) => {
     updateLaunchStatusData(launch.id, status);
     pubsub.publish("launchStatusChanged", { launchStatusChanged: launch });
     console.log(`[${new Date().toTimeString().slice(0, 8)}] sequence ${launch.name}: ${status}`);
   };
   const outcome = launch.name.toLowerCase().includes("fail") ? "FAILURE" : "SUCCESS";
-  setTimeout(() => step("IN_FLIGHT"), SEQUENCE_MS).unref();
-  setTimeout(() => step(outcome), SEQUENCE_MS * 2).unref();
+  // `unref` exists in Node only (browser timers are plain numbers).
+  setTimeout(() => step("IN_FLIGHT"), sequenceMs).unref?.();
+  setTimeout(() => step(outcome), sequenceMs * 2).unref?.();
 }
 
 // ---------------------------------------------------------------------------
@@ -109,13 +109,14 @@ function applyLaunchOrder(list, orderBy) {
 }
 
 function encodeCursor(index) {
-  return Buffer.from(`cursor:${index}`, "utf8").toString("base64");
+  // btoa/atob (ASCII-only here) rather than Buffer: runs in the browser too.
+  return btoa(`cursor:${index}`);
 }
 
 function decodeCursor(cursor) {
   let decoded;
   try {
-    decoded = Buffer.from(cursor, "base64").toString("utf8");
+    decoded = atob(cursor);
   } catch {
     throw new GraphQLError(`Invalid cursor: ${cursor}`);
   }
@@ -268,7 +269,7 @@ export const resolvers = {
       return launch;
     },
 
-    scheduleLaunch: (_root, { input }, { pubsub }) => {
+    scheduleLaunch: (_root, { input }, { pubsub, sequenceMs }) => {
       if (!findRocket(input.rocketId)) {
         throw new GraphQLError(`Unknown rocket id: ${input.rocketId}`);
       }
@@ -277,7 +278,7 @@ export const resolvers = {
       }
       const launch = scheduleLaunchData(input);
       pubsub.publish("launchScheduled", { launchScheduled: launch });
-      runLaunchSequence(launch, pubsub);
+      runLaunchSequence(launch, pubsub, sequenceMs);
       return launch;
     },
 
