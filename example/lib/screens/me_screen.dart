@@ -36,8 +36,9 @@ class MeScreen extends StatelessWidget {
             final name = me?.name;
             final agency = me?.agency;
             final count = me?.favoriteCount;
-            // Each row is a LaunchRow child widget; its reads are recorded in
-            // this scope too, so the whole tab is one request.
+            // Each row is a LaunchRow (a SlingRow): its reads join this scope's
+            // request, so the whole tab is one request, but a favourite
+            // toggled elsewhere rebuilds only that row.
             final favorites = me?.favorites ?? const <Launch>[];
 
             if (state.error != null) {

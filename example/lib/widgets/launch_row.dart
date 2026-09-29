@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:sling_gql/sling_gql.dart';
 
 import '../date_format.dart';
 import '../generated/schema.dart';
@@ -11,12 +12,19 @@ import 'status_icon.dart';
 ///
 /// All fields are read unconditionally so a single build records every
 /// dependency (no waterfall).
+///
+/// The row is a [SlingRow]: its reads are fetched in the list's request, but
+/// they are *its* dependencies — favouriting one launch (or a live status
+/// event) rebuilds that row only, not the whole list.
 class LaunchRow extends StatelessWidget {
   const LaunchRow(this.launch, {super.key});
   final Launch launch;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SlingRow(launch, ctor: Launch.new, builder: _build);
+
+  Widget _build(BuildContext context, Launch launch) {
     final status = launch.status;
     final date = launch.date;
     final rocketName = launch.rocket?.name;
