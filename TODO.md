@@ -9,15 +9,15 @@ while building the normalized cache and mutations, and the roadmap (website
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · fine-grained rebuilds done but #54 ·
-~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ (#57 left) · dev experience #46, #47 ·
+~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · dev experience #46, #47 ·
 `gql_link` #48.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
-Read-path allocations (#17, #18) done. Suggested next picks: #57
-(conflicting fields across fragments), #26/#33 (key/alias collisions).
+Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
+done. Suggested next picks: #26/#33 (key/alias collisions).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -41,13 +41,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     reject; document the semantics or make it a policy.
 33. **Runtime — 32-bit FNV alias.** Collision is theoretical but would merge
     two arg sets silently; consider 64-bit or include a length/checksum.
-
-57. **Runtime/Gen — Same response name, conflicting types across
-    fragments.** `... on Launch { status }` (`LaunchStatus!`) next to
-    `... on Launchpad { status }` (`String!`) fails GraphQL validation
-    (FieldsInSetCanMerge): aliases are derived from arguments only. Needs a
-    type-aware alias (the generator knows the field types) that still maps
-    back to the entity field name when writing to the cache.
 
 ## P4 — example app & tooling
 
@@ -131,6 +124,7 @@ Kept for number stability; see git history for details.
 17. Perf — Read path: `Cache.readField` (no `[...path, alias]` per getter), dep keys interned per `(entity, field)`, constant `rootKey`, single map lookup per step, `scalarAs` memoizes parsed values per `(parse, wire value)` (`DateTime.parse` was ~⅓ of a warm list build). Bench warm build 720 → 330 ns/read; bench now reports best of 5 rounds. A per-accessor location memo (`Expando`) was measured slower and dropped; object accessors still copy their path.
 18. Perf — `Selection.child`: no-args fast path, arg-bearing children memoized by structural args key (`_ArgsKey`, deep equality, order-free, nulls ignored, `10` ≠ `10.0`), `jsonEncode` + FNV only on a node's first creation.
 28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
+57. Runtime — Same response name across fragments: printed `<alias>__<Type>: field` per fragment when repeated (type-free, conservative), `PrintedOperation.toCacheKeys` maps responses back (merging direct + fragment selections) after error pruning, for queries, mutations and subscriptions.
 
 ## Explicitly not planned
 

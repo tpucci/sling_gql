@@ -109,8 +109,10 @@ Design decisions worth knowing before changing things:
   every branch on a skeleton so one build records all fragments. Generated
   `asType` getters + `when(...)` per `UNION`/`INTERFACE`; the hand-written
   contract is at the top of `packages/sling_gql/test/fragments_test.dart`.
-  Aliases do not include the type, so same-named fields of conflicting types
-  in two fragments fail server validation (TODO #57).
+  A field read in two fragments of one object (or a fragment and directly)
+  is printed `<alias>__<Type>: field` per fragment (GraphQL requires one
+  shape per response name); `PrintedOperation.toCacheKeys` maps the response
+  back to aliases after error pruning, before `writeResponse` (#57).
 - **Normalization is driven by codegen flags.** `object(..., keyed: true)` /
   `list(..., keyed: true)` make the printer add `id` next to `__typename`;
   `object(..., lookup: 'Launch')` lets `launch(id:)` resolve to `Launch:<id>`
