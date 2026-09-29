@@ -16,22 +16,15 @@ Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
-Suggested next picks: #17/#18
-(read-path allocations), #57 (conflicting fields across fragments).
+Read-path allocations (#17, #18) done. Suggested next picks: #57
+(conflicting fields across fragments), #26/#33 (key/alias collisions).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
 
-## P2 — performance follow-ups (measured: 506 ns/read, 38× raw maps)
+## P2 — performance follow-ups (measured: ~330 ns/read, ~25× raw maps)
 
-17. **Perf — Allocation per read.** Each getter allocates `[...path, alias]`,
-    a `'$entity.$field'` dep string, and an empty args map in `_aliasFor`.
-    Intern dep keys per `(entity, field)`, give accessors a parent pointer
-    instead of a copied path, skip the map when `args` is empty.
-18. **Perf — Alias hashing on every build.** Arg-bearing fields re-run
-    `jsonEncode` + FNV on every `child()` call. Cache the alias on the
-    `Selection` node / memoize per args map identity.
 21. **Perf — `snapshot` is a full deep copy** and `onChange` fires per write;
     persistence adapters will need debouncing and incremental snapshots.
 22. **Perf — `gc()` is manual.** Entities dropped from a replaced list stay
@@ -135,6 +128,8 @@ Kept for number stability; see git history for details.
 31. Runtime/Gen — Unions & interfaces: `Selection.fragment` (inline fragments, transparent to cache paths), `Accessor.on`/`whenType`; generated `asType` getters + `when(...)` per `UNION`/`INTERFACE` (all branches recorded on the skeleton; keyed members and key-declaring interfaces normalize); `MockGraphQLServer` resolves `... on Type`; mock `Node` interface + `search: [SearchResult!]!` union, `node(id:)`; example Search tab + e2e test.
 24. Runtime — `QueryBuilder(scheduler:)` (default `frameEndScheduler`); when `microtaskScheduler` fits documented in `guides/batching-and-waterfalls`.
 25. Runtime/Gen — `slingSchema` carries `keyField` (always emitted, `SlingSchema<Query, Accessor>` without a Mutation type); `SlingClient(schema:)` supplies `rootFactory` + default cache normalization, asserts on a mismatching `cache:`; `SlingScope` falls back to `client.schema`.
+17. Perf — Read path: `Cache.readField` (no `[...path, alias]` per getter), dep keys interned per `(entity, field)`, constant `rootKey`, single map lookup per step, `scalarAs` memoizes parsed values per `(parse, wire value)` (`DateTime.parse` was ~⅓ of a warm list build). Bench warm build 720 → 330 ns/read; bench now reports best of 5 rounds. A per-accessor location memo (`Expando`) was measured slower and dropped; object accessors still copy their path.
+18. Perf — `Selection.child`: no-args fast path, arg-bearing children memoized by structural args key (`_ArgsKey`, deep equality, order-free, nulls ignored, `10` ≠ `10.0`), `jsonEncode` + FNV only on a node's first creation.
 28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
 
 ## Explicitly not planned
