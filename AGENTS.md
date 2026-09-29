@@ -13,6 +13,15 @@ on the code.
   `mock-api/schema.graphql` is the **contract**; change it there, then
   `npm run introspect` and regenerate the Dart classes (below). The example
   widget tests (`example/test/app_test.dart`) need the server running.
+  The mock API keeps its state in memory and the e2e tests mutate it
+  (scheduled launches, favourites), so a long-running server drifts
+  (e.g. `totalCount` 187 instead of 181) and `app_test.dart` fails on
+  counts. `scripts/with-mock-api.mjs` *reuses* a server already on :4000.
+  When the example tests fail on data/counts and a server was already
+  running, restart it (kill the `npm start` / `node server.mjs` on :4000,
+  rerun the tests so the script starts a fresh one, then restart
+  `npm start` in `mock-api/` in the background if one was running before)
+  — don't treat it as a code regression.
 - `website/` — Astro + Starlight docs site, deployed to GitHub Pages by
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
