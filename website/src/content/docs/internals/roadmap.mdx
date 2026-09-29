@@ -87,12 +87,12 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    [Transport](/sling_gql/guides/transport/)). Left: a `gql_link` adapter for auth headers, retries and persisted queries, without changing
    the runtime's `_post` contract.
 
-9. **Live docs** — planned
+9. **Live docs** — in progress
 
-   The example app gains a web build and runs on this site, with the mock API executing in
-   your browser (the same resolvers as the Node server, called through
-   `SlingClient(transport:)`), so every visitor gets their own data and the site stays
-   static. First the whole app on one "Try it" page; then a runnable demo after each
+   Done: the example app has a web build that runs on this site —
+   [Try it live](/sling_gql/guides/try-it/) — with the mock API executing in your browser
+   (the same resolvers as the Node server, behind the app's `http.Client`), so every
+   visitor gets their own data and the site stays static. Next: a runnable demo after each
    concept, whose code block is the demo's source — starting with batching, fetch
    policies and optimistic mutations.
 

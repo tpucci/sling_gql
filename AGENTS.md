@@ -22,6 +22,11 @@ on the code.
   rerun the tests so the script starts a fresh one, then restart
   `npm start` in `mock-api/` in the background if one was running before)
   — don't treat it as a code regression.
+  The yoga instance lives in `app.mjs` (`createMockYoga`, no Node APIs);
+  `server.mjs` serves it over `node:http`, `browser.mjs` exposes it as
+  `globalThis.slingMockApi` and `npm run build:browser` bundles that to
+  `example/web/mock-api.js` (gitignored) for the example's web build. Keep
+  `resolvers.mjs` / `data.mjs` free of `Buffer`/`process`/`fs`.
 - `website/` — Astro + Starlight docs site, deployed to GitHub Pages by
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
@@ -44,9 +49,14 @@ on the code.
     `pumpUntilSettled` (on `SlingClient.isIdle`/`whenIdle`),
     `useRealNetwork`, `disposeAfterTest`. Tests: `flutter test`. Prefer it
     over hand-rolled `MockClient` + alias regexes in new tests.
-  - `example` — Flutter app, **iOS only** today (`flutter create --platforms=ios`).
-    Web is approved and tracked as TODO #58 (in-browser mock API, live on the
-    website); add it only as part of that item. No other platforms.
+  - `example` — Flutter app, **iOS and web** (no other platforms). On the web
+    `lib/in_browser_api.dart` (conditional import, the only platform switch)
+    swaps the `http.Client` for one answering from the in-page mock API, so
+    the site's "Try it live" page needs no server. `melos run build:web`
+    (`scripts/build-web-demo.mjs`) bundles the mock API, runs `flutter build
+    web --base-href /sling_gql/demo/` and copies it to `website/public/demo/`
+    (gitignored; `website.yml` does it before `astro build`). Keep
+    `dart:io` out of the runtime and the example.
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
   `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,
@@ -76,7 +86,8 @@ on the code.
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
   `example/lib/generated/schema.dart` unchanged, example tests against the
-  mock API, website build. `website.yml` deploys the docs on push to `main`.
+  mock API, the example's web build, website build. `website.yml` builds the
+  web demo and deploys the docs on push to `main`.
 - The example talks to `http://localhost:4000/graphql` (iOS simulator shares
   the host network). Its introspection is snapshotted in
   `example/graphql/schema.json`.

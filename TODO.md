@@ -18,9 +18,9 @@ pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API s
 Per-row rebuilds (#19, #20) done. Unions & interfaces (#31) done.
 Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
 and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
-#27, #29, #38, #39, #40 done; P3 is empty. Decided: the example also
-targets web, to run live on the website (#58, then #59). Suggested next
-picks: #58 (example on the web), #22 (`gc()` trigger), #46 (request overlay).
+#27, #29, #38, #39, #40 done; P3 is empty. The example runs on the web and
+live on the website (#58, 2026-09-29). Suggested next picks: #59 (a live demo
+per concept), #22 (`gc()` trigger), #46 (request overlay).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -35,32 +35,9 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-58. **Example — Run the example on the web, live on the website (v1,
-    start simple).** Decided: the example gets a `web` platform (next to
-    iOS; no other platforms), and the mock API runs *in the visitor's
-    browser*, so the site stays static on GitHub Pages and every visitor
-    has their own data (no shared in-memory state to drift).
-    - `mock-api/`: split `server.mjs` into a runtime-free
-      `app.mjs` (`createMockYoga({latencyMs, sequenceMs})` over the existing
-      `resolvers.mjs`/`data.mjs`/`schema.graphql`) and a thin Node wrapper;
-      an esbuild script bundles `app.mjs` (schema inlined) to
-      `mock-api.browser.js`. One set of resolvers for iOS, tests and web.
-    - Example: `flutter create --platforms=web .`; on web only (conditional
-      import), `main.dart` wires a `dart:js_interop` `Transport` and
-      `SubscriptionTransport` that call the bundled yoga's `fetch` (SSE
-      streamed from its `Response` body; `x-mock-latency-ms` from #40 still
-      works). iOS keeps `http://localhost:4000`. No `dart:io` in the
-      runtime or example today — keep it that way.
-    - Website: `website.yml` builds `flutter build web --base-href
-      /sling_gql/demo/`, copies it and the bundle into `website/public/demo/`
-      before `astro build`; one "Try it" page embedding the whole app in a
-      lazily loaded iframe ("▶ Run" button — the Flutter engine is
-      ~2 MB) with the network log / cache stats / latency picker visible.
-    - CI: `flutter build web` for the example; `app_test.dart` unchanged.
-      Update AGENTS.md ("iOS only") and `tooling/example-app` in the same
-      change.
-59. **Docs — A live demo after each concept** (after #58). Demo routes in
-    the example (`#/demo/<concept>`), sources marked `// #region snippet`
+59. **Docs — A live demo after each concept** (builds on #58's
+    `LiveApp.astro` and `demo/` build). Demo routes in the example
+    (`#/demo/<concept>`), sources marked `// #region snippet`
     and pulled into the MDX code blocks (shown code = running code, CI
     proves it compiles), an Astro `<LiveDemo demo="..." />` component
     (lazy iframe, reset-data button, side panel with the network log).
@@ -147,6 +124,8 @@ Kept for number stability; see git history for details.
 39. Example — `.vscode/` launch/tasks/settings are tracked (nothing to do).
 40. Example — Latency picker (Server/Off/500 ms/2 s) on the network log screen; `x-mock-latency-ms` header honoured per request by the mock API, injected by the example's transport.
 33. Runtime — 64-bit FNV-1a aliases (`Selection.fnv1a64`, on 32-bit halves so web = native); all hashed aliases changed once (persisted caches, if any, start cold).
+
+58. Example — Web platform + in-browser mock API: `mock-api/app.mjs` (`createMockYoga`, Node-free) served by `server.mjs` and bundled from `browser.mjs` (`npm run build:browser` → `example/web/mock-api.js`); `example/lib/in_browser_api.dart` swaps the `http.Client` on web (queries, mutations, SSE streamed from the Fetch `Response`); `melos run build:web` → `website/public/demo/`; site page `guides/try-it` with `LiveApp.astro` (click-to-load iframe, restart); CI builds the web target, `website.yml` ships it.
 
 ## Explicitly not planned
 
