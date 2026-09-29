@@ -235,6 +235,65 @@ abstract class Accessor {
   }
 
   // ---------------------------------------------------------------------------
+  // Abstract types (unions and interfaces) used by generated code
+  // ---------------------------------------------------------------------------
+
+  /// `__typename` of this object in cache, or [missing] (skeleton). Records
+  /// the dependency, so a scope rebuilds if the object changes type.
+  Object? _cachedTypename() => recorder.cache.read(recorder.operation, [
+    ...path,
+    '__typename',
+  ], deps: recorder.deps);
+
+  /// Views this object as the concrete type [typename] (the inline fragment
+  /// `... on Typename`): fields read through the result are selected inside
+  /// that fragment and read at this object's cache location.
+  ///
+  /// Returns `null` when the cached object is of another type. A skeleton
+  /// returns a skeleton of *every* type asked for, so the first build records
+  /// each branch's fields and one request fetches whichever type comes back
+  /// (the same reason skeleton lists have one element). [keyed] as for
+  /// [object]: the member type is an entity whose key must be selected.
+  R? on<R extends Accessor>(
+    String typename,
+    R Function(Recorder, Selection, List<Object>) ctor, {
+    bool keyed = false,
+  }) {
+    final actual = _cachedTypename();
+    if (actual != missing && actual != typename) return null;
+    final sel = selection.fragment(
+      typename,
+      keyed ? recorder.cache.normalization.selectedKeyField : null,
+    );
+    return ctor(recorder, sel, path);
+  }
+
+  /// Runs the branch of [cases] for this object's `__typename`, [orElse] for
+  /// a type without a branch (e.g. one added to the schema later), `null`
+  /// when neither applies. Backs the generated `when(...)`.
+  ///
+  /// On a skeleton *every* branch runs, so all of them record their fields
+  /// in the first build; the first branch's result is returned (it renders
+  /// from skeleton accessors, i.e. nulls, like any other skeleton UI).
+  T? whenType<T>(Map<String, T Function()> cases, {T Function()? orElse}) {
+    final actual = _cachedTypename();
+    if (actual == missing) {
+      T? first;
+      var ran = false;
+      for (final branch in cases.values) {
+        final result = branch();
+        if (!ran) first = result;
+        ran = true;
+      }
+      if (!ran && orElse != null) return orElse();
+      return first;
+    }
+    final branch = cases[actual];
+    if (branch != null) return branch();
+    return orElse?.call();
+  }
+
+  // ---------------------------------------------------------------------------
   // Write helpers (optimistic updates) used by generated setters
   // ---------------------------------------------------------------------------
 

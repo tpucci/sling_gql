@@ -100,7 +100,8 @@ query {
   `SubscriptionBuilder`), each event normalized into the cache;
   `subscriptionTransport:` for auth or another protocol.
 
-Not yet: unions/interfaces.
+- Unions and interfaces: generated `asLaunch` getters (inline fragments)
+  and `when(launch: …, rocket: …)`, all branches recorded on the skeleton.
 
 ## Rules of thumb
 

@@ -403,7 +403,14 @@ class QueryScope<Q extends Accessor> implements Recorder {
     final parts = <String>[];
     Selection? node = leaf;
     while (node != null && !node.isRoot) {
-      parts.insert(0, node.args.isEmpty ? node.field : '${node.field}(…)');
+      parts.insert(
+        0,
+        node.isFragment
+            ? '(on ${node.typeCondition})'
+            : node.args.isEmpty
+            ? node.field
+            : '${node.field}(…)',
+      );
       node = node.parent;
     }
     return parts.join('.');
@@ -1397,7 +1404,7 @@ class SlingClient<Q extends Accessor> {
     void walk(Selection node) {
       for (final c in node.children) {
         for (final rule in _listRules) {
-          if (rule.field != c.field) continue;
+          if (c.isFragment || rule.field != c.field) continue;
           final path = c.aliasPath;
           if (rule.items != null) path.add(rule.items!);
           _knownLists.putIfAbsent(rule.field, () => {})[path.join('/')] = (

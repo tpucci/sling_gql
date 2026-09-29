@@ -22,16 +22,34 @@ class Arg {
 /// side by side in one document *and* in the cache.
 class Selection {
   Selection._(this.field, this.args, this.parent)
-    : alias = _aliasFor(field, args);
+    : alias = _aliasFor(field, args),
+      typeCondition = null;
+
+  Selection._fragment(String typename, this.parent)
+    : field = typename,
+      args = const {},
+      alias = '... on $typename',
+      typeCondition = typename {
+    isObject = true;
+  }
 
   Selection.root(String operation) : this._(operation, const {}, null);
 
+  /// The field name; for an inline fragment, the type condition.
   final String field;
   final Map<String, Arg> args;
   final Selection? parent;
 
-  /// Also the cache key for this field on its parent object.
+  /// Also the cache key for this field on its parent object. Inline
+  /// fragments use `... on Type`, which no field alias can spell.
   final String alias;
+
+  /// Set on an inline fragment node (`... on Launch { … }`): its children are
+  /// fields of that concrete type, read at the *parent's* cache location. A
+  /// fragment adds nothing to cache paths ([aliasPath] skips it).
+  final String? typeCondition;
+
+  bool get isFragment => typeCondition != null;
 
   final Map<String, Selection> _children = {};
 
@@ -52,7 +70,7 @@ class Selection {
     final out = <String>[];
     Selection? node = this;
     while (node != null && !node.isRoot) {
-      out.insert(0, node.alias);
+      if (!node.isFragment) out.insert(0, node.alias);
       node = node.parent;
     }
     return out;
@@ -75,7 +93,26 @@ class Selection {
     return node;
   }
 
+  /// The inline fragment `... on [typename]` under this (abstract-typed)
+  /// object node. [keyField] as in [objectChild], for keyed member types.
+  Selection fragment(String typename, [String? keyField]) {
+    final node = _children.putIfAbsent(
+      '... on $typename',
+      () => Selection._fragment(typename, this),
+    );
+    if (keyField != null) node.keyField = keyField;
+    return node;
+  }
+
   Selection? childByAlias(String alias) => _children[alias];
+
+  /// The node in this tree corresponding to [other] (a child of a node
+  /// matching [other]'s parent), created when absent.
+  Selection _counterpart(Selection other) =>
+      (other.isFragment
+            ? fragment(other.typeCondition!)
+            : child(other.field, other.args))
+        .._adopt(other);
 
   /// Ensures every node of [other]'s path from its root exists under this
   /// root, and returns the corresponding node in this tree.
@@ -88,7 +125,7 @@ class Selection {
     }
     var cursor = this;
     for (final n in chain) {
-      cursor = cursor.child(n.field, n.args).._adopt(n);
+      cursor = cursor._counterpart(n);
     }
     return cursor;
   }
@@ -96,7 +133,7 @@ class Selection {
   /// Deep-merges [other]'s subtree into this node.
   void mergeFrom(Selection other) {
     for (final c in other.children) {
-      (child(c.field, c.args).._adopt(c)).mergeFrom(c);
+      _counterpart(c).mergeFrom(c);
     }
   }
 
@@ -177,6 +214,21 @@ class PrintedOperation {
     String printNode(Selection node, int depth) {
       final indent = '  ' * depth;
       final buf = StringBuffer(indent);
+      if (node.isFragment) {
+        // `__typename` is already selected on the enclosing object.
+        buf.writeln('... on ${node.typeCondition} {');
+        final keyField = node.keyField;
+        if (keyField != null) buf.writeln('$indent  $keyField');
+        for (final c in node.children) {
+          if (c.field == keyField && c.args.isEmpty) continue;
+          buf.writeln(printNode(c, depth + 1));
+        }
+        if (node.isLeaf && keyField == null) {
+          buf.writeln('$indent  __typename'); // no empty selection sets
+        }
+        buf.write('$indent}');
+        return buf.toString();
+      }
       if (node.alias != node.field) buf.write('${node.alias}: ');
       buf.write(node.field);
       final args = node.args.entries.where((e) => e.value.value != null);
