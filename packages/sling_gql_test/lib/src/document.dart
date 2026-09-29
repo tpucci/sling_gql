@@ -1,7 +1,8 @@
 /// A minimal GraphQL document parser: enough for the operations sling_gql
 /// prints (one anonymous operation, aliases, arguments as variables or
-/// literals, nested selections) and for hand-written documents of the same
-/// shape. Fragments and directives are not supported.
+/// literals, nested selections, inline fragments `... on Type { }`) and for
+/// hand-written documents of the same shape. Named fragments and directives
+/// are not supported.
 library;
 
 /// One parsed operation: `query`, `mutation` or `subscription`.
@@ -21,7 +22,20 @@ class ParsedOperation {
 /// One field of a selection set, with its arguments already resolved
 /// (variables substituted) and its sub-selection.
 class ParsedField {
-  ParsedField(this.name, this.alias, this.args, this.selection);
+  ParsedField(this.name, this.alias, this.args, this.selection)
+    : typeCondition = null;
+
+  /// An inline fragment `... on [typeCondition] { selection }`.
+  ParsedField.fragment(String this.typeCondition, this.selection)
+    : name = '... on $typeCondition',
+      alias = '... on $typeCondition',
+      args = const {};
+
+  /// Set on an inline fragment: its [selection] applies only to objects
+  /// whose `__typename` is this type.
+  final String? typeCondition;
+
+  bool get isFragment => typeCondition != null;
 
   final String name;
 
@@ -105,7 +119,19 @@ class _Parser {
     final fields = <ParsedField>[];
     while (_peek != '}') {
       if (_peek == '...') {
-        throw GraphQLSyntaxError('fragments are not supported');
+        _next();
+        if (_peek != 'on') {
+          throw GraphQLSyntaxError(
+            'named fragments are not supported, only `... on Type { }`',
+          );
+        }
+        _next();
+        final type = _name();
+        if (_peek == '@') {
+          throw GraphQLSyntaxError('directives are not supported');
+        }
+        fields.add(ParsedField.fragment(type, _selectionSet()));
+        continue;
       }
       fields.add(_field());
     }

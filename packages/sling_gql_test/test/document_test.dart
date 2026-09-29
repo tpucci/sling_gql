@@ -54,6 +54,23 @@ void main() {
     expect(parseOperation('{ me { name } }').fields.single.name, 'me');
   });
 
+  test('parses inline fragments', () {
+    final parsed = parseOperation('''
+      query {
+        search {
+          __typename
+          ... on Launch { id name }
+          ... on Rocket { id }
+        }
+      }
+    ''');
+    final search = parsed.fields.single;
+    expect(search.selection.map((f) => f.isFragment), [false, true, true]);
+    final launch = search.selection[1];
+    expect(launch.typeCondition, 'Launch');
+    expect(launch.selection.map((f) => f.name), ['id', 'name']);
+  });
+
   test('rejects what it does not support, loudly', () {
     expect(
       () => parseOperation('query { ...Frag }'),

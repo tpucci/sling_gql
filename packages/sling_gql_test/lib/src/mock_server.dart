@@ -41,13 +41,15 @@ class MockRequest {
   Set<String> get rootFields => {for (final f in operation.fields) f.name};
 
   /// True when [path] (`launches.nodes.name`, field names without aliases or
-  /// arguments) is selected somewhere in the document.
+  /// arguments) is selected somewhere in the document. An inline fragment
+  /// is one segment spelled `on Type`: `search.on Launch.name`.
   bool selects(String path) {
     var level = operation.fields;
     ParsedField? node;
     for (final part in path.split('.')) {
+      final type = part.startsWith('on ') ? part.substring(3) : null;
       node = level.cast<ParsedField?>().firstWhere(
-        (f) => f!.name == part,
+        (f) => type != null ? f!.typeCondition == type : f!.name == part,
         orElse: () => null,
       );
       if (node == null) return false;
@@ -358,9 +360,35 @@ class MockGraphQLServer {
         '(${field.selection.join(', ')}) but the data is ${value.runtimeType}',
       );
     }
-    final object = value.cast<String, Object?>();
     final out = <String, Object?>{};
-    for (final sub in field.selection) {
+    await _projectInto(
+      value.cast<String, Object?>(),
+      field.selection,
+      path,
+      errors,
+      out,
+    );
+    return out;
+  }
+
+  /// Resolves [selection] on [object] into [out]. An inline fragment applies
+  /// when the object's `__typename` equals its type condition (the mock has
+  /// no schema, so `... on SomeInterface` never matches: sling_gql only
+  /// prints fragments on concrete types).
+  Future<void> _projectInto(
+    Map<String, Object?> object,
+    List<ParsedField> selection,
+    List<Object> path,
+    List<Map<String, Object?>> errors,
+    Map<String, Object?> out,
+  ) async {
+    for (final sub in selection) {
+      if (sub.isFragment) {
+        if (object['__typename'] == sub.typeCondition) {
+          await _projectInto(object, sub.selection, path, errors, out);
+        }
+        continue;
+      }
       if (sub.name == '__typename') {
         final typename = object['__typename'];
         if (typename == null) {
@@ -383,7 +411,6 @@ class MockGraphQLServer {
         sub.alias,
       ], errors);
     }
-    return out;
   }
 
   static FutureOr<Object?> _invoke(Object? source, Map<String, Object?> args) {
