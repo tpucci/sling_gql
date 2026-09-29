@@ -355,9 +355,18 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-        'mutation: Mutation.root, subscription: Subscription.root);',
+        'mutation: Mutation.root, subscription: Subscription.root, '
+        "keyField: 'id');",
       ),
     );
+  });
+
+  test('slingSchema carries --key-field', () {
+    final code = generate(
+      IntrospectionSchema.fromJson(_schemaJson),
+      keyField: 'uuid',
+    );
+    expect(code, contains("keyField: 'uuid');"));
   });
 
   test('no Subscription class when the schema has no subscription type', () {
@@ -373,7 +382,7 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-        'mutation: Mutation.root);',
+        "mutation: Mutation.root, keyField: 'id');",
       ),
     );
   });
@@ -434,18 +443,23 @@ void main() {
     expect(unkeyed, isNot(contains('SlingCacheAccess')));
   });
 
-  test(
-    'no Mutation class or slingSchema when the schema has no mutation type',
-    () {
-      final json = Map<String, Object?>.from(_schemaJson);
-      final schema = Map<String, Object?>.from(
-        json['__schema'] as Map<String, Object?>,
-      )..['mutationType'] = null;
-      final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
-      expect(code, isNot(contains('extension SlingMutations')));
-      expect(code, isNot(contains('slingSchema')));
-    },
-  );
+  test('no Mutation class when the schema has no mutation type; slingSchema '
+      'still carries the query root and key field', () {
+    final json = Map<String, Object?>.from(_schemaJson);
+    final schema = Map<String, Object?>.from(
+      json['__schema'] as Map<String, Object?>,
+    )..['mutationType'] = null;
+    final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
+    expect(code, isNot(contains('extension SlingMutations')));
+    expect(code, isNot(contains('Mutation.root')));
+    expect(
+      code,
+      contains(
+        'const slingSchema = SlingSchema<Query, Accessor>(query: Query.root, '
+        "subscription: Subscription.root, keyField: 'id');",
+      ),
+    );
+  });
 
   test('non-null required arg without default -> required T', () {
     expect(

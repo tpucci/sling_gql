@@ -133,10 +133,13 @@ String generate(
     _emitSubscribeExtension(out);
   }
 
-  if (hasMutation) {
-    out.writeln();
-    _emitSlingSchema(out, subscription: hasSubscription);
-  }
+  out.writeln();
+  _emitSlingSchema(
+    out,
+    mutation: hasMutation,
+    subscription: hasSubscription,
+    keyField: ctx.keyField,
+  );
 
   final entityTypes = objectTypes
       .where((t) => !rootNames.contains(t.name))
@@ -260,14 +263,29 @@ void _emitRootClass(
 }
 
 /// A schema-wide convenience so apps never name roots by hand: pass to
-/// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` /
-/// `SubscriptionBuilder` resolve their roots without a `root:` argument.
-void _emitSlingSchema(StringBuffer out, {required bool subscription}) {
-  out.writeln(
-    'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-    'mutation: Mutation.root'
-    '${subscription ? ', subscription: Subscription.root' : ''});',
-  );
+/// `SlingClient(schema: slingSchema, ...)` (or `SlingScope(schema: ...)`) and
+/// `MutationBuilder` / `SubscriptionBuilder` resolve their roots without a
+/// `root:` argument. Also carries `--key-field`, so the client's cache
+/// normalizes on the same field the generator decided keyed types by.
+void _emitSlingSchema(
+  StringBuffer out, {
+  required bool mutation,
+  required bool subscription,
+  required String keyField,
+}) {
+  out
+    ..writeln(
+      '/// Pass to `SlingClient(schema: slingSchema)`: query/mutation/'
+      'subscription',
+    )
+    ..writeln('/// roots and the key field this file was generated with.')
+    ..writeln(
+      'const slingSchema = SlingSchema<Query, '
+      '${mutation ? 'Mutation' : 'Accessor'}>(query: Query.root'
+      '${mutation ? ', mutation: Mutation.root' : ''}'
+      '${subscription ? ', subscription: Subscription.root' : ''}'
+      ', keyField: ${dartStringLiteral(keyField)});',
+    );
 }
 
 /// `client.subscribe((s) => s.launchStatusChanged?.status)` without the

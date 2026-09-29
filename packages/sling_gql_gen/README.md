@@ -51,7 +51,9 @@ Flags:
   `Mutation` and `Subscription` roots get the same shape, plus
   `extension SlingMutations` (`client.mutate(...)`) and
   `extension SlingSubscriptions` (`client.subscribe(...)`), and the
-  `slingSchema` constant bundling the roots for `SlingScope(schema:)`.
+  `slingSchema` constant bundling the roots and `--key-field` for
+  `SlingClient(schema: slingSchema)` (the client's cache then normalizes on
+  the same key field; no hand-kept `Normalization(keyField:)`).
 - One `class <Name> extends Accessor` per other `OBJECT` type (skipping the
   operation roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)
