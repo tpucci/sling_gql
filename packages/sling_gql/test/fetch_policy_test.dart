@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
@@ -405,4 +406,108 @@ void main() {
       expect(h.calls, 2, reason: 'fresh again');
     });
   });
+
+  group('flags seen by the builder', () {
+    // isStale and a background isLoading are only known once the run's reads
+    // are: the builder of that run saw the previous values, so the scope
+    // re-runs once when they changed, and what is *rendered* matches.
+    late Completer<void> answer;
+    late String name;
+    late int calls;
+
+    SlingClient<Query> gatedClient({
+      Duration? maxAge,
+      required DateTime Function() now,
+    }) {
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        maxAge: maxAge,
+        now: now,
+        httpClient: MockClient((req) async {
+          calls++;
+          if (calls > 1) await answer.future;
+          return http.Response(
+            jsonEncode({
+              'data': {
+                'me': {'__typename': 'User', 'id': '1', 'name': name},
+              },
+            }),
+            200,
+          );
+        }),
+      );
+      addTearDown(client.dispose);
+      return client;
+    }
+
+    setUp(() {
+      name = 'Ada';
+      calls = 0;
+    });
+
+    Widget app(SlingClient<Query> client, {FetchPolicy? fetchPolicy}) =>
+        SlingScope<Query>(
+          client: client,
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: QueryBuilder<Query>(
+              fetchPolicy: fetchPolicy,
+              builder: (context, q, s) => Text(
+                '${q.me.name} stale:${s.isStale} loading:${s.isLoading}',
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('maxAge: stale while refreshing, then fresh', (tester) async {
+      answer = Completer<void>();
+      var now = DateTime(2026, 1, 1, 12);
+      final client = gatedClient(
+        maxAge: const Duration(minutes: 5),
+        now: () => now,
+      );
+      await client.resolve((q) => q.me.name);
+      now = now.add(const Duration(minutes: 6));
+      name = 'Grace';
+
+      await tester.pumpWidget(app(client));
+      await tester.pump();
+      expect(find.text('Ada stale:true loading:true'), findsOneWidget);
+
+      answer.complete();
+      await tester.pumpUntilRendered();
+      expect(find.text('Grace stale:false loading:false'), findsOneWidget);
+      expect(calls, 2);
+    });
+
+    testWidgets('cacheAndNetwork: cached data with loading, then fresh', (
+      tester,
+    ) async {
+      answer = Completer<void>();
+      final client = gatedClient(now: DateTime.now);
+      await client.resolve((q) => q.me.name);
+      name = 'Grace';
+
+      await tester.pumpWidget(
+        app(client, fetchPolicy: FetchPolicy.cacheAndNetwork),
+      );
+      await tester.pump();
+      expect(find.text('Ada stale:false loading:true'), findsOneWidget);
+
+      answer.complete();
+      await tester.pumpUntilRendered();
+      expect(find.text('Grace stale:false loading:false'), findsOneWidget);
+      expect(calls, 2);
+    });
+  });
+}
+
+extension on WidgetTester {
+  /// Lets the response land and every re-run it causes build.
+  Future<void> pumpUntilRendered() async {
+    for (var i = 0; i < 5; i++) {
+      await pump(const Duration(milliseconds: 10));
+    }
+  }
 }

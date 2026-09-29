@@ -268,6 +268,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _hadMiss = false;
     _missesAreWaterfall = _rebuildFromClient && _requestCount > 0;
     _rebuildFromClient = false;
+    // What [body] sees through `isStale` / `isLoading`: the previous run's
+    // values, since this run's are only known once its reads are.
+    final staleSeen = _stale;
     final result = body(client.rootFactory(this));
     final firstRun = _runCount++ == 0;
     final maxAge = this.maxAge;
@@ -283,11 +286,22 @@ class QueryScope<Q extends Accessor> implements Recorder {
     // A miss already schedules a fetch of the missing leaves; a stale or
     // cache-and-network run adds the *whole* selection to it. Sticky errors
     // block it like they block misses, so a failing server cannot loop.
+    var backgroundStarted = false;
     if (wantsNetwork && !_awaiting && !_errorBlocksFetch()) {
       client._enqueue(_root);
       _awaiting = true;
       _backgroundFetch = !_hadMiss;
       client._schedule(this);
+      backgroundStarted = true;
+    }
+    // The body rendered flags that turned out wrong for this run (stale data
+    // found, a background refresh started, or data fresh again after one):
+    // run once more so what is shown matches. Deferred — this is usually a
+    // widget build — and it cannot loop: the next run sees what it computes.
+    if (_stale != staleSeen || backgroundStarted) {
+      scheduleMicrotask(() {
+        if (!_disposed) onChanged();
+      });
     }
     return result;
   }
@@ -377,7 +391,10 @@ class QueryScope<Q extends Accessor> implements Recorder {
   Set<String> get _allDeps =>
       _rows.isEmpty ? _deps : {..._deps, for (final r in _rows) ...r._deps};
 
+  bool _disposed = false;
+
   void dispose() {
+    _disposed = true;
     client._scopes.remove(this);
     for (final r in _rows.toList()) {
       r.dispose();
