@@ -80,8 +80,8 @@ on the code.
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
-| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch). |
-| `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `frameEndScheduler`. |
+| `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch), `RowScope` (`QueryScope.row`: own deps, everything else forwarded to the parent). |
+| `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `SlingRow` (rebinds an accessor to a `RowScope`), `frameEndScheduler`. |
 
 Design decisions worth knowing before changing things:
 
@@ -159,6 +159,15 @@ Design decisions worth knowing before changing things:
 - **Notification is per entity field** (`Launch:launch-181.name`). Inline
   objects and lists notify at the granularity of the entity field that
   contains them.
+  A key is touched only when something under it changed: `_normalize` sets
+  `_changed` for leaves, refs, new keys and list lengths, `_mergeEntity`
+  reads it per field. Changes inside a referenced entity touch that entity.
+- **Rows are scopes for deps only.** `SlingRow` rebinds the accessor it is
+  given (`ctor(rowScope, selection, path)`) to a `RowScope`: same cache,
+  same selection tree, misses/writes forwarded to the parent `QueryScope`
+  (which fetches and holds loading/error); only `deps` are the row's, and
+  `_notify` probes rows after scopes. `_allDeps` (scope + rows) feeds
+  `maxAge`/`revalidate`.
 
 ## Generator (`packages/sling_gql_gen`)
 

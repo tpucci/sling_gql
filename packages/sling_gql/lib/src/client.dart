@@ -256,7 +256,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
     final result = body(client.rootFactory(this));
     final firstRun = _runCount++ == 0;
     final maxAge = this.maxAge;
-    _stale = maxAge != null && client._isStale(_deps, maxAge);
+    _stale = maxAge != null && client._isStale(_allDeps, maxAge);
     if (!_hadMiss && !_stale && !_errorIsBackground) {
       // Fully served from fresh cache: an error from a miss-driven fetch is
       // moot (a background one stays until `refetch`, see `error`).
@@ -283,7 +283,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// "refresh when this screen comes back into view".
   Future<void> revalidate() {
     final maxAge = this.maxAge;
-    if (maxAge != null && !client._isStale(_deps, maxAge)) {
+    if (maxAge != null && !client._isStale(_allDeps, maxAge)) {
       return Future.value();
     }
     return refetch();
@@ -336,7 +336,38 @@ class QueryScope<Q extends Accessor> implements Recorder {
   @override
   void onWrite(CacheWrite write) => client._onWrite(write);
 
-  void dispose() => client._scopes.remove(this);
+  /// Row scopes attached to this scope (see [row]).
+  final Set<RowScope> _rows = {};
+
+  /// Creates a [RowScope] under this scope: accessors bound to it record
+  /// their dependencies there, so a write only re-runs that row
+  /// ([onChanged]) rather than this scope. Dispose it with the row.
+  RowScope row({required void Function() onChanged}) {
+    final row = RowScope._(this, onChanged);
+    _rows.add(row);
+    client._rows.add(row);
+    return row;
+  }
+
+  /// The query scope owning [recorder] (an accessor's `recorder`): itself,
+  /// or the parent of a [RowScope]. `null` for other recorders (cache,
+  /// mutation and subscription scopes).
+  static QueryScope<Accessor>? ownerOf(Recorder recorder) => switch (recorder) {
+    QueryScope() => recorder,
+    RowScope() => recorder.parent,
+    _ => null,
+  };
+
+  /// Own deps plus those of the rows attached, for freshness checks.
+  Set<String> get _allDeps =>
+      _rows.isEmpty ? _deps : {..._deps, for (final r in _rows) ...r._deps};
+
+  void dispose() {
+    client._scopes.remove(this);
+    for (final r in _rows.toList()) {
+      r.dispose();
+    }
+  }
 
   void _settle(Object? error) {
     _awaiting = false;
@@ -376,6 +407,76 @@ class QueryScope<Q extends Accessor> implements Recorder {
       node = node.parent;
     }
     return parts.join('.');
+  }
+}
+
+/// A sub-scope of a [QueryScope] for one part of its tree — typically one row
+/// of a long list — that rebuilds on its own (`SlingRow` is the widget form).
+///
+/// Accessors rebound to it ([bind]) read through the same cache and add to
+/// the same selection tree as the parent's, and misses and writes go to the
+/// parent (it still owns the request, loading and error state); only the
+/// **dependency keys** are this scope's own. A write to `Launch:x.favorite`
+/// then re-runs the one row that read it instead of the parent's whole
+/// build — the parent depends only on what it read itself (the list).
+///
+/// A row keeps working through a parent rebuild: the parent hands it fresh
+/// accessors, bound again on the row's next [run].
+class RowScope implements Recorder {
+  RowScope._(this.parent, this.onChanged);
+
+  /// The query scope misses, writes, selections and fetch state belong to.
+  final QueryScope<Accessor> parent;
+
+  /// Invoked when a write touched one of this row's [deps].
+  final void Function() onChanged;
+
+  bool _disposed = false;
+
+  @override
+  String get operation => parent.operation;
+
+  @override
+  Selection get root => parent.root;
+
+  @override
+  Cache get cache => parent.cache;
+
+  Set<String> _deps = {};
+
+  /// Dependency keys read during the last [run] (and by accessors bound in
+  /// it afterwards).
+  @override
+  Set<String> get deps => _deps;
+
+  /// Rebinds [accessor] (an accessor handed out by the parent or by another
+  /// row of it) to this scope, via its generated constructor [ctor].
+  A bind<A extends Accessor>(
+    A accessor,
+    A Function(Recorder, Selection, List<Object>) ctor,
+  ) => ctor(this, accessor.selection, accessor.path);
+
+  /// Runs [body] with [accessor] bound to this scope and fresh [deps].
+  T run<A extends Accessor, T>(
+    A accessor,
+    A Function(Recorder, Selection, List<Object>) ctor,
+    T Function(A bound) body,
+  ) {
+    _deps = {};
+    return body(bind(accessor, ctor));
+  }
+
+  @override
+  void onMiss(Selection leaf) => parent.onMiss(leaf);
+
+  @override
+  void onWrite(CacheWrite write) => parent.onWrite(write);
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    parent._rows.remove(this);
+    parent.client._rows.remove(this);
   }
 }
 
@@ -1388,6 +1489,7 @@ class SlingClient<Q extends Accessor> {
   static void _printWaterfall(WaterfallWarning warning) => print(warning);
 
   final Set<QueryScope<Q>> _scopes = {};
+  final Set<RowScope> _rows = {};
 
   Selection _pending = Selection.root('query');
   Selection? _inflight;
@@ -1726,6 +1828,9 @@ class SlingClient<Q extends Accessor> {
       if (always.contains(scope) || touched.any(scope.deps.contains)) {
         scope._changedByClient();
       }
+    }
+    for (final row in _rows.toList()) {
+      if (touched.any(row._deps.contains)) row.onChanged();
     }
   }
 

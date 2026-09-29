@@ -43,6 +43,8 @@ export 'src/widgets.dart'
         QueryBuilder,
         QueryState,
         QueryWidgetBuilder,
+        SlingRow,
+        RowWidgetBuilder,
         MutationBuilder,
         MutationState,
         MutationWidgetBuilder,

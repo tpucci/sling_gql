@@ -74,8 +74,8 @@ abstract class Cache {
   /// Merges a GraphQL response `data` object. Objects the [Normalization]
   /// identifies are stored once as entities and referenced; the rest is
   /// merged inline. Returns the dependency keys touched (the ones whose
-  /// value changed). When [at] is given, every key the response wrote 	tt
-  /// changed or not 	tt is stamped with it (see [fetchedAt]).
+  /// value changed). When [at] is given, every key the response wrote —
+  /// changed or not — is stamped with it (see [fetchedAt]).
   @internal
   Set<String> writeResponse(
     String operation,
@@ -339,16 +339,26 @@ class NormalizedCache implements Cache {
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
       final existing = entity[e.key];
+      final outer = _changed;
+      _changed = false;
       final value = _normalize(existing, e.value, touched);
+      // Inline containers are merged in place: `_normalize` tells whether
+      // anything under this field actually differs (an identical `pageInfo`
+      // or `stats` in a refetch must not rebuild its readers).
+      final changed = !had || _changed;
+      _changed = outer;
       entity[e.key] = value;
       final dep = depKey(key, e.key);
       _writing?.add(dep);
-      // Containers are merged in place, so compare only leaves and refs.
-      if (!had || value is Map || value is List || value != existing) {
-        touched.add(dep);
-      }
+      if (changed) touched.add(dep);
     }
   }
+
+  /// Set by [_normalize] when the value it returns differs from `existing`
+  /// (a leaf, a ref, a key or list length); read and reset per entity field
+  /// by [_mergeEntity]. Changes *inside* a referenced entity do not count:
+  /// they are that entity's own touched keys.
+  bool _changed = false;
 
   /// Normalizes [incoming] against [existing]: keyed objects become entity
   /// refs, inline objects deep-merge, lists merge element-wise by index.
@@ -357,23 +367,32 @@ class NormalizedCache implements Cache {
       final key = normalization.identify(incoming);
       if (key != null) {
         _mergeEntity(key, incoming, touched);
-        return Ref(key);
+        final ref = Ref(key);
+        if (existing != ref) _changed = true;
+        return ref;
       }
-      final target = existing is Map<String, Object?>
-          ? existing
-          : <String, Object?>{};
+      final Map<String, Object?> target;
+      if (existing is Map<String, Object?>) {
+        target = existing;
+      } else {
+        target = {};
+        _changed = true;
+      }
       for (final e in incoming.entries) {
+        if (!target.containsKey(e.key)) _changed = true;
         target[e.key] = _normalize(target[e.key], e.value, touched);
       }
       return target;
     }
     if (incoming is List) {
       final old = existing is List ? existing : const <Object?>[];
+      if (existing is! List || old.length != incoming.length) _changed = true;
       return List<Object?>.generate(
         incoming.length,
         (i) => _normalize(i < old.length ? old[i] : null, incoming[i], touched),
       );
     }
+    if (incoming != existing) _changed = true;
     return incoming;
   }
 

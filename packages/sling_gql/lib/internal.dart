@@ -5,9 +5,9 @@
 /// - [NormalizedCache], [Ref], [missing], [depKey]: the store's building
 ///   blocks. Apps use the [Cache] interface (`client.cache.snapshot`,
 ///   `evict`, `onChange`…) and never these.
-/// - [CacheWrite], [MutationScope], [SubscriptionScope], [ListLocator]: the
-///   recorder machinery behind optimistic writes, mutations, subscriptions
-///   and `CacheScope.list`.
+/// - [CacheWrite], [MutationScope], [SubscriptionScope], [RowScope],
+///   [ListLocator]: the recorder machinery behind optimistic writes,
+///   mutations, subscriptions, `SlingRow` and `CacheScope.list`.
 ///
 /// No stability promise: anything here can change in a minor release.
 library;
@@ -17,4 +17,4 @@ import 'src/cache/cache.dart' show Cache;
 export 'src/accessor.dart' show ListLocator;
 export 'src/cache/cache.dart' show NormalizedCache, CacheWrite, depKey;
 export 'src/cache/ref.dart' show Ref, missing;
-export 'src/client.dart' show MutationScope, SubscriptionScope;
+export 'src/client.dart' show MutationScope, SubscriptionScope, RowScope;

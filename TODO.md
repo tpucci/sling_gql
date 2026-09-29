@@ -8,15 +8,15 @@ while building the normalized cache and mutations, and the roadmap (website
 `internals/roadmap.mdx`, folded in as items 46+).
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
-~~transport hook~~ · fine-grained rebuilds mostly done (#19, #20) ·
+~~transport hook~~ · fine-grained rebuilds done but #54 ·
 ~~expiry/SWR~~ · ~~subscriptions~~ · unions #31 · dev experience #46, #47 ·
 `gql_link` #48.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
 pub.dev-ready packages (#43), CI + tag-triggered pub.dev publishing (#44); API surface split (#32).
-29 items in **Done**. Suggested next picks: #19/#20 (per-row rebuilds), #31
-(unions), #24/#25/#28 (small runtime/gen fixes).
+Per-row rebuilds (#19, #20) done. Suggested next picks: #31 (unions),
+#24/#25/#28 (small runtime/gen fixes), #17/#18 (read-path allocations).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -31,13 +31,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 18. **Perf — Alias hashing on every build.** Arg-bearing fields re-run
     `jsonEncode` + FNV on every `child()` call. Cache the alias on the
     `Selection` node / memoize per args map identity.
-19. **Perf — Per-row rebuild.** A write to one entity rebuilds the whole
-    `QueryBuilder` (all built rows). Offer a row-scoped builder (`SlingRow`) or
-    per-row scopes for large lists.
-20. **Perf — Over-notification for inline containers.** `_mergeEntity` always
-    marks a field touched when the value is a `Map`/`List` (no deep compare),
-    so `company`/`stats`/`pageInfo` rebuild their readers on every identical
-    response. Cheap structural compare for small inline objects.
 21. **Perf — `snapshot` is a full deep copy** and `onChange` fires per write;
     persistence adapters will need debouncing and incremental snapshots.
 22. **Perf — `gc()` is manual.** Entities dropped from a replaced list stay
@@ -73,8 +66,8 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 39. **Example — `.vscode/` is ignored by a global gitignore** on this machine,
     so the launch configs are not shared. Force-add them (`git add -f`) or
     document the setup in README.
-40. **Example — Per-row `QueryBuilder` demo** once #19 exists; and a
-    `LATENCY_MS` toggle in-app to make skeletons visible on demand.
+40. **Example — `LATENCY_MS` toggle in-app** to make skeletons visible on
+    demand. (The per-row half is done: `LaunchRow` is a `SlingRow`, #19.)
 
 ## P5 — docs & repo hygiene
 
@@ -138,6 +131,8 @@ Kept for number stability; see git history for details.
 30. Runtime/Gen — Subscriptions: `SlingClient.subscribeWith` / generated `client.subscribe`, `SlingSubscription` (stream, cancel), `SubscriptionScope`, `SubscriptionTransport` with `sseSubscriptionTransport` default (GraphQL over SSE, distinct connections); generator emits the `Subscription` root, `SlingSubscriptions`, `slingSchema.subscription`; `MockGraphQLServer(subscription:)`; example "Live" banner + e2e test against yoga.
 56. Runtime — Subscription reconnection: `SlingClient(subscriptionRetryAfter:)` / `subscribe(retryAfter:)`, `SlingSubscription.isConnected`/`isReconnecting`/`reconnect()`, `SubscriptionState.retry()`; example banner shows "reconnecting… (tap to retry now)".
 55. Runtime — `ListRule` / `SlingClient(listRules:)`: cached lists follow their entities (`belongs(args, entity)` per remembered alias; responses only remove; journaled in `optimistic`). Example `list_rules.dart` + mission-control flow (`scheduleLaunch` form, mock launch sequence `SEQUENCE_MS`, `IN_FLIGHT` status).
+19. Perf — Per-row rebuilds: `SlingRow(value, ctor: Launch.new, builder:)` over `RowScope` (`QueryScope.row`, own deps; misses/writes/selections go to the parent; freshness checks include rows' deps). Example `LaunchRow` is one.
+20. Perf — Inline containers compared structurally while merging (`_normalize` flags real changes): identical `stats`/`pageInfo`/lists touch nothing.
 53. Runtime — `SubscriptionBuilder<Subscription>` (`select` records once, opens post-frame, `SubscriptionState`), root from `SlingScope(schema:)` via `subscriptionRootOf`.
 
 ## Explicitly not planned

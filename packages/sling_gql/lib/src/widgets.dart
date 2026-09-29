@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
 import 'client.dart';
+import 'selection.dart';
 
 /// Provides a [SlingClient] to the widget tree.
 ///
@@ -160,7 +161,7 @@ class QueryState {
 
   /// The last build rendered cached data older than the scope's `maxAge`
   /// (or never fetched from the server) and a background refetch is on its
-  /// way 	tt stale-while-revalidate. Always false without a `maxAge`. Pair
+  /// way — stale-while-revalidate. Always false without a `maxAge`. Pair
   /// with [isLoading] for a subtle "refreshing" indicator.
   bool get isStale => _scope.isStale;
 
@@ -270,6 +271,91 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
       widget.prepare?.call(query);
       return widget.builder(context, query, QueryState._(scope));
     });
+  }
+}
+
+typedef RowWidgetBuilder<T extends Accessor> = Widget Function(
+  BuildContext context,
+  T value,
+);
+
+/// Rebuilds on its own when the data *it* read changes — one row of a long
+/// list, a card, any subtree of a [QueryBuilder] that should not rebuild its
+/// parent (and every sibling) when one entity changes.
+///
+/// ```dart
+/// QueryBuilder<Query>(
+///   builder: (context, q, state) => ListView(children: [
+///     for (final launch in q.launches()?.nodes ?? const <Launch>[])
+///       SlingRow(launch, ctor: Launch.new,
+///           builder: (context, launch) => LaunchRow(launch)),
+///   ]),
+/// )
+/// ```
+///
+/// [value] is an accessor the enclosing [QueryBuilder] handed out; [builder]
+/// receives the same object rebound to the row's own scope (via [ctor], the
+/// generated constructor tear-off). Every field read through it — in
+/// [builder] or in widgets it creates — is a dependency of the row only: a
+/// write to `Launch:x.favorite` (a mutation, a subscription event, an
+/// optimistic setter) rebuilds this row, not the list. Fetching is
+/// unchanged: misses go to the enclosing query's batched request, and its
+/// `QueryState` still reports loading and errors.
+///
+/// The parent keeps depending on what it read itself (the list), so rows
+/// are added and removed as before. Read the row's fields only through the
+/// accessor [builder] receives: reads through the parent's copy (`launch`
+/// in the parent's closure) still land on the parent.
+///
+/// An accessor not handed out by a query (a `client.cacheScope` one, a
+/// mutation result) is passed through unscoped.
+class SlingRow<T extends Accessor> extends StatefulWidget {
+  const SlingRow(
+    this.value, {
+    super.key,
+    required this.ctor,
+    required this.builder,
+  });
+
+  final T value;
+
+  /// The generated constructor tear-off of [T] (`Launch.new`).
+  final T Function(Recorder, Selection, List<Object>) ctor;
+
+  final RowWidgetBuilder<T> builder;
+
+  @override
+  State<SlingRow<T>> createState() => _SlingRowState<T>();
+}
+
+class _SlingRowState<T extends Accessor> extends State<SlingRow<T>> {
+  RowScope? _row;
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _row?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final value = widget.value;
+    final owner = QueryScope.ownerOf(value.recorder);
+    if (owner == null) return widget.builder(context, value);
+    var row = _row;
+    if (row == null || row.parent != owner) {
+      row?.dispose();
+      row = _row = owner.row(onChanged: _onChanged);
+    }
+    return row.run(
+      value,
+      widget.ctor,
+      (bound) => widget.builder(context, bound),
+    );
   }
 }
 
