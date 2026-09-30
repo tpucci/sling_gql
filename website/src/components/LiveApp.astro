@@ -1,8 +1,12 @@
 ---
 /**
  * The example app (or one of its concept demos, `demo="batching"`) in a
- * phone-sized frame, loaded only on click. "Restart" reloads it from fresh
- * data.
+ * phone-sized frame, loaded only on click.
+ *
+ * The whole app is an iframe; "Restart" reloads it from fresh data. Demos are
+ * views of one shared Flutter engine (see the script below); "Restart" runs
+ * the demo again from an empty cache, while the in-page mock API keeps its
+ * data for the visit.
  */
 interface Props {
   /** A concept demo (`example/lib/demos/demos.dart`); the whole app if omitted. */
@@ -10,13 +14,17 @@ interface Props {
   height?: number;
 }
 const { demo, height = demo ? 600 : 760 } = Astro.props;
-const src =
-  `${import.meta.env.BASE_URL}/demo/`.replace(/\/{2,}/g, '/') +
-  (demo ? `?demo=${encodeURIComponent(demo)}` : '');
+const base = `${import.meta.env.BASE_URL}/demo/`.replace(/\/{2,}/g, '/');
+const src = base + (demo ? `?demo=${encodeURIComponent(demo)}` : '');
 const label = demo ? 'Run this demo' : 'Run the example app';
 ---
 
-<live-app data-src={src} style={`--live-app-height: ${height}px`}>
+<live-app
+  data-src={src}
+  data-demo={demo}
+  data-base={base}
+  style={`--live-app-height: ${height}px`}
+>
   <div class="live-app-frame">
     <button type="button" class="live-app-run">
       <span><span aria-hidden="true">▶</span> {label}</span>
@@ -43,6 +51,10 @@ const label = demo ? 'Run this demo' : 'Run the example app';
     display: grid;
     place-items: center;
     background: var(--sl-color-gray-6);
+  }
+  .live-app-frame :global(.live-app-view) {
+    width: 100%;
+    height: 100%;
   }
   .live-app-frame :global(iframe) {
     width: 100%;
@@ -84,22 +96,125 @@ const label = demo ? 'Run this demo' : 'Run the example app';
 </style>
 
 <script>
-  // A custom element, so it works across Astro <ClientRouter /> navigations
-  // without an `astro:page-load` listener.
+  // Demos (`demo="…"`) share one Flutter engine for the whole visit: the
+  // first "Run" loads the mock API and the web build with multi-view on
+  // (example/web/flutter_bootstrap.js hands over to `slingDemoHost`), and
+  // every demo is a view added into its frame. The engine survives
+  // <ClientRouter /> navigations; views are removed before a page is
+  // swapped out. The whole app (no `demo`), and any failure, use an iframe.
+
+  interface FlutterApp {
+    addView(options: { hostElement: HTMLElement; initialData?: unknown }): number;
+    removeView(viewId: number): unknown;
+  }
+  interface EngineInitializer {
+    initializeEngine(config: Record<string, unknown>): Promise<{ runApp(): Promise<FlutterApp> }>;
+  }
+  interface FlutterLoader {
+    load(options: {
+      config?: Record<string, unknown>;
+      onEntrypointLoaded: (engine: EngineInitializer) => Promise<void>;
+    }): Promise<unknown>;
+  }
+
+  let engine: Promise<FlutterApp> | null = null;
+  const views = new Map<HTMLElement, number>();
+
+  function script(src: string) {
+    return new Promise<void>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error(`could not load ${src}`));
+      document.head.append(s);
+    });
+  }
+
+  function start(base: string): Promise<FlutterApp> {
+    engine ??= new Promise<FlutterApp>((resolve, reject) => {
+      const config = {
+        entrypointBaseUrl: base,
+        assetBase: base,
+        canvasKitBaseUrl: `${base}canvaskit/`,
+      };
+      (window as unknown as { slingDemoHost: unknown }).slingDemoHost = {
+        start(loader: FlutterLoader) {
+          loader
+            .load({
+              config,
+              onEntrypointLoaded: async (initializer) => {
+                try {
+                  const runner = await initializer.initializeEngine({
+                    ...config,
+                    multiViewEnabled: true,
+                  });
+                  resolve(await runner.runApp());
+                } catch (e) {
+                  reject(e);
+                }
+              },
+            })
+            .catch(reject);
+        },
+      };
+      script(`${base}mock-api.js`)
+        .then(() => script(`${base}flutter_bootstrap.js`))
+        .catch(reject);
+    });
+    return engine;
+  }
+
+  async function removeView(host: HTMLElement) {
+    const id = views.get(host);
+    if (id === undefined) return;
+    views.delete(host);
+    (await engine)?.removeView(id);
+  }
+
+  document.addEventListener('astro:before-swap', () => {
+    for (const host of [...views.keys()]) void removeView(host);
+  });
+
   class LiveApp extends HTMLElement {
+    #host: HTMLElement | null = null;
+
     connectedCallback() {
       this.querySelector('.live-app-run')?.addEventListener('click', () => this.load());
       this.querySelector('.live-app-restart')?.addEventListener('click', () => this.load());
     }
 
-    load() {
-      const frame = this.querySelector('.live-app-frame');
+    disconnectedCallback() {
+      if (this.#host) void removeView(this.#host);
+    }
+
+    async load() {
+      const frame = this.querySelector<HTMLElement>('.live-app-frame');
       if (!frame) return;
+      this.querySelector<HTMLElement>('.live-app-bar')?.removeAttribute('hidden');
+      const demo = this.dataset.demo;
+      if (!demo) return this.iframe(frame);
+
+      if (this.#host) await removeView(this.#host);
+      const host = document.createElement('div');
+      host.className = 'live-app-view';
+      frame.replaceChildren(host);
+      this.#host = host;
+      try {
+        const app = await start(this.dataset.base ?? '/');
+        if (this.#host !== host) return; // restarted meanwhile
+        views.set(host, app.addView({ hostElement: host, initialData: { demo } }));
+      } catch (e) {
+        console.warn('sling_gql demos: multi-view failed, using an iframe', e);
+        this.#host = null;
+        this.iframe(frame);
+      }
+    }
+
+    iframe(frame: HTMLElement) {
       const iframe = document.createElement('iframe');
       iframe.src = this.dataset.src ?? '';
       iframe.title = 'sling_gql example app';
       frame.replaceChildren(iframe);
-      this.querySelector<HTMLElement>('.live-app-bar')?.removeAttribute('hidden');
     }
   }
   if (!customElements.get('live-app')) customElements.define('live-app', LiveApp);
