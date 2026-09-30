@@ -1,6 +1,6 @@
 ---
 title: Transport
-description: One hook on SlingClient for auth headers, token refresh, retries, timeouts and logging — no link system.
+description: One hook on SlingClient for auth headers, token refresh, retries, timeouts and logging — or your existing gql_link chain.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -31,8 +31,8 @@ final client = SlingClient<Query>(
 
 <Aside type="note">
 There is deliberately no link chain. Most apps need one function; compose it
-yourself with ordinary Dart. If you already use `gql_link`, an adapter is a
-single `Transport` (see the roadmap).
+yourself with ordinary Dart. If you already use `gql_link`, hand your chain
+over as that one function — see [gql_link](#gql_link) below.
 </Aside>
 
 ## Recipes
@@ -110,3 +110,99 @@ transport: (request) async {
 - `errors` alongside `data` → the errored paths are pruned before caching and
   the error is attached to the scopes that asked for them (see
   [Loading states & errors](/sling_gql/guides/loading-and-errors/)).
+
+## gql_link
+
+Already have a [`gql_link`](https://pub.dev/packages/gql_link) chain — an auth
+link, a retry link, persisted queries, a websocket link? `sling_gql_link`
+turns it into the client's `transport` (and `subscriptionTransport`). The
+runtime stays `http`-only; `gql`, `gql_exec` and `gql_link` are that
+package's dependencies.
+
+```sh
+flutter pub add sling_gql_link gql_link gql_http_link
+```
+
+```dart
+import 'package:gql_http_link/gql_http_link.dart';
+import 'package:gql_link/gql_link.dart';
+import 'package:sling_gql_link/sling_gql_link.dart';
+
+final authLink = Link.function(
+  (request, [forward]) => forward!(
+    request.updateContextEntry<HttpLinkHeaders>(
+      (headers) => HttpLinkHeaders(
+        headers: {...?headers?.headers, 'authorization': 'Bearer ${auth.current}'},
+      ),
+    ),
+  ),
+);
+
+final link = Link.from([authLink, retryLink, HttpLink(endpoint)]);
+
+final client = SlingClient<Query>(
+  endpoint: Uri.parse(endpoint), // nominal: the terminating link sends
+  schema: slingSchema,
+  headers: const {'x-app-version': '1.2.0'}, // arrive as HttpLinkHeaders
+  transport: linkTransport(link),
+);
+```
+
+**Going in**, each batched document is parsed into the `Request`'s
+`DocumentNode` (so links that hash or rewrite the document — persisted
+queries — work on it), with its `variables`; sling_gql's documents are
+anonymous, so `operationName` is `null`. The client's `headers` are in the
+context as `HttpLinkHeaders`; `content-type` and `accept` are left to the
+terminating link.
+
+**Coming back**, the first `Response` of the link's stream is the result:
+`data`, `errors` (message, locations, path, extensions) and `extensions` are
+handled exactly as over HTTP — partial errors pruned before caching and
+reported on the scope, `data: null` a `SlingException`. A `LinkException`
+becomes a `SlingLinkException`, the `SlingException` the widgets already
+show:
+
+| Link exception | `message` | `statusCode` |
+| --- | --- | --- |
+| `HttpLinkServerException` (status `>= 300`) | `HTTP <code>`, the body's errors in `graphqlErrors` | the status |
+| `ServerException` of a failed connection | the cause's message | `null` |
+| any other `LinkException` | the cause's message | `null` |
+
+`linkException` keeps what the link threw (and its `originalException`).
+Anything else a link throws — a `TimeoutException` of your own — surfaces
+unchanged, like with the default transport.
+
+<Aside type="caution">
+A retry link has to catch the error of `forward(request)`: in an `async*`
+link, `yield* forward(request)` *forwards* the error instead of throwing it.
+Loop with `await for (final r in forward!(request)) yield r;` inside the
+`try`.
+</Aside>
+
+### Subscriptions over a link
+
+`linkSubscriptionTransport(link)` maps the link's stream one to one: each
+`Response` is an event, the stream completing completes the subscription, a
+stream error is a transport failure (which reconnects with `retryAfter`, see
+[Subscriptions](/sling_gql/guides/subscriptions/)), and cancelling the
+subscription cancels the link's stream. `HttpLink` cannot run subscriptions;
+route them to a websocket link:
+
+```dart
+final link = Link.split(
+  (request) =>
+      request.operation.getOperationType() == OperationType.subscription,
+  websocketLink,
+  Link.from([authLink, HttpLink(endpoint)]),
+);
+
+SlingClient<Query>(
+  endpoint: Uri.parse(endpoint),
+  schema: slingSchema,
+  transport: linkTransport(link),
+  subscriptionTransport: linkSubscriptionTransport(link),
+);
+```
+
+Or keep sling_gql's default GraphQL-over-SSE subscriptions and pass only
+`transport:`.
