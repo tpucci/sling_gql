@@ -44,6 +44,7 @@ export default defineConfig({
             { label: 'Subscriptions', slug: 'guides/subscriptions' },
             { label: 'Transport', slug: 'guides/transport' },
             { label: 'Testing', slug: 'guides/testing' },
+            { label: 'Hooks (flutter_hooks)', slug: 'guides/hooks' },
           ],
         },
         {

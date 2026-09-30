@@ -1,0 +1,173 @@
+---
+title: Hooks
+description: sling_gql_hooks — useSlingQuery, useSlingMutation and useSlingSubscription, the QueryBuilder / MutationBuilder / SubscriptionBuilder of a flutter_hooks HookWidget.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+If your app is built with [flutter_hooks](https://pub.dev/packages/flutter_hooks),
+`sling_gql_hooks` gives you the three builders as hooks. Nothing else changes:
+each hook runs on the same client machinery as its builder — one `QueryScope`
+per widget, the frame's batched request, per-field rebuilds, sticky errors,
+fetch policies — and hands out the same state types.
+
+```sh
+flutter pub add sling_gql_hooks flutter_hooks
+```
+
+| Builder | Hook | Returns |
+| --- | --- | --- |
+| `QueryBuilder<Query>` | `useSlingQuery((Query q) => …)` | `(value, QueryState)` |
+| `MutationBuilder<Mutation>` | `useSlingMutation<Mutation>()` | `(mutate, MutationState)` |
+| `SubscriptionBuilder<Subscription>` | `useSlingSubscription<Subscription>((s) => …)` | `(Subscription?, SubscriptionState)` |
+
+All three need the usual `SlingScope` above (with `schema: slingSchema`, or a
+client built from it, for the mutation and subscription roots).
+
+## `useSlingQuery`
+
+```dart
+class LaunchTile extends HookWidget {
+  const LaunchTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final (launch, state) = useSlingQuery(
+      (Query q) => q.latestLaunch?..name..rocket?.name,
+    );
+    if (state.error != null) {
+      return TextButton(onPressed: state.refetch, child: const Text('Retry'));
+    }
+    return ListTile(
+      title: Text(launch?.name ?? '…'),
+      subtitle: Text(launch?.rocket?.name ?? '…'),
+    );
+  }
+}
+```
+
+The function you pass — the **selector** — is what `QueryBuilder`'s `builder`
+is. It runs in the widget's scope on every build; every field it reads is
+recorded, joins the frame's request (flushed at the end of the frame, so a
+screen of hook widgets and builders still sends one document) and becomes a
+dependency: the widget rebuilds when a response, a mutation, a subscription
+event or an optimistic write touches it, and only then.
+
+What it returns is up to you: an accessor (the cascade above reads `name` and
+`rocket.name` and returns the launch), or a record of values:
+
+```dart
+final ((name, age), state) = useSlingQuery((Query q) => (q.me.name, q.me.age));
+```
+
+<Aside type="caution" title="Read in the selector what the build needs">
+The selector's reads are the ones that decide `state.hasMissingData`, whether
+`maxAge` data is stale, what `cacheAndNetwork` refetches and whether a sticky
+error still applies. Accessors it returns stay bound to the scope, so reading
+more fields through them later in `build` still fetches them — the same as a
+`QueryBuilder`'s child widgets — but outside that bookkeeping. The waterfall
+rule is unchanged too: read everything unconditionally, never only behind an
+`if` on fetched data (see [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/)).
+</Aside>
+
+The named parameters are `QueryBuilder`'s and, like there, are read when the
+scope is created:
+
+```dart
+final (launches, state) = useSlingQuery(
+  (Query q) => q.launches(first: 20)?.nodes,
+  fetchPolicy: FetchPolicy.cacheAndNetwork,  // see Fetch policies
+  maxAge: const Duration(minutes: 5),
+  debugLabel: 'Launches',                    // request overlay, waterfall warnings
+);
+```
+
+`debugLabel` defaults to the widget's key, then (debug builds) the type of the
+`HookWidget` calling the hook. `scheduler:` is there as well, for the rare
+widget that must not wait for the frame (see
+[Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/)).
+`state` is the regular `QueryState`: `isLoading`, `hasMissingData`,
+`isSkeleton`, `isStale`, `error`, `refetch()`, `revalidate()` — see
+[Loading states & errors](/sling_gql/guides/loading-and-errors/).
+
+## `useSlingMutation`
+
+```dart
+class FavoriteButton extends HookWidget {
+  const FavoriteButton({super.key, required this.launch});
+  final Launch launch;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = launch.id;
+    final favorite = launch.favorite ?? false;
+    final (mutate, state) = useSlingMutation<Mutation>();
+    return CupertinoButton(
+      onPressed: state.isLoading || id == null
+          ? null
+          : () => mutate(
+                (m) => m.toggleFavorite(launchId: id)?.favorite,
+                optimistic: () => launch.favorite = !favorite,
+              ),
+      child: Icon(favorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart),
+    );
+  }
+}
+```
+
+Exactly `MutationBuilder`'s contract (see [Mutations](/sling_gql/guides/mutations/)):
+`mutate` records what the body reads, sends it at once, normalizes the
+response into the cache — every widget showing the launch rebuilds — and
+resolves to the body's value, or to `null` on failure (it never throws; the
+exception is on `state.error` and the optimistic write is rolled back).
+`state` describes the latest call. `mutate` is the same function on every
+build, so it is safe as a `useCallback` / `useEffect` key. Pass `root:` to
+use a mutation root other than the `SlingScope`'s.
+
+## `useSlingSubscription`
+
+```dart
+class LiveStatus extends HookWidget {
+  const LiveStatus({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final (s, state) = useSlingSubscription<Subscription>(
+      (s) => s.launchStatusChanged?..status..name,
+      onEvent: (s) => debugPrint('${s.launchStatusChanged?.name} changed'),
+    );
+    return Row(children: [
+      if (state.isActive) const Icon(CupertinoIcons.dot_radiowaves_left_right),
+      Text(s?.launchStatusChanged?.name ?? 'waiting…'),
+    ]);
+  }
+}
+```
+
+`SubscriptionBuilder`'s contract (see [Subscriptions](/sling_gql/guides/subscriptions/)):
+the selector runs once to record the document, the connection opens at the
+end of the first frame and closes when the widget is disposed, each event is
+normalized into the cache before `onEvent` runs and the widget rebuilds.
+`retryAfter:` reopens a dropped connection; `state.retry()` does it now.
+
+<Aside>
+Give the subscription's type argument explicitly (`useSlingSubscription<Subscription>`):
+Dart does not infer it from the selector for `onEvent`'s parameter.
+`useSlingQuery` infers both of its type arguments from an annotated
+parameter, `(Query q) => …`.
+</Aside>
+
+## Testing
+
+The hooks run on the client like the builders do, so
+[`sling_gql_test`](/sling_gql/guides/testing/) applies unchanged:
+
+```dart
+final server = MockGraphQLServer(query: {'latestLaunch': launch181});
+final client = server.client(Query.root);
+await tester.pumpWidget(
+  SlingScope<Query>(client: client, schema: slingSchema, child: const LaunchTile()),
+);
+await tester.pumpUntilSettled(client);
+expect(server.requests, hasLength(1));
+```
