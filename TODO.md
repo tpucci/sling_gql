@@ -22,7 +22,7 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
 the other guides), #22 (`gc()` trigger), #46 (request overlay). Tour of the
-guides and the example (2026-09-29): #61–#65.
+guides and the example (2026-09-29): #61–#66.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -48,10 +48,14 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 61. **Example — Plain-language copy in the app** (tour, 2026-09-29). The app
     explains itself in library jargon:
-    - detail screen: "Show payloads (2) — no request, thanks to prepare" →
-      "Show payloads (2)"; once expanded, a muted caption "Loaded with the
-      screen, no new request" (the concept name `prepare` belongs in the
-      docs, not the UI);
+    - detail screen: drop the payloads toggle ("Show payloads (2) — no
+      request, thanks to prepare") entirely — a library demo has nothing to
+      do in the app's UI. Payloads become a plain section, like Crew.
+      Knock-on: the expand step of `app_test.dart` test 1 ("0 requests to
+      expand payloads"), the example-app page (`_showPayloads`, the same
+      claim), the batching guide's `prepare` excerpt ("rendered only when
+      `_showPayloads` is true"). `LaunchScreen.prepare` stays (the
+      `resolve` prefetch uses it); the `prepare` story moves to #65;
     - schedule screen blurb ("subscribes to launchScheduled and
       launchStatusChanged … written into the same Launch:<id> entity the row
       reads") → what the user will *see* ("the row appears, lifts off and
@@ -86,6 +90,29 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     - Crew rows are labelled by agency abbreviation (CSA, JAXA) with no
       header: read as field names.
     - Rocket description cut at two lines with no way to expand.
+    - The debug banner: `SlingApp`'s `CupertinoApp` has no
+      `debugShowCheckedModeBanner: false` (shows in every iOS debug run and
+      screenshot; the demos already turn it off).
+66. **Example — Nicer skeletons.** Today `SkeletonBox` is a flat
+    `kColorSurface` rectangle (radius 4) and `SkeletonText` a box of a
+    fixed width, so every placeholder row is identical and nothing says
+    "loading". Proposal:
+    - one shared shimmer (a gradient sweeping across every placeholder in
+      sync, driven by a single ancestor animation, not one controller per
+      box), off when the platform asks for reduced motion;
+    - pill-shaped text bars sized from the text style (line height, not font
+      size) and varied widths per row (seeded by index) so a list looks like
+      a list;
+    - placeholders that match the real layout: a circle where the status
+      icon goes, the detail screen's sections (title, meta line, rocket
+      table) instead of a few bars;
+    - a short fade from skeleton to content.
+    Keep it one file (`widgets/skeleton.dart`) with the same
+    `SkeletonText(text, …)` call shape — the guides show it as "all the
+    loading UI you need" — and update the loading-and-errors excerpt if the
+    API changes. Check that `app_test.dart` still settles (a repeating
+    animation must not keep `pumpUntilSettled` busy; it only waits on the
+    client).
 
 ## P5 — docs & repo hygiene
 
