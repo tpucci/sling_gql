@@ -25,6 +25,7 @@ class DemoHarness extends StatefulWidget {
     this.resetKey,
     this.latency = const Duration(milliseconds: 800),
     this.failMutations = false,
+    this.failRequests = false,
   });
 
   final Widget child;
@@ -42,6 +43,10 @@ class DemoHarness extends StatefulWidget {
   /// them, to show an optimistic write being rolled back.
   final bool failMutations;
 
+  /// Answer every request (queries too) with HTTP 503. Read on each request,
+  /// so flipping it takes effect without a restart.
+  final bool failRequests;
+
   static DemoHarnessState of(BuildContext context) =>
       context.findAncestorStateOfType<DemoHarnessState>()!;
 
@@ -56,6 +61,9 @@ class DemoHarnessState extends State<DemoHarness> {
 
   /// The client of the current run (tests wait on it).
   SlingClient<Query> get client => _client;
+
+  /// What the current run sent, newest first (tests read it).
+  List<PrintedOperation> get requests => List.unmodifiable(_requests);
 
   @override
   void initState() {
@@ -107,7 +115,8 @@ class DemoHarnessState extends State<DemoHarness> {
       schema: slingSchema,
       httpClient: httpClient,
       transport: (request) async {
-        if (widget.failMutations && _isMutation(request)) {
+        if (widget.failRequests ||
+            (widget.failMutations && _isMutation(request))) {
           await Future<void>.delayed(widget.latency);
           return http.Response('Service unavailable', 503);
         }
@@ -156,7 +165,18 @@ class DemoHarnessState extends State<DemoHarness> {
               ),
             ),
             Container(height: 1, color: kColorHairline),
-            Expanded(flex: 2, child: _RequestPanel(_requests)),
+            Expanded(
+              flex: 2,
+              child: _RequestPanel(
+                [
+                  for (final op in _requests)
+                    if (!op.document.startsWith('subscription')) op,
+                ],
+                subscriptions: _requests
+                    .where((op) => op.document.startsWith('subscription'))
+                    .length,
+              ),
+            ),
           ],
         ),
       ),
@@ -165,8 +185,11 @@ class DemoHarnessState extends State<DemoHarness> {
 }
 
 class _RequestPanel extends StatelessWidget {
-  const _RequestPanel(this.requests);
+  const _RequestPanel(this.requests, {this.subscriptions = 0});
   final List<PrintedOperation> requests;
+
+  /// Open subscriptions: connections, not requests.
+  final int subscriptions;
 
   @override
   Widget build(BuildContext context) {
@@ -183,6 +206,13 @@ class _RequestPanel extends StatelessWidget {
               color: kColorAccent,
             ),
           ),
+          if (subscriptions > 0)
+            Text(
+              subscriptions == 1
+                  ? '1 subscription open'
+                  : '$subscriptions subscriptions open',
+              style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
+            ),
           for (final (i, op) in requests.indexed) ...[
             const SizedBox(height: 8),
             Text(

@@ -3,9 +3,13 @@ import 'package:flutter/cupertino.dart';
 import '../theme.dart';
 import '../widgets/skeleton.dart';
 import 'batching_demo.dart';
+import 'caching_demo.dart';
+import 'errors_demo.dart';
 import 'fetch_policies_demo.dart';
 import 'optimistic_demo.dart';
+import 'pagination_demo.dart';
 import 'prepare_demo.dart';
+import 'subscriptions_demo.dart';
 
 /// The concept demos embedded in the website's guides, by name
 /// (`?demo=<name>` on the web build). `null` for an unknown name.
@@ -14,6 +18,10 @@ Widget? demoFor(String name) => switch (name) {
   'fetch-policies' => const FetchPoliciesDemo(),
   'optimistic' => const OptimisticDemo(),
   'prepare' => const PrepareDemo(),
+  'errors' => const ErrorsDemo(),
+  'pagination' => const PaginationDemo(),
+  'caching' => const CachingDemo(),
+  'subscriptions' => const SubscriptionsDemo(),
   _ => null,
 };
 
