@@ -4,6 +4,7 @@ import 'screens/launches_screen.dart';
 import 'screens/me_screen.dart';
 import 'screens/search_screen.dart';
 import 'theme.dart';
+import 'widgets/skeleton.dart';
 
 /// Root widget — a dark-themed Cupertino app with three tabs:
 /// "Launches", "Search" and "Me".
@@ -20,6 +21,8 @@ class SlingApp extends StatelessWidget {
     return CupertinoApp(
       title: 'sling_gql',
       debugShowCheckedModeBanner: false,
+      // One shimmer for every loading placeholder in the app.
+      builder: (context, child) => SkeletonShimmer(child: child!),
       theme: slingTheme(),
       home: CupertinoTabScaffold(
         tabBar: CupertinoTabBar(

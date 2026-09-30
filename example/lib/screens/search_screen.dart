@@ -174,7 +174,7 @@ class _HitTile extends StatelessWidget {
     final launchId = hit.launchId;
     return CupertinoListTile(
       leading: hit.title == null
-          ? const SkeletonBox(width: 28, height: 28)
+          ? const SkeletonBox.circle(size: 28)
           : Icon(hit.icon, color: kColorAccent),
       title: SkeletonText(hit.title, width: 160),
       subtitle: SkeletonText(hit.subtitle, width: 200),

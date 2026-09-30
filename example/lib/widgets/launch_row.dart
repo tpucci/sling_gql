@@ -17,8 +17,12 @@ import 'status_icon.dart';
 /// they are *its* dependencies — favouriting one launch (or a live status
 /// event) rebuilds that row only, not the whole list.
 class LaunchRow extends StatelessWidget {
-  const LaunchRow(this.launch, {super.key});
+  const LaunchRow(this.launch, {super.key, this.placeholderIndex = 0});
   final Launch launch;
+
+  /// Varies the placeholder widths while the list is loading, so repeated
+  /// skeleton rows do not all look the same.
+  final int placeholderIndex;
 
   @override
   Widget build(BuildContext context) =>
@@ -35,14 +39,17 @@ class LaunchRow extends StatelessWidget {
 
     return CupertinoListTile(
       leading: launch.isSkeleton
-          ? const SkeletonBox(width: 28, height: 28)
+          ? const SkeletonBox.circle(size: 28)
           : StatusIcon(status),
-      title: SkeletonText(launch.name, width: 160),
+      title: SkeletonText(
+        launch.name,
+        width: variedWidth(150, placeholderIndex),
+      ),
       subtitle: SkeletonText(
         date == null
             ? null
             : '${formatDate(date)} · $rocketName · ${statusLabel(status)}',
-        width: 200,
+        width: variedWidth(190, placeholderIndex + 5),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

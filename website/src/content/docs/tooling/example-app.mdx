@@ -334,21 +334,31 @@ The top of `NetworkLogScreen` has two more tools:
 
 ## Skeletons
 
-`widgets/skeleton.dart` is two widgets, and the comment on `SkeletonText`
-says the whole point:
+`widgets/skeleton.dart` has one job, and the comment on `SkeletonText` says it:
 
 ```dart title="example/lib/widgets/skeleton.dart"
-/// Renders [text], or a skeleton box of [width] when `null`.
+/// Renders [text], or a text-shaped placeholder when it is `null`.
 ///
 /// This is the whole "loading state" story: a missing value is `null`,
 /// nothing else to wire.
 ```
 
-`SkeletonBox` is a surface-coloured rounded rectangle; `SkeletonText` renders
-the real text if it's non-null, or a `SkeletonBox` sized to `width`/font size
-if it's `null`. There's no separate loading branch in any screen — every place
-that shows a string calls `SkeletonText` and lets the accessor's
-`null`-while-fetching semantics do the rest.
+There's no separate loading branch in any screen: every place that shows a
+string calls `SkeletonText` and lets the accessor's `null`-while-fetching
+do the rest. The rest is polish:
+
+- **Shaped like the content.** The bar is a pill as tall as a line of the text
+  style, so nothing jumps when the text arrives, and it fades in over it.
+  `SkeletonBox.circle` stands in for status icons.
+- **A screenful of rows.** A skeleton list has one element; the Launches
+  screen shows it as eight `LaunchRow`s, each with its own widths
+  (`variedWidth`), so the list looks like a list while it loads.
+- **One shimmer.** `SkeletonShimmer`, above the whole app, sweeps a highlight
+  across every placeholder in sync from a single animation. It runs only while
+  a placeholder is on screen, and not at all when the system asks for reduced
+  motion.
+
+Pick 2 s in the network log's latency picker to look at them.
 
 ## The end-to-end tests
 

@@ -42,6 +42,7 @@ const _allSentinel = LaunchStatus.unknown;
 
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
+  static const placeholderRows = 8;
 
   /// Segment values: `null` = All, otherwise a [LaunchStatus].
   static const _segments = <LaunchStatus?, String>{
@@ -139,14 +140,22 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
                   }
 
                   final launches = state.items;
+                  final loading =
+                      state.hasMissingData &&
+                      launches.length == 1 &&
+                      launches.first.isSkeleton;
 
                   return CustomScrollView(
                     key: const ValueKey('launches-scroll'),
                     slivers: [
                       CupertinoSliverRefreshControl(onRefresh: state.refetch),
+                      // While the first page loads, the list holds one
+                      // skeleton launch; show it as a screenful of rows.
                       SliverList.builder(
-                        itemCount: launches.length,
-                        itemBuilder: (context, i) => LaunchRow(launches[i]),
+                        itemCount: loading ? placeholderRows : launches.length,
+                        itemBuilder: (context, i) => loading
+                            ? LaunchRow(launches.first, placeholderIndex: i)
+                            : LaunchRow(launches[i]),
                       ),
                       SliverToBoxAdapter(
                         child: Padding(

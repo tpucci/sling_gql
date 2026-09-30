@@ -116,7 +116,7 @@ class _LaunchScreenState extends State<LaunchScreen> {
                     // Follows Launch:<id>.status: a subscription event
                     // (schedule a launch, watch it fly) updates it live.
                     if (launch.isSkeleton)
-                      const SkeletonBox(width: 32, height: 32)
+                      const SkeletonBox.circle(size: 32)
                     else
                       StatusIcon(
                         status,

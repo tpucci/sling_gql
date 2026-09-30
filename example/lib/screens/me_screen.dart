@@ -115,7 +115,7 @@ class _ProfileHeader extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: initials == null
-                ? const SkeletonBox(width: 28, height: 20)
+                ? const SkeletonBox(width: 28, height: 12)
                 : Text(
                     initials!,
                     style: const TextStyle(

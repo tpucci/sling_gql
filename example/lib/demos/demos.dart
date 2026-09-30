@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 
 import '../theme.dart';
+import '../widgets/skeleton.dart';
 import 'batching_demo.dart';
 import 'fetch_policies_demo.dart';
 import 'optimistic_demo.dart';
@@ -24,6 +25,7 @@ class DemoApp extends StatelessWidget {
     title: 'sling_gql demo',
     theme: slingTheme(),
     debugShowCheckedModeBanner: false,
+    builder: (context, child) => SkeletonShimmer(child: child!),
     home: demo,
   );
 }
