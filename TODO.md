@@ -48,14 +48,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 61. **Example — Plain-language copy in the app** (tour, 2026-09-29). The app
     explains itself in library jargon:
-    - detail screen: drop the payloads toggle ("Show payloads (2) — no
-      request, thanks to prepare") entirely — a library demo has nothing to
-      do in the app's UI. Payloads become a plain section, like Crew.
-      Knock-on: the expand step of `app_test.dart` test 1 ("0 requests to
-      expand payloads"), the example-app page (`_showPayloads`, the same
-      claim), the batching guide's `prepare` excerpt ("rendered only when
-      `_showPayloads` is true"). `LaunchScreen.prepare` stays (the
-      `resolve` prefetch uses it); the `prepare` story moves to #65;
     - schedule screen blurb ("subscribes to launchScheduled and
       launchStatusChanged … written into the same Launch:<id> entity the row
       reads") → what the user will *see* ("the row appears, lifts off and
@@ -86,13 +78,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 63. **Example — Small UI fixes from the tour.**
     - Status icons have no legend; the grey "pause" (scrubbed) covers most
       of the first screen, and there is no Scrubbed segment.
-    - Rocket mass "5000000 kg" unformatted; payload mass "? kg" when unknown.
+    - Rocket mass "5000000 kg" unformatted.
     - Crew rows are labelled by agency abbreviation (CSA, JAXA) with no
       header: read as field names.
     - Rocket description cut at two lines with no way to expand.
-    - The debug banner: `SlingApp`'s `CupertinoApp` has no
-      `debugShowCheckedModeBanner: false` (shows in every iOS debug run and
-      screenshot; the demos already turn it off).
 66. **Example — Nicer skeletons.** Today `SkeletonBox` is a flat
     `kColorSurface` rectangle (radius 4) and `SkeletonText` a box of a
     fixed width, so every placeholder row is identical and nothing says
@@ -242,6 +231,8 @@ Kept for number stability; see git history for details.
 
 58. Example — Web platform + in-browser mock API: `mock-api/app.mjs` (`createMockYoga`, Node-free) served by `server.mjs` and bundled from `browser.mjs` (`npm run build:browser` → `example/web/mock-api.js`); `example/lib/in_browser_api.dart` swaps the `http.Client` on web (queries, mutations, SSE streamed from the Fetch `Response`); `melos run build:web` → `website/public/demo/`; site page `guides/try-it` with `LiveApp.astro` (click-to-load iframe, restart); CI builds the web target, `website.yml` ships it.
 59. Docs — Live demo per concept: `example/lib/demos/` (`DemoHarness`: own client per run, request panel; `?demo=batching|fetch-policies|optimistic`), `DemoSource.astro` pulls `// #region` blocks into the guides (shown code = running code), `LiveApp demo=`; embedded in batching, fetch-policies and mutations guides; `example/test/demos_test.dart`. Found and fixed on the way: a builder saw the previous run's `isStale` / background `isLoading` (the scope now re-runs once when they change).
+
+Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no request, thanks to prepare" toggle is gone (payloads are a plain section, like Crew; unknown mass omitted), with the matching test step and docs; no debug banner in `SlingApp`.
 
 ## Explicitly not planned
 
