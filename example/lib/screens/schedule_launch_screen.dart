@@ -220,11 +220,10 @@ class _ScheduleLaunchScreenState extends State<ScheduleLaunchScreen> {
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  'The server runs the launch sequence by itself once the '
-                  'mutation lands: SCHEDULED → IN_FLIGHT → SUCCESS / FAILURE. '
-                  'Nothing polls — the list subscribes to launchScheduled and '
-                  'launchStatusChanged, and each event is written into the '
-                  'same Launch:<id> entity the row reads.',
+                  'Your launch appears at the top of the list, lifts off a '
+                  'few seconds later and lands on its own (put "fail" in the '
+                  'name to see one fail). Nothing refreshes: the server tells '
+                  'the app as it happens.',
                   style: TextStyle(color: kColorTextSecondary, fontSize: 13),
                 ),
               ],

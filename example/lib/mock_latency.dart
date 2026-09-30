@@ -6,7 +6,7 @@ import 'package:sling_gql/sling_gql.dart';
 /// can be made visible on demand (the network log screen has the picker).
 enum MockLatency {
   /// No header: the server's `LATENCY_MS` (400 ms unless overridden) applies.
-  serverDefault(null, 'Server'),
+  serverDefault(null, 'Default'),
   off(0, 'Off'),
   halfSecond(500, '500 ms'),
   twoSeconds(2000, '2 s');

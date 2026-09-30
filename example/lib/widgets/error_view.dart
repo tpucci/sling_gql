@@ -1,5 +1,7 @@
 import 'package:flutter/cupertino.dart';
 
+import '../in_browser_api.dart';
+
 /// Shown by a screen's [QueryBuilder] when `state.error` is set (sticky until
 /// `refetch()`); a hint plus a retry button that calls it.
 class ErrorView extends StatelessWidget {
@@ -17,11 +19,15 @@ class ErrorView extends StatelessWidget {
           const Icon(CupertinoIcons.exclamationmark_triangle, size: 40),
           const SizedBox(height: 8),
           Text('$error', textAlign: TextAlign.center),
-          const SizedBox(height: 8),
-          const Text(
-            'Is the mock API running? `cd mock-api && npm start`',
-            style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
-          ),
+          // On iOS the API is `npm start` on the Mac; on the web it runs in
+          // the page, so there is nothing to start.
+          if (!mockApiInBrowser) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Is the mock API running? `cd mock-api && npm start`',
+              style: TextStyle(color: CupertinoColors.systemGrey, fontSize: 13),
+            ),
+          ],
           const SizedBox(height: 16),
           CupertinoButton.filled(
             onPressed: onRetry,

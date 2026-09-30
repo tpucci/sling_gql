@@ -22,7 +22,7 @@ Worth a look:
 
 - **Network log** (antenna icon, top right): every document the client sent,
   with the request count. Its screen also has the dev tools:
-  - a **mock latency** picker (Server / Off / 500 ms / 2 s), sent per request
+  - a **mock latency** picker (Default / Off / 500 ms / 2 s), sent per request
     as an `x-mock-latency-ms` header through `SlingClient(transport:)` — pick
     2 s to watch the skeletons (`lib/mock_latency.dart`);
   - a live **cache** summary: entities per type and `cache.snapshot` size,
