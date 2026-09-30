@@ -26,3 +26,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    # The network log's documents (a bundled font: the web build has no
+    # system monospace). SIL Open Font License, see assets/fonts.
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMonoNL-Regular.ttf

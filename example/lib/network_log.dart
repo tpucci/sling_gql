@@ -1,22 +1,87 @@
+import 'dart:convert';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
 
 import 'mock_latency.dart';
+import 'theme.dart';
 import 'widgets/cache_stats.dart';
 
-/// Keeps every GraphQL document the client sent, newest first. The whole point
-/// of the PoC is to *see* what queries the widgets produce.
+/// One operation the client sent: the printed document, and — for requests,
+/// once [NetworkLog.transport] saw the response — how it went.
+class LogEntry {
+  LogEntry(this.operation, this.number) : sentAt = DateTime.now();
+
+  final PrintedOperation operation;
+
+  /// 1 for the first request (or subscription) of the session.
+  final int number;
+  final DateTime sentAt;
+
+  String get document => operation.document;
+  Map<String, Object?> get variables => operation.variables;
+
+  /// `query`, `mutation` or `subscription`.
+  String get type => document.substring(0, document.indexOf(RegExp(r'[\s({]')));
+
+  /// The root fields, by name (not alias): `company · stats · launches`.
+  List<String> get rootFields => [
+    for (final line in document.split('\n'))
+      if (line.startsWith('  ') &&
+          !line.startsWith('   ') &&
+          _name.hasMatch(line.trim()))
+        (_aliased.firstMatch(line.trim())?.group(1) ??
+            line.trim().split(RegExp(r'[\s({]')).first),
+  ];
+
+  Duration? duration;
+  int? statusCode;
+  int? bytes;
+  String? responseBody;
+  Object? failure;
+
+  bool get isDone => statusCode != null || failure != null;
+
+  /// HTTP error, transport failure or GraphQL `errors`.
+  String? get problem {
+    if (failure != null) return '$failure';
+    final code = statusCode;
+    if (code != null && code >= 400) return 'HTTP $code';
+    final body = responseBody;
+    if (body != null && body.contains('"errors"')) {
+      try {
+        final errors = (jsonDecode(body) as Map)['errors'] as List?;
+        if (errors != null && errors.isNotEmpty) {
+          return errors.map((e) => (e as Map)['message']).join('\n');
+        }
+      } on FormatException {
+        // Not JSON: nothing more to say than the status.
+      }
+    }
+    return null;
+  }
+}
+
+final _aliased = RegExp(r'^\w+:\s*(\w+)');
+final _name = RegExp(r'^\w');
+
+/// Keeps every GraphQL operation the client sent, newest first. The whole
+/// point of the PoC is to *see* what the widgets produce.
 ///
 /// Subscriptions are long-lived connections, not round trips: they go to
-/// [subscriptions] so [entries] keeps counting requests.
+/// [subscriptions], so [entries] keeps counting requests.
 class NetworkLog extends ChangeNotifier {
-  final List<PrintedOperation> entries = [];
-  final List<PrintedOperation> subscriptions = [];
+  final List<LogEntry> entries = [];
+  final List<LogEntry> subscriptions = [];
 
+  /// For `SlingClient(onOperation:)`.
   void add(PrintedOperation op) {
     final isSubscription = op.document.startsWith('subscription');
-    (isSubscription ? subscriptions : entries).insert(0, op);
+    final list = isSubscription ? subscriptions : entries;
+    list.insert(0, LogEntry(op, list.length + 1));
     if (kDebugMode) {
       final label = isSubscription
           ? 'subscription #${subscriptions.length}'
@@ -24,6 +89,43 @@ class NetworkLog extends ChangeNotifier {
       debugPrint('[sling_gql] $label\n${op.document}\n${op.variables}');
     }
     notifyListeners();
+  }
+
+  /// Wraps a [Transport] to record each request's status, size, response
+  /// and duration on its entry.
+  Transport transport(Transport next) => (request) async {
+    final entry = _pendingFor(request);
+    final stopwatch = Stopwatch()..start();
+    try {
+      final response = await next(request);
+      entry
+        ?..duration = stopwatch.elapsed
+        ..statusCode = response.statusCode
+        ..bytes = response.bodyBytes.length
+        ..responseBody = response.body;
+      return response;
+    } catch (e) {
+      entry
+        ?..duration = stopwatch.elapsed
+        ..failure = e;
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  };
+
+  /// The oldest request still waiting whose document is [request]'s.
+  LogEntry? _pendingFor(http.Request request) {
+    final Object? query;
+    try {
+      query = (jsonDecode(request.body) as Map)['query'];
+    } on FormatException {
+      return null;
+    }
+    for (final entry in entries.reversed) {
+      if (!entry.isDone && entry.document == query) return entry;
+    }
+    return null;
   }
 
   void clear() {
@@ -44,8 +146,10 @@ class NetworkLogScope extends InheritedNotifier<NetworkLog> {
       context.dependOnInheritedWidgetOfExactType<NetworkLogScope>()!.notifier!;
 }
 
-/// Nav-bar button showing the request count; taps open the log (with the
-/// latency picker and cache stats on top).
+String _plural(int n, String one, [String? many]) =>
+    '$n ${n == 1 ? one : many ?? '${one}s'}';
+
+/// Nav-bar button with the request count; opens the log.
 class NetworkLogButton extends StatelessWidget {
   const NetworkLogButton({super.key});
 
@@ -60,66 +164,314 @@ class NetworkLogButton extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(CupertinoIcons.antenna_radiowaves_left_right, size: 20),
+          const Icon(CupertinoIcons.antenna_radiowaves_left_right, size: 18),
           const SizedBox(width: 4),
-          Text('${log.entries.length}'),
+          Text(
+            _plural(log.entries.length, 'request'),
+            style: const TextStyle(fontSize: 14),
+          ),
         ],
       ),
     );
   }
 }
 
-class NetworkLogScreen extends StatelessWidget {
+enum _Section { requests, subscriptions, tools }
+
+/// Requests · Subscriptions · Dev tools (mock latency, cache).
+class NetworkLogScreen extends StatefulWidget {
   const NetworkLogScreen({super.key});
+
+  @override
+  State<NetworkLogScreen> createState() => _NetworkLogScreenState();
+}
+
+class _NetworkLogScreenState extends State<NetworkLogScreen> {
+  var _section = _Section.requests;
+  var _showAdded = false;
 
   @override
   Widget build(BuildContext context) {
     final log = NetworkLogScope.of(context);
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: Text(
-          '${log.entries.length} request(s)'
-          '${log.subscriptions.isEmpty ? '' : ' · ${log.subscriptions.length} subscription(s)'}',
+        middle: const Text('Network'),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: log.entries.isEmpty && log.subscriptions.isEmpty
+              ? null
+              : log.clear,
+          child: const Text('Clear'),
         ),
       ),
       child: SafeArea(
-        child: ListView.separated(
-          padding: const EdgeInsets.all(12),
-          // Dev tools on top, then the log.
-          itemCount: 1 + log.entries.length + log.subscriptions.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            if (index == 0) return const _DevTools();
-            final i = index - 1;
-            // Subscriptions first (they are open), then requests newest first.
-            final isSubscription = i < log.subscriptions.length;
-            final op = isSubscription
-                ? log.subscriptions[i]
-                : log.entries[i - log.subscriptions.length];
-            final n = isSubscription
-                ? log.subscriptions.length - i
-                : log.entries.length - (i - log.subscriptions.length);
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+              child: CupertinoSlidingSegmentedControl<_Section>(
+                groupValue: _section,
+                onValueChanged: (s) {
+                  if (s != null) setState(() => _section = s);
+                },
+                children: {
+                  _Section.requests: _segment(
+                    'Requests (${log.entries.length})',
+                  ),
+                  _Section.subscriptions: _segment(
+                    'Subscriptions (${log.subscriptions.length})',
+                  ),
+                  _Section.tools: _segment('Dev tools'),
+                },
+              ),
+            ),
+            Expanded(
+              child: switch (_section) {
+                _Section.requests => _OperationList(
+                  entries: log.entries,
+                  empty: 'No request yet.',
+                  showAdded: _showAdded,
+                  onShowAdded: (v) => setState(() => _showAdded = v),
+                ),
+                _Section.subscriptions => _OperationList(
+                  entries: log.subscriptions,
+                  empty: 'No subscription open.',
+                  showAdded: _showAdded,
+                  onShowAdded: (v) => setState(() => _showAdded = v),
+                ),
+                _Section.tools => const _DevTools(),
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _segment(String label) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 4),
+    child: Text(label, style: const TextStyle(fontSize: 13)),
+  );
+}
+
+class _OperationList extends StatelessWidget {
+  const _OperationList({
+    required this.entries,
+    required this.empty,
+    required this.showAdded,
+    required this.onShowAdded,
+  });
+
+  final List<LogEntry> entries;
+  final String empty;
+  final bool showAdded;
+  final ValueChanged<bool> onShowAdded;
+
+  @override
+  Widget build(BuildContext context) {
+    if (entries.isEmpty) {
+      return Center(
+        child: Text(empty, style: const TextStyle(color: kColorTextSecondary)),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+      itemCount: entries.length + 1,
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Show what sling_gql adds (__typename, aliases)',
+                  style: TextStyle(fontSize: 13, color: kColorTextSecondary),
+                ),
+              ),
+              CupertinoSwitch(value: showAdded, onChanged: onShowAdded),
+            ],
+          );
+        }
+        final entry = entries[i - 1];
+        return _EntryTile(
+          key: ObjectKey(entry),
+          entry: entry,
+          showAdded: showAdded,
+        );
+      },
+    );
+  }
+}
+
+/// One line per operation; tap for the document, variables and response.
+class _EntryTile extends StatefulWidget {
+  const _EntryTile({super.key, required this.entry, required this.showAdded});
+  final LogEntry entry;
+  final bool showAdded;
+
+  @override
+  State<_EntryTile> createState() => _EntryTileState();
+}
+
+class _EntryTileState extends State<_EntryTile> {
+  var _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = widget.entry;
+    final problem = e.problem;
+    final isSubscription = e.type == 'subscription';
+    final result = isSubscription
+        ? 'open'
+        : !e.isDone
+        ? 'sending…'
+        : [
+            if (e.duration != null) '${e.duration!.inMilliseconds} ms',
+            if (e.bytes != null) _size(e.bytes!),
+          ].join(' · ');
+    final vars = e.variables.isEmpty ? null : jsonEncode(e.variables);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: kColorSurface,
+          borderRadius: BorderRadius.circular(10),
+          border: problem == null ? null : Border.all(color: kColorCoral),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
                 Text(
-                  isSubscription ? 'subscription #$n (open)' : '#$n',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  '#${e.number}',
+                  style: const TextStyle(
+                    color: kColorTextSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _TypeBadge(e.type),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    e.rootFields.join(' · '),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(
+                  _expanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  size: 14,
+                  color: kColorTextSecondary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [_time(e.sentAt), result, ?vars].join(' · '),
+              style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
+              maxLines: _expanded ? null : 1,
+              overflow: _expanded ? null : TextOverflow.ellipsis,
+            ),
+            if (problem != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                problem,
+                style: const TextStyle(fontSize: 12, color: kColorCoral),
+              ),
+            ],
+            if (_expanded) ...[
+              const SizedBox(height: 8),
+              _Code(
+                widget.showAdded ? e.document : readableDocument(e.document),
+              ),
+              if (e.responseBody case final body?) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Response',
+                  style: TextStyle(fontSize: 12, color: kColorTextSecondary),
                 ),
                 const SizedBox(height: 4),
-                _Code(op.document),
-                if (op.variables.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  _Code('variables: ${op.variables}'),
-                ],
+                _Code(_pretty(body)),
               ],
-            );
-          },
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 32),
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: e.document)),
+                child: const Text(
+                  'Copy document',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
 }
+
+class _TypeBadge extends StatelessWidget {
+  const _TypeBadge(this.type);
+  final String type;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (type) {
+      'mutation' => kColorCoral,
+      'subscription' => CupertinoColors.systemGreen,
+      _ => CupertinoColors.systemBlue,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(type, style: TextStyle(fontSize: 11, color: color)),
+    );
+  }
+}
+
+/// The document as the widgets read it: without the `__typename`s the
+/// printer adds for the cache, and without the aliases it gives fields with
+/// arguments (`launch_1ov936k1qddray: launch(…)`) or read in several
+/// fragments (`name__Launch: name`).
+String readableDocument(String document) => document
+    .split('\n')
+    .where((line) => line.trim() != '__typename')
+    .map(
+      (line) => line
+          .replaceAllMapped(_hashAlias, (m) => '')
+          .replaceAllMapped(_fragmentAlias, (m) => ''),
+    )
+    .join('\n');
+
+final _hashAlias = RegExp(r'\b(\w+)_[0-9a-z]{6,}: (?=\1\b)');
+final _fragmentAlias = RegExp(r'\b(\w+)__\w+: (?=\1\b)');
+
+String _pretty(String body) {
+  try {
+    final text = const JsonEncoder.withIndent('  ').convert(jsonDecode(body));
+    return text.length > 4000 ? '${text.substring(0, 4000)}\n…' : text;
+  } on FormatException {
+    return body;
+  }
+}
+
+String _size(int bytes) =>
+    bytes < 1024 ? '$bytes B' : '${(bytes / 1024).toStringAsFixed(1)} KB';
+
+String _time(DateTime t) =>
+    [t.hour, t.minute, t.second].map((v) => '$v'.padLeft(2, '0')).join(':');
 
 /// Mock latency (to watch skeletons) and a live view of the cache.
 class _DevTools extends StatelessWidget {
@@ -128,17 +480,22 @@ class _DevTools extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final latency = MockLatencyScope.maybeOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return ListView(
+      padding: const EdgeInsets.all(12),
       children: [
         if (latency != null) ...[
           const Text(
             'Mock API latency',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
+          const SizedBox(height: 4),
+          const Text(
+            'Slow the network down to watch the loading placeholders.',
+            style: TextStyle(fontSize: 12, color: kColorTextSecondary),
+          ),
           const SizedBox(height: 8),
           MockLatencyPicker(latency: latency),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
         ],
         const CacheStats(),
       ],
@@ -155,12 +512,17 @@ class _Code extends StatelessWidget {
     width: double.infinity,
     padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
-      color: CupertinoColors.systemGrey6.resolveFrom(context),
+      color: kColorBackground,
       borderRadius: BorderRadius.circular(6),
     ),
     child: Text(
       text,
-      style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+      style: const TextStyle(
+        fontFamily: 'JetBrainsMono',
+        fontSize: 11,
+        height: 1.35,
+        color: kColorTextPrimary,
+      ),
     ),
   );
 }

@@ -35,7 +35,8 @@ void main() {
     // Requests (not subscriptions) carry the latency picked in the network
     // log screen; subscriptions share the same `http.Client`.
     httpClient: httpClient,
-    transport: latency.transport(httpClient),
+    // Timing, status and response of each request, for the network log.
+    transport: log.transport(latency.transport(httpClient)),
     onOperation: log.add,
     listRules: listRules,
     // A dropped subscription (server restarted) reopens itself.

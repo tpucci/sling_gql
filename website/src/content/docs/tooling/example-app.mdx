@@ -298,39 +298,44 @@ screen, which finds the hit's `Launch:<id>` entity in cache. See
 
 ## Network log
 
-`network_log.dart`'s `NetworkLog` is a `ChangeNotifier` that keeps every
-`PrintedOperation` the client sent, newest first, and also prints it to the
-console:
+Tap **N requests** in any nav bar. The screen has three parts:
 
-```dart title="example/lib/network_log.dart"
-void add(PrintedOperation op) {
-  entries.insert(0, op);
-  debugPrint('[sling_gql] request #${entries.length}\n${op.document}\n${op.variables}');
-  notifyListeners();
-}
+- **Requests**, newest first, one line each: number, type (`query`,
+  `mutation`), the root fields by name (`company · stats · launches`), then
+  the time, duration, size and variables. A failed request has a red border
+  and its error. Tap a line for the document, the response and "Copy
+  document". The document shows what the widgets read; the switch on top
+  adds back what sling_gql puts in for the cache (`__typename`, the
+  `field_<hash>` aliases).
+- **Subscriptions**, the ones open.
+- **Dev tools**: the mock latency and the cache.
+
+`NetworkLog` (`network_log.dart`) is a `ChangeNotifier` with two hooks on the
+client:
+
+```dart title="example/lib/main.dart"
+onOperation: log.add,                                  // every printed document
+transport: log.transport(latency.transport(httpClient)), // its status, size, time
 ```
 
-`NetworkLogScope` (an `InheritedNotifier`) makes it available anywhere in the
-tree; `NetworkLogButton` in the nav bar shows the running count and opens
-`NetworkLogScreen`, a plain list of every document and its variables. This is
-the whole debugging story for the PoC — no devtools extension, just "read
-what was actually sent."
+`onOperation` records each operation as it is sent; the transport wrapper finds
+its entry again by document and adds what came back. That is the whole
+debugging story for the PoC: no devtools extension, just "read what was
+actually sent."
 
 ### Dev tools: latency and cache
 
-The top of `NetworkLogScreen` has two more tools:
-
-- **Mock API latency** — Default / Off / 500 ms / 2 s. `MockLatencyController`
+- **Mock API latency**: Default / Off / 500 ms / 2 s. `MockLatencyController`
   (`mock_latency.dart`) is a `ValueNotifier` whose `transport(httpClient)`
   adds an `x-mock-latency-ms` header to every request, which the mock API
-  honours over `LATENCY_MS` ("Default" sends no header). Pick 2 s, pull to
-  refresh or switch segments, and the skeletons stay on screen long enough
+  honours over `LATENCY_MS` ("Default" sends no header). Pick 2 s, then
+  switch segments, and the loading placeholders stay on screen long enough
   to look at. Subscriptions do not go through `transport`.
-- **Cache** — `CacheStats` (`widgets/cache_stats.dart`) counts the entities
-  per type in `client.cache.entityKeys` and the size of `cache.snapshot`
-  (what a persistence layer would store), and rebuilds on every
-  `cache.onChange` event, so the numbers move while the screens behind it
-  fetch, mutate or receive subscription events.
+- **Cache**: `CacheStats` (`widgets/cache_stats.dart`) counts the objects
+  per type in `client.cache.entityKeys` ("20 launches · 4 rockets · …") and
+  the size of `cache.snapshot` (what a persistence layer would store). It
+  rebuilds on every `cache.onChange` event, so the numbers move while the
+  screens behind it fetch, mutate or receive subscription events.
 
 ## Skeletons
 

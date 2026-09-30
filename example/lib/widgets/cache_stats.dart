@@ -67,25 +67,45 @@ class _CacheStatsState extends State<CacheStats> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '$entityCount entities · '
-          'snapshot ${snapshotKb.toStringAsFixed(1)} KB',
-          key: const ValueKey('cache-stats'),
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        const Text('Cache', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
-        Text(
-          types.map((e) => '${e.key} ${e.value}').join(' · '),
-          style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
+        const Text(
+          'Every object the app has received, stored once. Updates live.',
+          style: TextStyle(fontSize: 12, color: kColorTextSecondary),
         ),
+        const SizedBox(height: 8),
+        Text(
+          '${_plural(entityCount, 'object')} · '
+          '${snapshotKb.toStringAsFixed(1)} KB',
+          key: const ValueKey('cache-stats'),
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          types.map((e) => _plural(e.value, _typeName(e.key))).join(' · '),
+          style: const TextStyle(fontSize: 13),
+        ),
+        const SizedBox(height: 2),
         Text(
           _changeCount == 0
-              ? 'no change since opened'
-              : '$_changeCount change(s) since opened · '
-                    'last touched $_lastTouched key(s)',
+              ? 'No update since you opened this.'
+              : '${_plural(_changeCount, 'update')} since you opened this '
+                    '(last one touched ${_plural(_lastTouched, 'field')}).',
           style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
         ),
       ],
     );
   }
 }
+
+String _plural(int n, String one) => '$n ${n == 1 ? one : _many(one)}';
+
+String _many(String one) => switch (one) {
+  _ when one.endsWith('y') && !one.endsWith('ay') =>
+    '${one.substring(0, one.length - 1)}ies',
+  _ when RegExp(r'(s|x|ch|sh)$').hasMatch(one) => '${one}es',
+  _ => '${one}s',
+};
+
+/// `Launchpad` → `launchpad`: the type name, as a word.
+String _typeName(String type) => type.toLowerCase();

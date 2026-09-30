@@ -14,16 +14,18 @@ back.
 
 ## Things to try
 
-- **Count the requests.** Tap the antenna icon, top right of Launches: the header, the
-  list and every row on the first screen came in **one** request. Scroll down to load
+- **Count the requests.** Tap **1 request**, top right of Launches: the header, the list
+  and every row on the first screen came in **one** request. Tap it to see what it asked
+  for. Scroll down to load
   more and check again: one more. See
   [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/).
-- **Slow the network down.** On that screen, set the latency to **2 s**, go back and open
+- **Slow the network down.** On that screen's **Dev tools**, set the latency to **2 s**,
+  go back and open
   a status segment you have not opened yet: placeholders, then data, from the same widget
   code. See [Loading states & errors](/sling_gql/guides/loading-and-errors/).
 - **Open a launch.** Its name and status appear at once: the list already had them. Only
-  what the list did not show is fetched. The cache counts on the network log screen show
-  each launch stored once. See [Caching](/sling_gql/guides/caching/).
+  what the list did not show is fetched. The cache counts under **Dev tools** show each
+  launch stored once. See [Caching](/sling_gql/guides/caching/).
 - **Toggle a favourite.** The heart fills before the server answers. Go back: the list
   row and the Me tab agree, with no refetch. See [Mutations](/sling_gql/guides/mutations/).
 - **Schedule a launch.** Tap **+** on Launches. The "Live" banner and the row follow it

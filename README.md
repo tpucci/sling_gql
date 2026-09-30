@@ -97,7 +97,7 @@ The packages are on pub.dev:
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab
 showing the viewer profile and their favourite launches. It prints every
-GraphQL document it sends to the console and shows them in-app (antenna icon,
+GraphQL document it sends to the console and shows them in-app (**N requests**,
 top right). Server latency is `LATENCY_MS` (default 400 ms) so skeletons are
 visible; the log screen also has a latency picker (an `x-mock-latency-ms`
 header per request) and a live view of the cache.

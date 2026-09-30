@@ -34,7 +34,7 @@ void main() {
         endpoint: Uri.parse('http://localhost:4000/graphql'),
         schema: slingSchema,
         httpClient: httpClient,
-        transport: latency.transport(httpClient),
+        transport: log.transport(latency.transport(httpClient)),
         onOperation: log.add,
         listRules: listRules,
         subscriptionRetryAfter: const Duration(seconds: 3),
@@ -644,6 +644,25 @@ void main() {
       await settle(tester);
       expect(log.entries, hasLength(1), reason: 'opening the log is free');
 
+      // One collapsed line per request: number, type, root fields by name,
+      // and what the transport saw.
+      final first = log.entries.single;
+      expect(first.rootFields, ['company', 'stats', 'launches']);
+      expect(first.statusCode, 200);
+      expect(first.duration, isNotNull);
+      expect(find.text('company · stats · launches'), findsOneWidget);
+      expect(find.text('Requests (1)'), findsOneWidget);
+      // Expanded, the document reads like what the widgets asked for.
+      await tester.tap(find.text('company · stats · launches'));
+      await tester.pump();
+      expect(find.textContaining(r'launches(first: $first'), findsOneWidget);
+      final readable = readableDocument(first.document);
+      expect(readable, isNot(contains('__typename')));
+      expect(find.text(readable), findsOneWidget);
+
+      await tester.tap(find.text('Dev tools'));
+      await tester.pump();
+
       String stats() =>
           tester.widget<Text>(find.byKey(const ValueKey('cache-stats'))).data!;
       int typeCount(String type) =>
@@ -651,7 +670,7 @@ void main() {
       final entitiesBefore = client.cache.entityKeys
           .where((k) => k.contains(':'))
           .length;
-      expect(stats(), startsWith('$entitiesBefore entities · snapshot '));
+      expect(stats(), startsWith('$entitiesBefore objects · '));
       expect(typeCount('Launchpad'), 0, reason: 'the list never selects one');
 
       expect(latency.value, MockLatency.serverDefault);
@@ -680,12 +699,12 @@ void main() {
       await tester.pump();
       final launchpads = typeCount('Launchpad');
       expect(launchpads, greaterThan(0));
+      expect(stats(), startsWith('${entitiesBefore + launchpads} objects · '));
+      expect(find.textContaining('$launchpads launchpad'), findsOneWidget);
       expect(
-        stats(),
-        startsWith('${entitiesBefore + launchpads} entities · snapshot '),
+        find.textContaining(RegExp(r'\d+ updates? since you opened this')),
+        findsOneWidget,
       );
-      expect(find.textContaining('Launchpad $launchpads'), findsOneWidget);
-      expect(find.textContaining('change(s) since opened'), findsOneWidget);
     },
   );
 }

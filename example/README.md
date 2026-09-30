@@ -20,12 +20,13 @@ on iOS, one that answers from the in-page mock API on the web.
 
 Worth a look:
 
-- **Network log** (antenna icon, top right): every document the client sent,
-  with the request count. Its screen also has the dev tools:
+- **Network log** (**N requests**, top right): one line per request (fields,
+  time, duration, size; tap for the document and the response), the open
+  subscriptions, and the dev tools:
   - a **mock latency** picker (Default / Off / 500 ms / 2 s), sent per request
     as an `x-mock-latency-ms` header through `SlingClient(transport:)` — pick
     2 s to watch the skeletons (`lib/mock_latency.dart`);
-  - a live **cache** summary: entities per type and `cache.snapshot` size,
+  - a live **cache** summary: objects per type and `cache.snapshot` size,
     rebuilt on `cache.onChange` (`lib/widgets/cache_stats.dart`).
 - **Prefetch**: tapping a row calls `LaunchScreen.open`, which starts the
   detail query with `client.resolve` before pushing the route; the screen joins
