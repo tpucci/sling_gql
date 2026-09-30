@@ -130,8 +130,9 @@ You don't have to spot these by eye: `SlingClient(warnOnWaterfall: true)` (the d
 when asserts are enabled, i.e. debug builds and tests) reports every waterfall through
 `onWaterfall` (a `void Function(WaterfallWarning)`, printed by default). Each
 `WaterfallWarning` names the scope (`QueryBuilder.debugLabel`, falling back to the
-widget's `key` then a generated `QueryScope#n`) and the fields that needed the second
-request. `refetch()` and rebuilds your own `setState` triggered never warn.
+widget's `key`, then — in debug builds — the widget that encloses the `QueryBuilder`,
+e.g. `LaunchesScreen`, then a generated `QueryScope#n`) and the fields that needed the
+second request. `refetch()` and rebuilds your own `setState` triggered never warn.
 </Aside>
 
 ### The rule
@@ -174,6 +175,33 @@ expect(log.entries, hasLength(3), reason: 'detail screen: exactly one request');
 
 Hook `SlingClient.onOperation` to a list, and assert on its length after each interaction.
 Every waterfall shows up as an off-by-one.
+
+## See every request: the overlay and the log line
+
+Each operation the client sends — a query batch, a mutation, a subscription connection —
+is a `SlingRequest` on `client.requests`: the root fields, how many fields the widgets
+read, the duration, the response size, the error, and **the scopes whose reads are in the
+document**. Two ready-made views:
+
+```dart
+// One line per operation in the console, once it is done:
+//   sling_gql #3 query launches, company · 42 ms · 1.2 KB · 18 fields ← _Header, LaunchesScreen
+final client = SlingClient<Query>(endpoint: endpoint, schema: slingSchema, logRequests: true);
+
+// A chip over the app (debug builds): tap it for the list, tap a line for its document.
+CupertinoApp(builder: (context, child) => SlingRequestOverlay(child: child!), ...);
+```
+
+The overlay goes below the `SlingScope` (or takes `client:`) and is only `child` in release
+builds (`enabled:` overrides it). Records are only built while someone listens to
+`client.requests` or `logRequests` is on, so both cost nothing when off.
+
+Attribution is by scope: a `QueryBuilder` is named by its `debugLabel`, its `key`, or the
+widget around it; a `MutationBuilder` / `SubscriptionBuilder` by `debugLabel:` or the widget
+around it; `mutateWith` / `subscribeWith` take a `debugLabel:` too. Twelve rows of the same
+widget type fold into `LaunchRow ×12`. A line with two unrelated screens on it is batching
+at work; the same screen on two consecutive lines is the waterfall the warning above
+talks about.
 
 <Aside type="tip" title="See it live">
 The example app has an in-app network log (**N requests**, top right). Every request is one

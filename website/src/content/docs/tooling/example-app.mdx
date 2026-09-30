@@ -49,11 +49,12 @@ void main() {
     // The default, spelled out: `__typename` + `id` → one `Launch:<id>` entity.
     cache: Cache(normalization: const Normalization(keyField: 'id')),
     httpClient: httpClient,
-    transport: latency.transport(httpClient), // x-mock-latency-ms
-    onOperation: log.add,
+    transport: log.transport(latency.transport(httpClient)), // x-mock-latency-ms
+    logRequests: true, // one console line per operation
     listRules: listRules,
     subscriptionRetryAfter: const Duration(seconds: 3),
   );
+  log.attach(client); // client.requests → the network log
 
   runApp(SlingScope<Query>(
     client: client,
@@ -65,8 +66,11 @@ void main() {
 }
 ```
 
-`onOperation: log.add` is the only hook the app needs to capture every
-request — `SlingClient` calls it once per flushed operation, batched or not.
+`log.attach(client)` is the only hook the app needs to capture every
+request — `client.requests` emits one `SlingRequest` per flushed operation,
+batched or not, with its timing, size and the widgets that asked for it.
+`SlingApp` also wraps the app in a `SlingRequestOverlay` (debug builds): the
+same requests, one line each, in a chip you can open from any screen.
 The `cache:` line is what `schema: slingSchema` builds anyway (the code was
 generated with `--key-field id`); it is there to show where
 [`Normalization`](/sling_gql/guides/caching/) is configured.
@@ -302,24 +306,27 @@ Tap **N requests** in any nav bar. The screen has three parts:
 
 - **Requests**, newest first, one line each: number, type (`query`,
   `mutation`), the root fields by name (`company · stats · launches`), then
-  the time, duration, size and variables. A failed request has a red border
+  the time, duration, size and variables, and the widgets whose reads are in
+  it (`← _Header, LaunchesScreen`). A failed request has a red border
   and its error. Tap a line for the document, the response and "Copy
   document". The document shows what the widgets read; the switch on top
   adds back what sling_gql puts in for the cache (`__typename`, the
   `field_<hash>` aliases).
-- **Subscriptions**, the ones open.
+- **Subscriptions**: each connection, open or closed, with its event count.
 - **Dev tools**: the mock latency and the cache.
 
 `NetworkLog` (`network_log.dart`) is a `ChangeNotifier` with two hooks on the
 client:
 
 ```dart title="example/lib/main.dart"
-onOperation: log.add,                                  // every printed document
-transport: log.transport(latency.transport(httpClient)), // its status, size, time
+log.attach(client),                                      // client.requests
+transport: log.transport(latency.transport(httpClient)), // the response body
 ```
 
-`onOperation` records each operation as it is sent; the transport wrapper finds
-its entry again by document and adds what came back. That is the whole
+`attach` records each `SlingRequest` as it is sent (and rebuilds as it
+completes: status, size, time, the `← LaunchesScreen, LaunchRow ×20` line of
+widgets that asked for it); the transport wrapper finds its entry again by
+document and keeps the response body. That is the whole
 debugging story for the PoC: no devtools extension, just "read what was
 actually sent."
 
