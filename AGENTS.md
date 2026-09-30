@@ -61,7 +61,11 @@ on the code.
     `demos.dart`); the guides show their `// #region` blocks through
     `website/src/components/DemoSource.astro`, so renaming or removing a
     region breaks the site build. What each guide tells the reader to try
-    is asserted in `test/demos_test.dart`.
+    is asserted in `test/demos_test.dart`. On the site, demos are views of
+    one Flutter engine (multi-view): `web/flutter_bootstrap.js` (a template)
+    hands over to `window.slingDemoHost` when `LiveApp.astro` installed it,
+    and `main.dart` then runs `DemoViews` (no implicit view); otherwise the
+    same build starts normally (`/demo/`, `?demo=`, the Try-it iframe).
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
   `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,

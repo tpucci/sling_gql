@@ -21,8 +21,8 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 #27, #29, #38, #39, #40 done; P3 is empty. The example runs on the web and
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Demos in four more
-guides (#60). Suggested next picks: #22 (`gc()` trigger), #46 (request
-overlay), #67 (one engine for every demo of a page). Tour of the
+guides (#60). Demos share one Flutter engine (#67).
+Suggested next picks: #22 (`gc()` trigger), #46 (request overlay). Tour of the
 guides and the example (2026-09-29): #61–#66 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -38,17 +38,14 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-67. **Docs — One Flutter engine per page for the demos.** Each `<LiveApp demo>`
-    is an iframe with its own engine (a few MB, a second or two to start);
-    Flutter's multi-view embedding (`multiViewEnabled`, `app.addView`)
-    could run every demo of a page in one engine. Each view needs its own
-    client and mock instance (the harness already has one client per run).
+(empty)
 
 ## P5 — docs & repo hygiene
 
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
+
 ## Roadmap items not covered above
 
 46. **DX — In-app request overlay.** Attribute each request to the widgets
@@ -135,6 +132,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: still #46.
 65. Docs — Missing examples: a `prepare` demo in the batching guide (Without/With prepare, 2 requests vs 1 on "Show payloads"), prefetch on tap with `client.resolve` in querying (`LaunchScreen.open`), a complete screen in loading-and-errors (the Me tab: error + retry, pull-to-refresh, empty state guarded on `isSkeleton`, and `ErrorView`), "Five minutes with the mock API" in getting-started. `DemoSource` reads any `example/lib/<dir>/`.
 60. Docs — Live demos in four more guides: loading & errors (`errors`: placeholders, a sticky error, Retry), pagination (`pagination`: load more fetches one page, refresh both), caching (`caching`: a detail served from the list's entity, a cache write, SlingRow vs plain rows with build counters), subscriptions (`subscriptions`: an event updates banner and row, no request). Harness: `failRequests`, subscriptions counted apart. Multi-view embedding moved to #67.
+67. Docs — One Flutter engine for every demo: `LiveApp` demos are views of a shared engine started with `multiViewEnabled` (`web/flutter_bootstrap.js` template hands over to `window.slingDemoHost`; `DemoViews` runs one `View` per host, demo from the initial data). Loaded once per visit, survives `<ClientRouter />` navigations (views removed before a swap, a demo re-mounts in ~30 ms), iframe fallback on failure; the whole app on Try it stays an iframe. The in-page mock API is shared by the demos of a visit.
 
 ## Explicitly not planned
 
