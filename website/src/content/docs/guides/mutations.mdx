@@ -170,10 +170,16 @@ rollback applies.
 Because the cache is normalized, a mutation returning an existing entity updates every list
 it appears in for free. What the response cannot say is that a list **gained or lost a row**:
 after `toggleFavorite`, `Launch:launch-181.favorite` is right everywhere, but `me.favorites`
-still holds the same refs. Edit the list yourself, through the typed
+still holds the same refs.
+
+When membership follows from the entity (`me.favorites` holds a launch iff
+`launch.favorite`), declare it once as a
+[list rule](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities): the
+client moves the row for the optimistic write, for the response and for the rollback. That
+is what the example does. Otherwise, edit the list yourself, through the typed
 [`client.cacheScope`](/sling_gql/guides/caching/#typed-cache-access-clientcachescope):
 
-```dart title="example/lib/screens/launch_screen.dart"
+```dart
 mutate(
   (m) => m.toggleFavorite(launchId: id)?.favorite,
   optimistic: () {
@@ -236,8 +242,9 @@ final id = await client.mutate((m) => m.scheduleLaunch(input: input)?.id);
 ## What is in the example
 
 The detail screen's heart is a `MutationBuilder`; the list row reads `launch.favorite` so it
-depends on `Launch:<id>.favorite`. Its `optimistic` callback also prepends/removes the launch
-in `me.favorites` and adjusts `me.favoriteCount`, so the Me tab follows without a refetch.
+depends on `Launch:<id>.favorite`. Its `optimistic` callback flips `launch.favorite` and
+adjusts `me.favoriteCount`; the `favorites` list rule (`example/lib/list_rules.dart`) adds
+or removes the row in `me.favorites`, so the Me tab follows without a refetch.
 `example/test/app_test.dart` asserts, against the real mock server: one request for the
 mutation, the optimistic state before the response, the confirmed state after, the list row
 updated on the way back, and the Me tab gaining (then losing) the row — all with **no** extra
@@ -251,9 +258,9 @@ list. `refetchQueries` is the simple, always-available alternative that asks the
 instead, and the right one for paginated or filtered lists:
 
 ```dart
-await client.mutateWith(
-  Mutation.root,
-  (m) => m.scheduleLaunch(name: name)?.id,
+final input = ScheduleLaunchInput(name: name, rocketId: rocketId, launchpadId: padId, date: date);
+await client.mutate(
+  (m) => m.scheduleLaunch(input: input)?.id,
   refetchQueries: ['launches'],
 );
 ```
@@ -273,7 +280,7 @@ If the mutation itself fails, no refetch happens at all.
 
 ```dart
 mutate(
-  (m) => m.scheduleLaunch(name: name)?.id,
+  (m) => m.scheduleLaunch(input: input)?.id,
   refetchQueries: ['launches'],
 );
 ```

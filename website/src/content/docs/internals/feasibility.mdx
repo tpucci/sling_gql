@@ -100,6 +100,10 @@ that test.**
 
 ## What we would need to believe to go to production
 
+*Written on day one. Since then normalization, mutations with optimistic writes and
+subscriptions over SSE have landed (see the [roadmap](/sling_gql/internals/roadmap/)); the
+dev overlay and the ownership question are still open.*
+
 - Normalization with per-entity notifications (design is straightforward, ~300 lines).
 - Mutations with optimistic writes and response selections via `prepare` functions.
 - Subscriptions over SSE or WebSocket writing into the same cache.

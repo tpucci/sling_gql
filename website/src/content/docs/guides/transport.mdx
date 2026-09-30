@@ -20,7 +20,7 @@ applied; you can mutate its headers before sending.
 ```dart
 final client = SlingClient<Query>(
   endpoint: Uri.parse('https://api.example.com/graphql'),
-  rootFactory: Query.root,
+  schema: slingSchema,
   headers: const {'x-app-version': '1.2.0'}, // static, applied before transport
   transport: (request) async {
     request.headers['authorization'] = 'Bearer ${await auth.token()}';

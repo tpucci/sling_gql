@@ -12,6 +12,9 @@ hero:
       link: /sling_gql/guides/getting-started/
       icon: right-arrow
       variant: primary
+    - text: Try it live
+      link: /sling_gql/guides/try-it/
+      variant: secondary
     - text: Why sling_gql?
       link: /sling_gql/guides/why/
       variant: minimal
@@ -50,9 +53,9 @@ export const generatedSnippet = `class Launch extends Accessor {
   String? get name => scalar<String>('name');
   set name(String? v) => write('name', v);
   String? get details => scalar<String>('details');
-  String? get status => scalar<String>('status');
-  Rocket? get rocket => object('rocket', Rocket.new);
-  List<Payload>? get payloads => list('payloads', Payload.new);
+  LaunchStatus? get status => enumValue('status', LaunchStatus.fromGraphQL);
+  Rocket? get rocket => object('rocket', Rocket.new, keyed: true);
+  List<Payload>? get payloads => list('payloads', Payload.new, keyed: true);
 }`;
 
 export const gqlSnippet = `query {
@@ -89,7 +92,7 @@ export const gqlSnippet = `query {
 
 <section class="landing-section">
   <h2>How it works</h2>
-  <p class="lead">Four moving parts, ~600 lines of runtime, one dependency (<code>http</code>).</p>
+  <p class="lead">Four moving parts, a small runtime, two dependencies (<code>http</code> and <code>meta</code>).</p>
   <ol class="steps">
     <li>
       <strong>Generated accessors, not proxies</strong>
@@ -105,7 +108,7 @@ export const gqlSnippet = `query {
     </li>
     <li>
       <strong>Targeted rebuilds</strong>
-      <p>The response is deep-merged into a path-addressed cache; only widgets that read the affected fields are asked to rebuild.</p>
+      <p>The response is normalized: each object is stored once (<code>Launch:launch-181</code>), and only the widgets that read a field that changed rebuild.</p>
     </li>
   </ol>
 </section>
@@ -131,7 +134,7 @@ export const gqlSnippet = `query {
   </div>
 
   <p class="lead" style="margin-top: 1.25rem">
-    Arguments become named parameters, enums become constants, input objects become
+    Arguments become named parameters, enums become Dart enums, input objects become
     <code>const</code> classes with <code>toJson()</code>. Regenerate in one command:
     <code>dart run sling_gql_gen --endpoint …</code>
   </p>

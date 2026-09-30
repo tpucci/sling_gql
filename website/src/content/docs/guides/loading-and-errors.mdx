@@ -32,11 +32,13 @@ class SkeletonText extends StatelessWidget {
 ```
 
 ```dart title="launch row"
-CupertinoListTile(
-  leading: launch.isSkeleton ? const SkeletonBox(width: 28, height: 28) : Icon(_icon(launch.status)),
+final date = launch.date;          // DateTime?
+final rocketName = launch.rocket?.name;
+return CupertinoListTile(
+  leading: launch.isSkeleton ? const SkeletonBox(width: 28, height: 28) : StatusIcon(launch.status),
   title: SkeletonText(launch.name, width: 160),
-  subtitle: SkeletonText(date == null ? null : '${date.substring(0, 10)} · $rocketName', width: 200),
-)
+  subtitle: SkeletonText(date == null ? null : '${formatDate(date)} · $rocketName', width: 200),
+);
 ```
 
 The one-element skeleton list gives you a **single placeholder row** that has the exact

@@ -141,7 +141,7 @@ results:
 ```dart
 SlingClient<Query>(
   endpoint: uri,
-  rootFactory: Query.root,
+  schema: slingSchema,
   subscriptionTransport: (request) {
     request.headers['authorization'] = 'Bearer $token';
     return sseSubscriptionTransport(request);

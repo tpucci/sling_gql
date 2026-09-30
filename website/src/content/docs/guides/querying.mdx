@@ -91,8 +91,8 @@ Fields with arguments are **methods with named parameters**. Required arguments
 final launch = query.launch(id: widget.id);
 final page = query.launches(
   first: 20,
-  filter: LaunchFilter(status: LaunchStatus.SUCCESS, year: 2024),
-  orderBy: LaunchOrder.DATE_DESC,
+  filter: LaunchFilter(status: LaunchStatus.success, year: 2024),
+  orderBy: LaunchOrder.dateDesc,
 );
 ```
 
@@ -124,10 +124,11 @@ serialization beyond `toJson()`, which the generated input classes implement. Th
 that can coexist in one document. This is what makes
 [pagination](/sling_gql/guides/pagination/) fall out naturally.
 
-<Aside type="note" title="Enums are strings">
-The generator emits a constant holder per enum (`LaunchStatus.SUCCESS == 'SUCCESS'`) and
-types enum fields as `String?`. A Dart `enum` with unknown-value handling is a possible
-refinement; strings keep the PoC honest about values the server may add later.
+<Aside type="note" title="Enums are Dart enums">
+Each GraphQL enum becomes a Dart `enum` with lowerCamel values
+(`LaunchStatus.success`, `LaunchOrder.dateDesc`), so `switch` is exhaustive. Each value
+knows its wire name (`LaunchStatus.success.graphqlName == 'SUCCESS'`), and a value the
+server added after you generated reads as `unknown` instead of throwing.
 </Aside>
 
 ## Input objects

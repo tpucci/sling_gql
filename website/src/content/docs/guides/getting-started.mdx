@@ -22,7 +22,7 @@ minor versions. Everything below works against any GraphQL endpoint that allows 
    ```
 
    Both are on pub.dev ([`sling_gql`](https://pub.dev/packages/sling_gql),
-   [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen)) and released in lockstep.
+   [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen)), each versioned on its own.
    To track `main` instead, use a `git:` dependency with
    `url: https://github.com/tpucci/sling_gql` and `path: packages/sling_gql`
    (resp. `packages/sling_gql_gen`).
@@ -38,7 +38,7 @@ minor versions. Everything below works against any GraphQL endpoint that allows 
    Add `-H "Authorization: Bearer …"` if introspection needs a header, or pass
    `--schema introspection.json` if you already have the introspection result on disk.
 
-   You get one class per GraphQL type, a constant holder per enum and a Dart class per
+   You get one class per GraphQL type, a Dart `enum` per enum and a Dart class per
    input object — see [Code generation](/sling_gql/tooling/code-generation/) for the rules.
    Re-run the command whenever your schema changes; the compiler will tell you what moved.
 
@@ -130,7 +130,7 @@ said `null`":
 builder: (context, query, state) {
   if (state.isSkeleton) return const SkeletonScreen();  // first paint only
   final launch = query.latestLaunch;
-  final hasDetails = launch.isFetched('details');       // per-field, no extra rebuild
+  final hasDetails = launch?.isFetched('details') ?? false; // per-field, no extra rebuild
   return LaunchCard(launch, showDetailsPlaceholder: !hasDetails);
 }
 ```

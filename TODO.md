@@ -92,38 +92,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
-64. **Docs — Stale statements sweep** (tour, 2026-09-29; fix in one pass):
-    - `index.mdx`: "~600 lines of runtime, one dependency (`http`)" (≈4,500
-      lines; `http` + `meta`); "deep-merged into a path-addressed cache"
-      (normalized now); the generated snippet shows `String? get status` (an
-      enum now) and `object('rocket', Rocket.new)` without `keyed:`; no
-      "Try it live" action in the hero.
-    - `getting-started`: "released in lockstep" (versions are independent:
-      0.2.0 / 0.1.2 / 0.1.1); "a constant holder per enum" (real enums since
-      #2); `launch.isFetched('details')` on a nullable `launch`.
-    - `querying`: the "Enums are strings" aside and `LaunchStatus.SUCCESS`,
-      `LaunchOrder.DATE_DESC` in the arguments example (now
-      `LaunchStatus.success`).
-    - `loading-and-errors`: the launch row uses `date.substring(0, 10)`
-      (`DateTime` now) and an undefined `_icon`.
-    - `caching`: "`Company` stays inline" (it is keyed); "Optimistic writes
-      — when mutations land, the pattern will be…" (they have); "replaced
-      the coarse root-alias intersection of the first PoC iteration" and
-      "the old path-addressed behaviour" (history, not guidance).
-    - `mutations`: "Updating lists after a mutation" shows the hand-written
-      `me.favorites` edit and "What is in the example" says the callback
-      prepends/removes — the example uses the `favorites` `ListRule` now;
-      the `refetchQueries` examples call `scheduleLaunch(name:)` (it takes
-      `input:`).
-    - `tooling/example-app`: "Known limitation: `me.favorites` membership
-      does not update" (fixed by #55); test sections ordered 1, 3, 4, 5, 2, 6.
-    - `internals/feasibility`: "What we would need to believe to go to
-      production" lists normalization, mutations, subscriptions — all done.
-      Keep it as the day-one record, add a short "since then".
-    - Consistency: transport, subscriptions, testing and fetch-policies build
-      clients with `rootFactory: Query.root`, the rest with
-      `schema: slingSchema` — use the latter everywhere; `testing` types `me`
-      as `User`, the schema's is `Viewer`.
 65. **Docs — Missing examples.**
     - `prepare`: the batching guide's excerpt hides the point
       (`LaunchScreen.prepare(launch); // reads payloads, crew, rocket…`).
@@ -221,6 +189,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 61. Example — Plain-language copy: the schedule screen says what you will see (the launch appears, lifts off and lands on its own), `ErrorView` only suggests `npm start` on iOS, the latency picker's no-header option is "Default".
 63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
 
+64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
 ## Explicitly not planned
 
 - SSR hydration (not applicable).

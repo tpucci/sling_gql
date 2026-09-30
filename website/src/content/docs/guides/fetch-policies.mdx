@@ -48,7 +48,7 @@ has".
 ```dart
 SlingClient<Query>(
   endpoint: ...,
-  rootFactory: Query.root,
+  schema: slingSchema,
   maxAge: const Duration(minutes: 5), // client-wide default
 );
 

@@ -36,7 +36,7 @@ final launches = {
 
 final server = MockGraphQLServer(
   query: {
-    'me': {'__typename': 'User', 'id': 'me', 'name': 'Mira Vance'},
+    'me': {'__typename': 'Viewer', 'id': 'viewer-1', 'name': 'Mira Vance'},
     'launch': (args) => launches[args['id']],
     'launches': (args) => {
       '__typename': 'LaunchConnection',
@@ -157,7 +157,7 @@ void main() {
   testWidgets('...', (tester) async {
     final client = SlingClient<Query>(
       endpoint: Uri.parse('http://localhost:4000/graphql'),
-      rootFactory: Query.root,
+      schema: slingSchema,
     );
     await tester.pumpWidget(...);
     await tester.pumpUntilSettled(client);

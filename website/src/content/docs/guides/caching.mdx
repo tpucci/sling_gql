@@ -15,13 +15,13 @@ normalization powerful — but it also means you should understand its shape.
 
 The cache is a flat map of **entities**. Every object the response contains that has a
 `__typename` and an `id` is stored once, under `Typename:id`, and referenced from wherever
-it appeared. Objects without an id (`Stats`, `PageInfo`, `Company` here) stay **inline** in
-their parent. The operation roots are entities like any other (`ROOT_QUERY`, `ROOT_MUTATION`):
+it appeared. Objects without an id (`Stats`, `PageInfo` here) stay **inline** in their
+parent. The operation roots are entities like any other (`ROOT_QUERY`, `ROOT_MUTATION`):
 
 ```json title="client.cache.snapshot"
 {
   "ROOT_QUERY": {
-    "company": { "__typename": "Company", "name": "Sling Space", "ceo": "Alex Corren" },
+    "company": { "__ref": "Company:company-1" },
     "stats": { "__typename": "Stats", "totalLaunches": 181, "successRatePct": 89.8 },
     "launches_c0y93u18lig6v": {
       "__typename": "LaunchConnection",
@@ -35,7 +35,8 @@ their parent. The operation roots are entities like any other (`ROOT_QUERY`, `RO
     "__typename": "Launch", "id": "launch-181", "name": "Crew-5",
     "rocket": { "__ref": "Rocket:starship" }, "details": "…"
   },
-  "Rocket:starship": { "__typename": "Rocket", "id": "starship", "name": "Starship" }
+  "Rocket:starship": { "__typename": "Rocket", "id": "starship", "name": "Starship" },
+  "Company:company-1": { "__typename": "Company", "id": "company-1", "name": "Sling Space", "ceo": "Alex Corren" }
 }
 ```
 
@@ -70,7 +71,7 @@ builds its cache with `Normalization(keyField: 'uuid')` — nothing to keep in s
 Passing your own `cache:` next to `schema:`? Build it with
 `Cache(normalization: slingSchema.normalization)`; a mismatching key field fails an assert.
  `Normalization(identify: (obj) => …)` replaces the whole rule;
-`Normalization.none` turns it off and gives you the old path-addressed behaviour.
+`Normalization.none` turns it off: every object is then stored where it appears, by path.
 
 ## Lookups: `launch(id:)` is served from the entity
 
@@ -115,8 +116,8 @@ launch.name = '${launch.name} ✨';
 ```
 
 Because there is one `Launch:launch-181`, setting `name` on the detail screen **updates the
-list row too**. When mutations land, the pattern will be: write optimistically, send the
-mutation, let the response overwrite, refetch on error.
+list row too**. Inside a mutation's `optimistic:` callback such writes are journaled and
+rolled back if the mutation fails — see [Mutations](/sling_gql/guides/mutations/#optimistic-writes-and-rollback).
 
 ## Typed cache access: `client.cacheScope`
 
@@ -246,8 +247,6 @@ write returns the keys it touched. A scope rebuilds when the two intersect, so:
 - a mutation returning `Launch:launch-181 { status }` rebuilds the list row *and* the detail
   screen, but not a widget that only read the launch's `name`;
 - the detail screen's fetch does not rebuild the header that reads `company`.
-
-This is what replaced the coarse root-alias intersection of the first PoC iteration.
 
 A key is touched only when its value **changed**. That includes inline objects and lists
 (`stats`, `pageInfo`, a connection without an `id`): they are compared structurally as
