@@ -8,6 +8,8 @@
 /// - [CacheWrite], [MutationScope], [SubscriptionScope], [RowScope],
 ///   [ListLocator]: the recorder machinery behind optimistic writes,
 ///   mutations, subscriptions, `SlingRow` and `CacheScope.list`.
+/// - [debugOwnerLabel]: the default scope label of the widgets, for adapters
+///   (`sling_gql_hooks`).
 ///
 /// No stability promise: anything here can change in a minor release.
 library;
@@ -18,3 +20,4 @@ export 'src/accessor.dart' show ListLocator;
 export 'src/cache/cache.dart' show NormalizedCache, CacheWrite, depKey;
 export 'src/cache/ref.dart' show Ref, missing;
 export 'src/client.dart' show MutationScope, SubscriptionScope, RowScope;
+export 'src/widgets.dart' show debugOwnerLabel;
