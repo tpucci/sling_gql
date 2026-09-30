@@ -560,7 +560,8 @@ class _BypassCache implements Cache {
   @override
   Set<String> evict(String key) => _inner.evict(key);
   @override
-  Set<String> gc() => _inner.gc();
+  Set<String> gc({Iterable<String> retain = const []}) =>
+      _inner.gc(retain: retain);
   @override
   Iterable<String> get entityKeys => _inner.entityKeys;
   @override
@@ -1251,6 +1252,7 @@ class SlingSubscription<T> {
       at: _client._now(),
     );
     _client._notify(touched);
+    _client._countWrite();
     if (errors.isNotEmpty) {
       _controller.addError(
         SlingException(
@@ -1302,6 +1304,7 @@ class SlingClient<Q extends Accessor> {
     this.maxAge,
     Iterable<ListRule<Accessor>> listRules = const [],
     this.subscriptionRetryAfter,
+    this.gcAfterWrites = 100,
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
@@ -1447,6 +1450,55 @@ class SlingClient<Q extends Accessor> {
   /// is remounted. A few seconds is right for most apps; the retry repeats
   /// until the connection holds.
   final Duration? subscriptionRetryAfter;
+
+  /// How many server responses (query responses, mutation results,
+  /// subscription events) the client writes before it runs [gc] on its
+  /// own, at the next moment it [isIdle]. `null` turns the automatic sweep
+  /// off; call [gc] yourself then (e.g. on app pause).
+  final int? gcAfterWrites;
+
+  int _writesSinceGc = 0;
+
+  void _countWrite() {
+    _writesSinceGc++;
+    _maybeGc();
+  }
+
+  void _maybeGc() {
+    final every = gcAfterWrites;
+    if (every == null || _writesSinceGc < every || !isIdle) return;
+    gc();
+  }
+
+  /// Removes the cache entities nothing can reach any more — dropped from a
+  /// replaced list, orphaned by an evicted parent or a removed mutation
+  /// root — and returns their keys. Unlike `cache.gc()`, entities a live
+  /// scope or row read (a detail screen resolved through a `launch(id:)`
+  /// lookup, say) are kept even when no root references them, so nothing on
+  /// screen loses its data. Runs by itself every [gcAfterWrites] responses.
+  ///
+  /// While a mutation is in flight the sweep is skipped (an optimistic
+  /// rollback may put back references to collected entities) and returns
+  /// an empty set.
+  Set<String> gc() {
+    if (_mutationsInFlight > 0) return const {};
+    _writesSinceGc = 0;
+    final retain = <String>{};
+    void addEntities(Set<String> deps) {
+      for (final dep in deps) {
+        final dot = dep.lastIndexOf('.');
+        if (dot > 0) retain.add(dep.substring(0, dot));
+      }
+    }
+
+    for (final s in _scopes) {
+      addEntities(s._deps);
+    }
+    for (final r in _rows) {
+      addEntities(r._deps);
+    }
+    return cache.gc(retain: retain);
+  }
 
   final List<ListRule<Accessor>> _listRules;
 
@@ -1623,6 +1675,7 @@ class SlingClient<Q extends Accessor> {
 
   void _checkIdle() {
     if (!isIdle) return;
+    _maybeGc();
     _idle?.complete();
     _idle = null;
   }
@@ -1728,6 +1781,7 @@ class SlingClient<Q extends Accessor> {
       final undone = error == null ? const <String>{} : _rollback(journal);
       touched = cache.writeResponse('mutation', data, at: _now());
       touched = touched.union(undone);
+      _writesSinceGc++;
     } catch (e) {
       _notify(_rollback(journal));
       rethrow;
@@ -1933,7 +1987,9 @@ class SlingClient<Q extends Accessor> {
     PrintedOperation op,
   ) async {
     final (data, error) = await _receive(op);
-    return (cache.writeResponse(operation, data, at: _now()), error);
+    final touched = cache.writeResponse(operation, data, at: _now());
+    _writesSinceGc++; // swept once the flush settles (`_checkIdle`)
+    return (touched, error);
   }
 
   /// POSTs [op] and returns `data` keyed by cache aliases. On partial failure

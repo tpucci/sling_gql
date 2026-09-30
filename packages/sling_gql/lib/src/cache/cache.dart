@@ -106,8 +106,11 @@ abstract class Cache {
   /// object fields become missing so they are re-fetched on next read).
   Set<String> evict(String key);
 
-  /// Removes entities not reachable from any operation root. Returns their keys.
-  Set<String> gc();
+  /// Removes entities not reachable from any operation root nor from one of
+  /// the [retain]ed entity keys (extra roots: `SlingClient.gc` passes the
+  /// entities live scopes read). Returns the removed keys. Nothing reads a
+  /// removed entity, so nothing is notified.
+  Set<String> gc({Iterable<String> retain = const []});
 
   bool hasEntity(String key);
   Iterable<String> get entityKeys;
@@ -501,7 +504,7 @@ class NormalizedCache implements Cache {
   }
 
   @override
-  Set<String> gc() {
+  Set<String> gc({Iterable<String> retain = const []}) {
     final live = <String>{};
     void mark(Object? node) {
       if (node is Ref) {
@@ -513,14 +516,17 @@ class NormalizedCache implements Cache {
       }
     }
 
-    for (final key in _entities.keys.where(isRootKey)) {
-      live.add(key);
-      mark(_entities[key]);
+    for (final key in [..._entities.keys.where(isRootKey), ...retain]) {
+      final entity = _entities[key];
+      if (entity != null && live.add(key)) mark(entity);
     }
     final dead = _entities.keys.where((k) => !live.contains(k)).toSet();
     for (final key in dead) {
-      _entities.remove(key);
+      final removed = _entities.remove(key)!;
       _depKeys.remove(key);
+      for (final field in removed.keys) {
+        _fetchedAt.remove(depKey(key, field));
+      }
     }
     return dead;
   }
