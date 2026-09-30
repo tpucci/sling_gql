@@ -145,16 +145,22 @@ Some reads are legitimately conditional — a collapsed section, a tab that isn'
 yet. For those, `QueryBuilder.prepare` runs a selection function **in addition to** the
 builder, so the fields are part of the first request even though nothing displays them yet:
 
-```dart title="launch_screen.dart (excerpt)"
+```dart
 QueryBuilder<Query>(
   prepare: (query) {
-    final launch = query.launch(id: widget.id);
-    if (launch != null) LaunchScreen.prepare(launch); // reads payloads, crew, rocket…
+    for (final p in query.launch(id: id)?.payloads ?? const <Payload>[]) {
+      p..name..orbit;
+    }
   },
   builder: (context, query, state) {
-    final launch = query.launch(id: widget.id);
-    // …the payload list is rendered only when _showPayloads is true,
-    // but it was fetched up front → expanding costs 0 requests.
+    final launch = query.launch(id: id);
+    // The payload list is only built once _expanded is true, but prepare
+    // selected it: it came with the first request, expanding costs none.
+    return Column(children: [
+      Text(launch?.name ?? '…'),
+      if (_expanded)
+        for (final p in launch?.payloads ?? const <Payload>[]) Text('${p.name}'),
+    ]);
   },
 )
 ```
@@ -172,8 +178,6 @@ expect(log.entries, hasLength(1), reason: 'header + list + rows batched');
 expect(log.entries, hasLength(2), reason: 'only the second page is fetched');
 // open a launch
 expect(log.entries, hasLength(3), reason: 'detail screen: exactly one request');
-// expand payloads
-expect(log.entries, hasLength(3), reason: 'no request when expanding: prepare paid for it');
 ```
 
 Hook `SlingClient.onOperation` to a list, and assert on its length after each interaction.

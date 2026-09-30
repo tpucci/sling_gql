@@ -138,7 +138,7 @@ void main() {
       expect(
         detail,
         contains('payloads {'),
-        reason: 'prepare selected the collapsed section',
+        reason: 'the whole screen in one request, payloads included',
       );
       expect(
         detail,
@@ -158,22 +158,7 @@ void main() {
       );
       expect(find.text('Rocket'), findsOneWidget);
 
-      // The tab bar stays visible over the detail screen (per-tab navigators);
-      // bring the button above it before tapping or the tap hits the "Me" tab.
-      await tester.ensureVisible(find.textContaining('Show payloads'));
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.textContaining('Show payloads'));
-      await tester.pump();
-      expect(
-        log.entries,
-        hasLength(3),
-        reason: 'no request when expanding: prepare paid for it',
-      );
-      expect(
-        find.textContaining('Hide payloads'),
-        findsOneWidget,
-        reason: 'the tap landed',
-      );
+      expect(find.text('Payloads'), findsOneWidget);
 
       // --- Mutation: toggle favourite from the detail screen -------------------
       // The mock server keeps favourites in memory across runs, so assert on the

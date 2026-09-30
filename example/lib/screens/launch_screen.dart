@@ -10,8 +10,8 @@ import '../widgets/status_icon.dart';
 
 /// Launch detail.
 ///
-/// - `prepare` selects everything the screen will need up front (including
-///   the collapsed payload section), so opening it later costs no request.
+/// - `prepare` is the screen's selection as a reusable function: the
+///   [QueryBuilder] runs it, and [LaunchScreen.open] prefetches with it.
 /// - `name`/`date`/`status`/`rocket.name` are NOT fetched again: the list
 ///   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
 ///   is a `lookup` field that resolves straight to the entity. Only the fields
@@ -52,8 +52,6 @@ class LaunchScreen extends StatefulWidget {
 }
 
 class _LaunchScreenState extends State<LaunchScreen> {
-  bool _showPayloads = false;
-
   /// Reusable selection ("fragment").
   static void prepare(Launch launch) {
     launch
@@ -105,6 +103,7 @@ class _LaunchScreenState extends State<LaunchScreen> {
             if (launch == null) return const Center(child: Text('Not found'));
             final rocket = launch.rocket;
             final crew = launch.crew ?? const <Astronaut>[];
+            final payloads = launch.payloads ?? const <Payload>[];
             final favorite = launch.favorite;
             final status = launch.status;
 
@@ -184,24 +183,11 @@ class _LaunchScreenState extends State<LaunchScreen> {
                   const _Section('Crew'),
                   for (final a in crew) _Row(a.agency, a.name),
                 ],
-                const SizedBox(height: 24),
-                CupertinoButton(
-                  onPressed: () =>
-                      setState(() => _showPayloads = !_showPayloads),
-                  child: Text(
-                    '${_showPayloads ? 'Hide' : 'Show'} payloads '
-                    '(${launch.payloads?.length ?? '…'}) — no request, thanks to prepare',
-                  ),
-                ),
-                if (_showPayloads)
-                  for (final p in launch.payloads ?? const <Payload>[])
-                    CupertinoListTile(
-                      title: Text(p.name ?? '…'),
-                      subtitle: Text(
-                        '${p.type$} · ${p.orbit} · ${p.massKg ?? '?'} kg · '
-                        '${p.customers?.join(', ')}',
-                      ),
-                    ),
+                if (payloads.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  const _Section('Payloads'),
+                  for (final p in payloads) _Payload(p),
+                ],
                 if (state.isLoading)
                   const Padding(
                     padding: EdgeInsets.all(16),
@@ -260,6 +246,41 @@ class _FavoriteButton extends StatelessWidget {
           color: state.error != null ? kColorTextSecondary : kColorCoral,
           size: 28,
         ),
+      ),
+    );
+  }
+}
+
+class _Payload extends StatelessWidget {
+  const _Payload(this.payload);
+  final Payload payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = payload;
+    final mass = p.massKg;
+    final details = [
+      p.type$,
+      p.orbit,
+      if (mass != null) '$mass kg',
+      p.customers?.join(', '),
+    ].whereType<String>().join(' · ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonText(p.name, width: 160),
+          const SizedBox(height: 2),
+          SkeletonText(
+            p.isSkeleton ? null : details,
+            width: 220,
+            style: const TextStyle(
+              color: CupertinoColors.systemGrey,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }

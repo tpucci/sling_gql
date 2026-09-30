@@ -19,6 +19,7 @@ class SlingApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return CupertinoApp(
       title: 'sling_gql',
+      debugShowCheckedModeBanner: false,
       theme: slingTheme(),
       home: CupertinoTabScaffold(
         tabBar: CupertinoTabBar(

@@ -152,8 +152,8 @@ Pull-to-refresh always reflects the current server state.
 
 > Launch detail.
 >
-> - `prepare` selects everything the screen will need up front (including
->   the collapsed payload section), so opening it later costs no request.
+> - `prepare` is the screen's selection as a reusable function: the
+>   [QueryBuilder] runs it, and [LaunchScreen.open] prefetches with it.
 > - `name`/`date`/`status`/`rocket.name` are NOT fetched again: the list
 >   already wrote `Launch:<id>` and `Rocket:<id>` entities, and `launch(id:)`
 >   is a `lookup` field that resolves straight to the entity. Only the fields
@@ -182,9 +182,8 @@ the same fields in flight and waits for that request — still one request.
 Awaiting `resolve` before `push` would open the screen fully populated
 instead, at the price of a tap that does nothing for a round trip.
 
-`prepare` is a static method, passed to `QueryBuilder.prepare`, that reads
-every field the screen might show — including the payload list that starts
-collapsed:
+`prepare` is a static method, passed to `QueryBuilder.prepare` and used by
+the prefetch above, that reads every field the screen shows:
 
 ```dart title="example/lib/screens/launch_screen.dart"
 static void prepare(Launch launch) {
@@ -219,11 +218,8 @@ static void prepare(Launch launch) {
 }
 ```
 
-Because `prepare` runs in the same batching pass as `build`, the payload
-section's fields are already in the cache by the time the user taps "Show
-payloads" — toggling `_showPayloads` costs a `setState` and nothing else.
-That's the `0` in the front page's "requests to expand the collapsed payload
-section" stat.
+One function, two callers: the tap's prefetch and the screen's own build
+select exactly the same fields, so they are one request.
 
 <Aside type="tip" title="One launch, one entity">
 `query.launch(id: ...)` and the row inside `query.launches(...).nodes` resolve to the
@@ -378,7 +374,6 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
   `prepare`, which selects everything the screen needs in one shot. The
   request is already in the log right after the tap, before the route is
   built (`LaunchScreen.open`'s `resolve`), and the screen adds none.
-- **0 requests to expand payloads.** `prepare` paid for them up front.
 
 ### Test 3 — subscriptions over SSE
 
