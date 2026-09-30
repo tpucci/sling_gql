@@ -10,6 +10,7 @@ workspace:
   - packages/sling_gql_gen
   - packages/sling_gql_test
   - packages/sling_gql_hooks
+  - packages/sling_gql_link
   - example
 
 dev_dependencies:
@@ -58,12 +59,12 @@ melos:
         ignore: [sling_gql_workspace]
 
     test:runtime:
-      description: Runtime + test-helper + hooks package tests.
+      description: Runtime, test-helper, hooks and gql_link adapter package tests.
       run: flutter test
       exec:
         concurrency: 1
       packageFilters:
-        scope: [sling_gql, sling_gql_test, sling_gql_hooks]
+        scope: [sling_gql, sling_gql_test, sling_gql_hooks, sling_gql_link]
 
     test:gen:
       description: Generator package tests.
