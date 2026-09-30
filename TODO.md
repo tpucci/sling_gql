@@ -22,7 +22,7 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
 the other guides), #22 (`gc()` trigger), #46 (request overlay). Tour of the
-guides and the example (2026-09-29): #62, #64–#66 left.
+guides and the example (2026-09-29): #61–#66 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -51,21 +51,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
-65. **Docs — Missing examples.**
-    - `prepare`: the batching guide's excerpt hides the point
-      (`LaunchScreen.prepare(launch); // reads payloads, crew, rocket…`).
-      Show the collapsed section, the request it costs without `prepare`
-      (a second one, on tap), and the one request with it. A demo fits (#60).
-    - Prefetch on tap with `client.resolve` (the example's
-      `LaunchScreen.open`) is only on the example-app page; add it to
-      querying ("Reading outside of build()").
-    - `ErrorView` is used in getting-started and loading-and-errors but never
-      shown: one complete error + retry + pull-to-refresh widget.
-    - The "never branch on list length while loading" rule is stated three
-      times and never shown as a complete widget with a real empty state.
-    - Getting started targets an imaginary `api.example.com` only: add the
-      five-minute path against the mock API (or point at Try it live first).
-
 ## Roadmap items not covered above
 
 46. **DX — In-app request overlay.** Attribute each request to the widgets
@@ -150,6 +135,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
 66. Example — Nicer skeletons: `SkeletonShimmer` (one animation for every placeholder, runs only while one is on screen, off with reduced motion), pill bars as tall as a line of the style with a fade to the text, `SkeletonBox.circle` for icons, eight varied-width placeholder rows while the Launches list loads.
 62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: still #46.
+65. Docs — Missing examples: a `prepare` demo in the batching guide (Without/With prepare, 2 requests vs 1 on "Show payloads"), prefetch on tap with `client.resolve` in querying (`LaunchScreen.open`), a complete screen in loading-and-errors (the Me tab: error + retry, pull-to-refresh, empty state guarded on `isSkeleton`, and `ErrorView`), "Five minutes with the mock API" in getting-started. `DemoSource` reads any `example/lib/<dir>/`.
 
 ## Explicitly not planned
 
