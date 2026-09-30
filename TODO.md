@@ -20,8 +20,9 @@ Read-path allocations (#17, #18) done. Conflicting fragment fields (#57)
 and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 #27, #29, #38, #39, #40 done; P3 is empty. The example runs on the web and
 live on the website (#58), with a live demo in the batching, fetch-policies
-and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
-the other guides), #22 (`gc()` trigger), #46 (request overlay). Tour of the
+and mutations guides (#59, 2026-09-29). Demos in four more
+guides (#60). Suggested next picks: #22 (`gc()` trigger), #46 (request
+overlay), #67 (one engine for every demo of a page). Tour of the
 guides and the example (2026-09-29): #61–#66 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -37,14 +38,11 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P4 — example app & tooling
 
-60. **Docs — Live demos for the other guides** (after #59: add a widget
-    to `example/lib/demos/` with `// #region` markers, register it in
-    `demos.dart`, embed `<DemoSource>` + `<LiveApp demo>`, assert what the
-    guide says to try in `example/test/demos_test.dart`). Candidates:
-    loading states & sticky errors, pagination (`PaginatedQueryBuilder`),
-    caching (normalization, `SlingRow`), subscriptions. Later: Flutter
-    multi-view embedding (one engine for every demo of a page) instead of
-    one iframe each.
+67. **Docs — One Flutter engine per page for the demos.** Each `<LiveApp demo>`
+    is an iframe with its own engine (a few MB, a second or two to start);
+    Flutter's multi-view embedding (`multiViewEnabled`, `app.addView`)
+    could run every demo of a page in one engine. Each view needs its own
+    client and mock instance (the harness already has one client per run).
 
 ## P5 — docs & repo hygiene
 
@@ -136,6 +134,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 66. Example — Nicer skeletons: `SkeletonShimmer` (one animation for every placeholder, runs only while one is on screen, off with reduced motion), pill bars as tall as a line of the style with a fade to the text, `SkeletonBox.circle` for icons, eight varied-width placeholder rows while the Launches list loads.
 62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: still #46.
 65. Docs — Missing examples: a `prepare` demo in the batching guide (Without/With prepare, 2 requests vs 1 on "Show payloads"), prefetch on tap with `client.resolve` in querying (`LaunchScreen.open`), a complete screen in loading-and-errors (the Me tab: error + retry, pull-to-refresh, empty state guarded on `isSkeleton`, and `ErrorView`), "Five minutes with the mock API" in getting-started. `DemoSource` reads any `example/lib/<dir>/`.
+60. Docs — Live demos in four more guides: loading & errors (`errors`: placeholders, a sticky error, Retry), pagination (`pagination`: load more fetches one page, refresh both), caching (`caching`: a detail served from the list's entity, a cache write, SlingRow vs plain rows with build counters), subscriptions (`subscriptions`: an event updates banner and row, no request). Harness: `failRequests`, subscriptions counted apart. Multi-view embedding moved to #67.
 
 ## Explicitly not planned
 
