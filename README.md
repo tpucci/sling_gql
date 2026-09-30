@@ -56,7 +56,7 @@ query {
 | Subscriptions (`client.subscribe((s) => s.launchStatusChanged?..status)`, `SubscriptionBuilder`) | ✅ GraphQL over SSE by default, `subscriptionTransport:` to swap; events normalized into the same entities |
 | List rules (`ListRule`: "`launches(filter:)` holds a launch iff its status matches") | ✅ cached lists gain/lose entities on mutations, subscription events and setters; query responses only remove |
 | Fetch policies (`cacheAndNetwork`, `networkOnly`), `maxAge` stale-while-revalidate | ✅ per widget or client-wide, `state.isStale`, soft `revalidate()` |
-| Persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`) |
+| Persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`, `changesSince`) |
 | Unions / interfaces (`hit.asLaunch`, `hit.when(launch: …, rocket: …)`) | ✅ inline fragments, every branch recorded on the skeleton; example Search tab |
 
 ## Layout
