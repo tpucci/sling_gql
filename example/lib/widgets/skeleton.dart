@@ -25,10 +25,19 @@ class SkeletonBox extends StatelessWidget {
 /// This is the whole "loading state" story: a missing value is `null`,
 /// nothing else to wire.
 class SkeletonText extends StatelessWidget {
-  const SkeletonText(this.text, {super.key, required this.width, this.style});
+  const SkeletonText(
+    this.text, {
+    super.key,
+    required this.width,
+    this.style,
+    this.maxLines = 2,
+  });
   final String? text;
   final double width;
   final TextStyle? style;
+
+  /// `null` for no limit.
+  final int? maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -43,8 +52,8 @@ class SkeletonText extends StatelessWidget {
     return Text(
       text,
       style: style,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
+      maxLines: maxLines,
+      overflow: maxLines == null ? null : TextOverflow.ellipsis,
     );
   }
 }

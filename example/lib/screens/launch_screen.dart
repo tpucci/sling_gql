@@ -4,6 +4,7 @@ import 'package:sling_gql/sling_gql.dart';
 import '../date_format.dart';
 import '../generated/schema.dart';
 import '../network_log.dart';
+import '../number_format.dart';
 import '../theme.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/status_icon.dart';
@@ -163,13 +164,20 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (launch.isSkeleton || launch.details != null)
-                  SkeletonText(launch.details, width: double.infinity),
+                  SkeletonText(
+                    launch.details,
+                    width: double.infinity,
+                    maxLines: null,
+                  ),
                 const SizedBox(height: 24),
                 const _Section('Rocket'),
                 _Row('Name', rocket?.name),
-                SkeletonText(rocket?.description, width: double.infinity),
+                _Description(rocket?.description),
                 _Row('Height', rocket?.height?.meters?.let((v) => '$v m')),
-                _Row('Mass', rocket?.mass?.kg?.let((v) => '$v kg')),
+                _Row(
+                  'Mass',
+                  rocket?.mass?.kg?.let((v) => '${formatWhole(v)} kg'),
+                ),
                 _Row(
                   'Success rate',
                   rocket?.successRatePct?.let((v) => '$v %'),
@@ -181,12 +189,14 @@ class _LaunchScreenState extends State<LaunchScreen> {
                 if (crew.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   const _Section('Crew'),
-                  for (final a in crew) _Row(a.agency, a.name),
+                  for (final a in crew)
+                    _Item(a.name, a.agency, isSkeleton: a.isSkeleton),
                 ],
                 if (payloads.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   const _Section('Payloads'),
-                  for (final p in payloads) _Payload(p),
+                  for (final p in payloads)
+                    _Item(p.name, _payloadDetails(p), isSkeleton: p.isSkeleton),
                 ],
                 if (state.isLoading)
                   const Padding(
@@ -251,37 +261,93 @@ class _FavoriteButton extends StatelessWidget {
   }
 }
 
-class _Payload extends StatelessWidget {
-  const _Payload(this.payload);
-  final Payload payload;
+String _payloadDetails(Payload p) {
+  final mass = p.massKg;
+  return [
+    p.type$,
+    p.orbit,
+    if (mass != null) '${formatWhole(mass)} kg',
+    p.customers?.join(', '),
+  ].whereType<String>().join(' · ');
+}
+
+/// A two-line entry (crew member, payload): a name and muted details.
+class _Item extends StatelessWidget {
+  const _Item(this.title, this.subtitle, {required this.isSkeleton});
+  final String? title;
+  final String? subtitle;
+  final bool isSkeleton;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SkeletonText(title, width: 160),
+        const SizedBox(height: 2),
+        SkeletonText(
+          isSkeleton ? null : subtitle,
+          width: 220,
+          style: const TextStyle(
+            color: CupertinoColors.systemGrey,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// The rocket's description: three lines, "More" to read the rest.
+class _Description extends StatefulWidget {
+  const _Description(this.text);
+  final String? text;
+
+  @override
+  State<_Description> createState() => _DescriptionState();
+}
+
+class _DescriptionState extends State<_Description> {
+  static const _collapsedLines = 3;
+  var _expanded = false;
 
   @override
   Widget build(BuildContext context) {
-    final p = payload;
-    final mass = p.massKg;
-    final details = [
-      p.type$,
-      p.orbit,
-      if (mass != null) '$mass kg',
-      p.customers?.join(', '),
-    ].whereType<String>().join(' · ');
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SkeletonText(p.name, width: 160),
-          const SizedBox(height: 2),
-          SkeletonText(
-            p.isSkeleton ? null : details,
-            width: 220,
-            style: const TextStyle(
-              color: CupertinoColors.systemGrey,
-              fontSize: 13,
+    final text = widget.text;
+    if (text == null) return const SkeletonText(null, width: double.infinity);
+    final style = DefaultTextStyle.of(context).style;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          maxLines: _collapsedLines,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final overflows = painter.didExceedMaxLines;
+        painter.dispose();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              text,
+              maxLines: _expanded ? null : _collapsedLines,
+              overflow: _expanded ? null : TextOverflow.ellipsis,
             ),
-          ),
-        ],
-      ),
+            if (overflows || _expanded)
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 32),
+                onPressed: () => setState(() => _expanded = !_expanded),
+                child: Text(
+                  _expanded ? 'Less' : 'More',
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

@@ -157,8 +157,14 @@ void main() {
         reason: 'only fields the list did not fetch',
       );
       expect(find.text('Rocket'), findsOneWidget);
-
+      // Further down, built once scrolled to (and it costs no request).
+      await tester.scrollUntilVisible(
+        find.text('Payloads'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
       expect(find.text('Payloads'), findsOneWidget);
+      expect(log.entries, hasLength(3));
 
       // --- Mutation: toggle favourite from the detail screen -------------------
       // The mock server keeps favourites in memory across runs, so assert on the

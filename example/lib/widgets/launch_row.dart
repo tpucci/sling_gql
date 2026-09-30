@@ -39,7 +39,9 @@ class LaunchRow extends StatelessWidget {
           : StatusIcon(status),
       title: SkeletonText(launch.name, width: 160),
       subtitle: SkeletonText(
-        date == null ? null : '${formatDate(date)} · $rocketName',
+        date == null
+            ? null
+            : '${formatDate(date)} · $rocketName · ${statusLabel(status)}',
         width: 200,
       ),
       trailing: Row(

@@ -49,6 +49,7 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
     LaunchStatus.scheduled: 'Scheduled',
     LaunchStatus.success: 'Success',
     LaunchStatus.failure: 'Failure',
+    LaunchStatus.scrubbed: 'Scrubbed',
   };
 
   /// Selected status, `null` for all launches.

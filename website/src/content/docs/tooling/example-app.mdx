@@ -119,10 +119,11 @@ look at:
 ### Status segments
 
 A `CupertinoSlidingSegmentedControl` at the top of the list switches between
-"All", "Scheduled", "Success" and "Failure". A status segment queries:
+"All", "Scheduled", "Success", "Failure" and "Scrubbed"; each row names its
+status next to the date, so the icons need no legend. A status segment queries:
 
 ```dart
-query.launches(first: pageSize, filter: LaunchFilter(status: LaunchStatus.SUCCESS))
+query.launches(first: pageSize, filter: LaunchFilter(status: LaunchStatus.success))
 ```
 
 This is a **different argument set** from the All query, so the selection
@@ -320,10 +321,10 @@ what was actually sent."
 
 The top of `NetworkLogScreen` has two more tools:
 
-- **Mock API latency** — Server / Off / 500 ms / 2 s. `MockLatencyController`
+- **Mock API latency** — Default / Off / 500 ms / 2 s. `MockLatencyController`
   (`mock_latency.dart`) is a `ValueNotifier` whose `transport(httpClient)`
   adds an `x-mock-latency-ms` header to every request, which the mock API
-  honours over `LATENCY_MS` ("Server" sends no header). Pick 2 s, pull to
+  honours over `LATENCY_MS` ("Default" sends no header). Pick 2 s, pull to
   refresh or switch segments, and the skeletons stay on screen long enough
   to look at. Subscriptions do not go through `transport`.
 - **Cache** — `CacheStats` (`widgets/cache_stats.dart`) counts the entities

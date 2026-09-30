@@ -15,6 +15,17 @@ class StatusIcon extends StatelessWidget {
       Icon(statusIcon(status), color: statusColor(status), size: size);
 }
 
+/// What the icon means, in words (list rows show it next to the date).
+String statusLabel(LaunchStatus? status) => switch (status) {
+  LaunchStatus.success => 'Success',
+  LaunchStatus.failure => 'Failure',
+  LaunchStatus.partialFailure => 'Partial failure',
+  LaunchStatus.scrubbed => 'Scrubbed',
+  LaunchStatus.scheduled => 'Scheduled',
+  LaunchStatus.inFlight => 'In flight',
+  LaunchStatus.unknown || null => 'Unknown',
+};
+
 IconData statusIcon(LaunchStatus? status) => switch (status) {
   LaunchStatus.success => CupertinoIcons.checkmark_circle_fill,
   LaunchStatus.failure => CupertinoIcons.xmark_circle_fill,
