@@ -90,6 +90,9 @@ query {
   `state.isSkeleton`, `state.isLoading`, `state.error`, `state.refetch()`.
 - `prepare:` to fetch fields hidden behind conditionals in the first round
   trip; dev-mode waterfall warnings.
+- Request log: `client.requests` (`SlingRequest`: fields, duration, bytes,
+  error, the widgets that asked for it), `logRequests: true` for one console
+  line per operation, `SlingRequestOverlay` for the same list in the app.
 - Mutations with optimistic writes (journaled, rolled back on failure).
 - Partial `errors[]` handling, sticky errors, retry cooldown.
 - Fetch policies per widget (`cacheFirst`, `cacheAndNetwork`, `networkOnly`)

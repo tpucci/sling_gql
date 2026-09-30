@@ -22,6 +22,7 @@ export 'src/client.dart'
         RootFactory,
         SlingSchema,
         WaterfallWarning,
+        SlingRequest,
         Transport,
         SubscriptionTransport,
         sseSubscriptionTransport,
@@ -53,3 +54,4 @@ export 'src/widgets.dart'
         SubscriptionState,
         SubscriptionWidgetBuilder,
         frameEndScheduler;
+export 'src/request_overlay.dart' show SlingRequestOverlay;

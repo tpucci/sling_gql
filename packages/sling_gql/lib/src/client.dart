@@ -95,6 +95,145 @@ class WaterfallWarning {
       '${fields.join(', ')}. Fix: $hint.';
 }
 
+/// One operation the client sent — a query batch, a mutation, or one
+/// subscription connection — as dev tooling sees it: who asked for it
+/// ([scopes]), what it selected ([rootFields], [fieldCount]) and how it went
+/// ([duration], [bytes], [error]). Emitted on [SlingClient.requests] and
+/// printed by [SlingClient.logRequests]; `SlingRequestOverlay` lists them.
+///
+/// Mutable until [isDone]: the same object is emitted again each time it
+/// changes.
+class SlingRequest {
+  SlingRequest._({
+    required this.id,
+    required this.kind,
+    required this.operation,
+    required this.scopes,
+    required this.rootFields,
+    required this.fieldCount,
+    required this.startedAt,
+  });
+
+  /// 1 for the first operation this client sent.
+  final int id;
+
+  /// `query`, `mutation` or `subscription`.
+  final String kind;
+
+  /// The printed document and variables.
+  final PrintedOperation operation;
+
+  /// Labels of the scopes whose selections are in the document, one per
+  /// scope (repeated labels are distinct widgets of the same type): a
+  /// `QueryBuilder`'s `debugLabel`, key or enclosing widget
+  /// (`LaunchesScreen`), a `MutationBuilder`/`SubscriptionBuilder`'s
+  /// enclosing widget, or the `debugLabel:` passed to `mutateWith` /
+  /// `subscribeWith`. Empty when nobody named it (`resolve()`, a bare
+  /// `client.mutate`).
+  final List<String> scopes;
+
+  /// Root field names (not aliases), in document order: `launches, company`.
+  final List<String> rootFields;
+
+  /// Fields the scopes read (leaves of the selection), without the
+  /// `__typename`/key fields the printer adds.
+  final int fieldCount;
+
+  final DateTime startedAt;
+
+  final Stopwatch _stopwatch = Stopwatch()..start();
+  final Completer<SlingRequest> _done = Completer<SlingRequest>();
+  void Function(SlingRequest)? _onChange;
+
+  /// Time until the response was processed (a subscription: how long the
+  /// connection stayed open); the time so far while pending.
+  Duration get duration => _stopwatch.elapsed;
+
+  /// Size of the response body; `null` until it arrived (and for
+  /// subscriptions).
+  int? get bytes => _bytes;
+  int? _bytes;
+
+  /// HTTP status of the response, when one arrived.
+  int? get statusCode => _statusCode;
+  int? _statusCode;
+
+  /// Events received (subscriptions only).
+  int get events => _events;
+  int _events = 0;
+
+  /// Why it failed: an HTTP or transport error, or the GraphQL `errors` (a
+  /// [SlingException]), partial ones included.
+  Object? get error => _error;
+  Object? _error;
+
+  bool get isDone => _done.isCompleted;
+
+  /// Completes (never with an error) once the request is done.
+  Future<SlingRequest> get done => _done.future;
+
+  /// [scopes] with repeats folded: `LaunchesScreen, LaunchTile ×12`.
+  String get scopeSummary {
+    final counts = <String, int>{};
+    for (final s in scopes) {
+      counts[s] = (counts[s] ?? 0) + 1;
+    }
+    return [
+      for (final MapEntry(:key, :value) in counts.entries)
+        value == 1 ? key : '$key ×$value',
+    ].join(', ');
+  }
+
+  /// One line: `#3 query launches, company · 42 ms · 1.2 KB · 18 fields ←
+  /// LaunchesScreen, LaunchTile ×12`, with `✗` and the error on failure.
+  String get logLine {
+    final ms = '${duration.inMilliseconds} ms';
+    final bytes = _bytes;
+    final parts = [
+      '#$id $kind ${rootFields.join(', ')}',
+      if (kind == 'subscription')
+        '${_events == 1 ? '1 event' : '$_events events'}'
+            '${isDone ? ' in $ms' : ', open'}'
+      else if (!isDone)
+        'pending'
+      else
+        ms,
+      if (bytes != null) _formatBytes(bytes),
+      fieldCount == 1 ? '1 field' : '$fieldCount fields',
+    ];
+    final error = _error;
+    final problem = error == null
+        ? ''
+        : ' ✗ ${error is SlingException ? error.message : error}';
+    final by = scopes.isEmpty ? '' : ' ← $scopeSummary';
+    return '${parts.join(' · ')}$by$problem';
+  }
+
+  static String _formatBytes(int bytes) =>
+      bytes < 1024 ? '$bytes B' : '${(bytes / 1024).toStringAsFixed(1)} KB';
+
+  void _response(int statusCode, int bytes) {
+    _statusCode = statusCode;
+    _bytes = bytes;
+  }
+
+  void _event() {
+    _events++;
+    _onChange?.call(this);
+  }
+
+  void _finish([Object? error]) {
+    if (isDone) return;
+    _stopwatch.stop();
+    _error = error;
+    _done.complete(this);
+    _onChange?.call(this);
+  }
+
+  @override
+  String toString() => 'sling_gql $logLine';
+}
+
 /// Decides *when* pending selections are flushed into one request.
 ///
 /// Selections are accumulated until [flush] runs; everything recorded in the
@@ -1116,6 +1255,7 @@ class SlingSubscription<T> {
     this._compute,
     this.operation, {
     required this.retryAfter,
+    this.debugLabel,
   }) {
     // Sync: values are added from the transport's own async events, so
     // listeners see them in the same turn as the cache write and the scopes'
@@ -1140,6 +1280,12 @@ class SlingSubscription<T> {
   /// `null` (the default) ends the stream instead. See
   /// [SlingClient.subscriptionRetryAfter].
   final Duration? retryAfter;
+
+  /// Names this subscription in [SlingRequest.scopes].
+  final String? debugLabel;
+
+  /// The dev-tooling record of the current connection, if anyone watches.
+  SlingRequest? _record;
 
   late final StreamController<T> _controller;
   StreamSubscription<Map<String, Object?>>? _upstream;
@@ -1186,6 +1332,9 @@ class SlingSubscription<T> {
     _listened = true;
     _client._subscriptions.add(this);
     _client.onOperation?.call(operation);
+    _record = _client._track('subscription', operation, _scope.root, [
+      ?debugLabel,
+    ]);
     final request = _client._request(operation)
       ..headers['accept'] = 'text/event-stream';
     Stream<Map<String, Object?>> results;
@@ -1200,6 +1349,7 @@ class SlingSubscription<T> {
       _onResult,
       onError: (Object e, StackTrace st) {
         if (!_controller.isClosed) _controller.addError(e, st);
+        _record?._finish(e);
         _dropped();
       },
       onDone: _close,
@@ -1229,6 +1379,7 @@ class SlingSubscription<T> {
   void _onResult(Map<String, Object?> json) {
     if (_closed) return;
     _eventCount++;
+    _record?._event();
     final errors =
         (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
     final data = json['data'] as Map<String, Object?>?;
@@ -1272,6 +1423,7 @@ class SlingSubscription<T> {
     final up = _upstream;
     _upstream = null;
     _client._subscriptions.remove(this);
+    _record?._finish();
     // The payloads live on in the entities they referenced; the root fields
     // would only pin them.
     final touched = <String>{};
@@ -1305,6 +1457,7 @@ class SlingClient<Q extends Accessor> {
     Iterable<ListRule<Accessor>> listRules = const [],
     this.subscriptionRetryAfter,
     this.gcAfterWrites = 100,
+    this.logRequests = false,
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
@@ -1400,6 +1553,7 @@ class SlingClient<Q extends Accessor> {
     RootFactory<S> root,
     T Function(S subscription) body, {
     Duration? retryAfter,
+    String? debugLabel,
   }) {
     final scope = SubscriptionScope(this);
     body(root(scope));
@@ -1410,8 +1564,71 @@ class SlingClient<Q extends Accessor> {
       () => body(root(scope)),
       op,
       retryAfter: retryAfter ?? subscriptionRetryAfter,
+      debugLabel: debugLabel,
     );
   }
+
+  /// Prints one [SlingRequest.logLine] per operation once it is done:
+  /// `sling_gql #3 query launches · 42 ms · 1.2 KB · 18 fields ←
+  /// LaunchesScreen`. Off by default; for a custom sink, listen to
+  /// [requests] and await [SlingRequest.done] instead.
+  final bool logRequests;
+
+  final StreamController<SlingRequest> _requests =
+      StreamController<SlingRequest>.broadcast(sync: true);
+  int _lastRequestId = 0;
+
+  /// Every operation sent (query batches, mutations, subscription
+  /// connections) as a [SlingRequest]: emitted when it is sent and again
+  /// each time it changes (response processed, subscription event,
+  /// connection closed). Records are only built while someone listens (or
+  /// [logRequests] is on), so this costs nothing otherwise.
+  /// `SlingRequestOverlay` is the in-app view of it.
+  Stream<SlingRequest> get requests => _requests.stream;
+
+  /// A record for [op], or `null` when nobody is watching.
+  SlingRequest? _track(
+    String kind,
+    PrintedOperation op,
+    Selection tree,
+    List<String> scopes,
+  ) {
+    if (!logRequests && !_requests.hasListener) {
+      _lastRequestId++;
+      return null;
+    }
+    var leaves = 0;
+    void count(Selection s) {
+      if (s.isLeaf) {
+        leaves++;
+      } else {
+        s.children.forEach(count);
+      }
+    }
+
+    tree.children.forEach(count);
+    final record = SlingRequest._(
+      id: ++_lastRequestId,
+      kind: kind,
+      operation: op,
+      scopes: scopes,
+      rootFields: [
+        for (final c in tree.children)
+          if (!c.isFragment) c.field,
+      ],
+      fieldCount: leaves,
+      startedAt: _now(),
+    );
+    record._onChange = (r) {
+      if (!_requests.isClosed) _requests.add(r);
+    };
+    if (logRequests) record.done.then(_printRequest);
+    _requests.add(record);
+    return record;
+  }
+
+  // ignore: avoid_print
+  static void _printRequest(SlingRequest r) => print(r);
 
   /// Debug hook: called with every document sent to the endpoint.
   final void Function(PrintedOperation op)? onOperation;
@@ -1749,6 +1966,7 @@ class SlingClient<Q extends Accessor> {
     T Function(M mutation) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
+    String? debugLabel,
   }) async {
     final journal = <CacheWrite>[];
     if (optimistic != null) {
@@ -1769,13 +1987,15 @@ class SlingClient<Q extends Accessor> {
     body(root(scope));
     final op = PrintedOperation.from(scope.root);
     onOperation?.call(op);
+    final record = _track('mutation', op, scope.root, [?debugLabel]);
 
     Set<String> touched;
     SlingException? error;
     _mutationsInFlight++;
     try {
       final Map<String, Object?> data;
-      (data, error) = await _receive(op);
+      (data, error) = await _receive(op, record);
+      record?._finish(error);
       // Partial failure: undo the optimistic writes *before* writing the
       // fields that resolved, so the server's values win over the rollback.
       final undone = error == null ? const <String>{} : _rollback(journal);
@@ -1783,6 +2003,7 @@ class SlingClient<Q extends Accessor> {
       touched = touched.union(undone);
       _writesSinceGc++;
     } catch (e) {
+      record?._finish(e);
       _notify(_rollback(journal));
       rethrow;
     } finally {
@@ -1915,11 +2136,14 @@ class SlingClient<Q extends Accessor> {
       if (warning != null && warnOnWaterfall) onWaterfall(warning);
     }
     onOperation?.call(op);
+    final record = _track('query', op, tree, [
+      for (final s in scopes) s.debugLabel,
+    ]);
 
     Object? error;
     Set<String> touched = {};
     try {
-      (touched, error) = await _send('query', op);
+      (touched, error) = await _send('query', op, record);
       if (error != null) {
         _failedDocument = op.document;
         _failedAt = _now();
@@ -1934,6 +2158,7 @@ class SlingClient<Q extends Accessor> {
       _failedAt = _now();
       _lastError = e;
     }
+    record?._finish(error);
 
     _inflight = null;
     final waiters = _inflightScopes;
@@ -1984,9 +2209,10 @@ class SlingClient<Q extends Accessor> {
   /// for partial failures.
   Future<(Set<String>, SlingException?)> _send(
     String operation,
-    PrintedOperation op,
-  ) async {
-    final (data, error) = await _receive(op);
+    PrintedOperation op, [
+    SlingRequest? record,
+  ]) async {
+    final (data, error) = await _receive(op, record);
     final touched = cache.writeResponse(operation, data, at: _now());
     _writesSinceGc++; // swept once the flush settles (`_checkIdle`)
     return (touched, error);
@@ -1997,9 +2223,10 @@ class SlingClient<Q extends Accessor> {
   /// paths are pruned (they are not real nulls), and the error is returned
   /// alongside.
   Future<(Map<String, Object?>, SlingException?)> _receive(
-    PrintedOperation op,
-  ) async {
-    final (data, errors) = await _post(op);
+    PrintedOperation op, [
+    SlingRequest? record,
+  ]) async {
+    final (data, errors) = await _post(op, record);
     SlingException? error;
     if (errors.isNotEmpty) {
       for (final e in errors) {
@@ -2037,9 +2264,11 @@ class SlingClient<Q extends Accessor> {
     ..body = jsonEncode({'query': op.document, 'variables': op.variables});
 
   Future<(Map<String, Object?>, List<Map<String, Object?>>)> _post(
-    PrintedOperation op,
-  ) async {
+    PrintedOperation op, [
+    SlingRequest? record,
+  ]) async {
     final response = await transport(_request(op));
+    record?._response(response.statusCode, response.bodyBytes.length);
     if (response.statusCode >= 400) {
       throw SlingException(
         'HTTP ${response.statusCode}',
@@ -2064,6 +2293,7 @@ class SlingClient<Q extends Accessor> {
     for (final s in _subscriptions.toList()) {
       s.cancel();
     }
+    _requests.close();
     _http.close();
   }
 }

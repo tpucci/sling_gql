@@ -5,7 +5,41 @@ import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
 import 'client.dart';
+import 'pagination.dart';
+import 'request_overlay.dart';
 import 'selection.dart';
+
+/// Debug-mode name for a sling widget's scope: the type of the nearest
+/// enclosing app widget (`LaunchesScreen`), found by walking up to the
+/// [SlingScope] past render/proxy widgets and sling's own. `null` in release
+/// builds (type names are minified there), when the widget sits right
+/// under the [SlingScope], or when there is none.
+String? debugOwnerLabel(BuildContext context) {
+  var enabled = false;
+  assert(enabled = true);
+  if (!enabled) return null;
+  String? found;
+  context.visitAncestorElements((element) {
+    final widget = element.widget;
+    if (widget is SlingScope) return false;
+    if (widget is! StatelessWidget && widget is! StatefulWidget) return true;
+    if (widget is QueryBuilder ||
+        widget is SlingRow ||
+        widget is MutationBuilder ||
+        widget is SubscriptionBuilder ||
+        widget is PaginatedQueryBuilder ||
+        widget is SlingRequestOverlay ||
+        widget is Builder ||
+        widget is StatefulBuilder) {
+      return true;
+    }
+    final name = '${widget.runtimeType}';
+    final generic = name.indexOf('<');
+    found = generic < 0 ? name : name.substring(0, generic);
+    return false;
+  });
+  return found;
+}
 
 /// Provides a [SlingClient] to the widget tree.
 ///
@@ -106,6 +140,10 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
     child: child,
   );
 }
+
+/// The nearest [SlingScope]'s client, or `null` without one.
+SlingClient<Accessor>? maybeSlingClientOf(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<_InheritedClient>()?.client;
 
 class _InheritedClient extends InheritedWidget {
   const _InheritedClient({
@@ -238,8 +276,10 @@ class QueryBuilder<Q extends Accessor> extends StatefulWidget {
   final Duration? maxAge;
 
   /// Names this widget's scope in dev-mode waterfall warnings
-  /// (see `SlingClient.onWaterfall`). Defaults to the widget's [key] when
-  /// set, otherwise a generated `QueryScope#n`.
+  /// (see `SlingClient.onWaterfall`) and in `SlingRequest.scopes` (the
+  /// request overlay). Defaults to the widget's [key] when set, then
+  /// (debug builds) the type of the enclosing widget (`LaunchesScreen`),
+  /// otherwise a generated `QueryScope#n`.
   final String? debugLabel;
 
   /// Optional selection function run *in addition to* the builder, so fields
@@ -265,7 +305,10 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
       _scope = client.createScope(
         onChanged: _onChanged,
         scheduler: widget.scheduler,
-        debugLabel: widget.debugLabel ?? widget.key?.toString(),
+        debugLabel:
+            widget.debugLabel ??
+            widget.key?.toString() ??
+            debugOwnerLabel(context),
         fetchPolicy: widget.fetchPolicy,
         maxAge: widget.maxAge,
       );
@@ -448,7 +491,16 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 /// Tell a failure from a `null` result by `state.error`, or call
 /// `client.mutate` directly to get the exception.
 class MutationBuilder<M extends Accessor> extends StatefulWidget {
-  const MutationBuilder({super.key, this.root, required this.builder});
+  const MutationBuilder({
+    super.key,
+    this.root,
+    required this.builder,
+    this.debugLabel,
+  });
+
+  /// Names this widget's mutations in `SlingRequest.scopes` (the request
+  /// overlay). Defaults (debug builds) to the type of the enclosing widget.
+  final String? debugLabel;
 
   /// The generated `Mutation.root` constructor. Optional: when omitted, it is
   /// resolved from the nearest [SlingScope] via [SlingScope.mutationRootOf].
@@ -508,6 +560,7 @@ class _MutationBuilderState<M extends Accessor>
         body,
         optimistic: optimistic,
         refetchQueries: refetchQueries,
+        debugLabel: widget.debugLabel ?? debugOwnerLabel(context),
       );
       settle(() => _data = result);
       return result;
@@ -614,7 +667,12 @@ class SubscriptionBuilder<S extends Accessor> extends StatefulWidget {
     required this.builder,
     this.onEvent,
     this.retryAfter,
+    this.debugLabel,
   });
+
+  /// Names this subscription in `SlingRequest.scopes` (the request
+  /// overlay). Defaults (debug builds) to the type of the enclosing widget.
+  final String? debugLabel;
 
   /// Delay before reopening a dropped connection; defaults to
   /// `SlingClient.subscriptionRetryAfter`. Read when the subscription is
@@ -656,10 +714,15 @@ class _SubscriptionBuilderState<S extends Accessor>
       _close();
       _client = client;
       final root = widget.root ?? SlingScope.subscriptionRootOf<S>(context);
-      final sub = client.subscribeWith<S, S>(root, (s) {
-        widget.select(s);
-        return s;
-      }, retryAfter: widget.retryAfter);
+      final sub = client.subscribeWith<S, S>(
+        root,
+        (s) {
+          widget.select(s);
+          return s;
+        },
+        retryAfter: widget.retryAfter,
+        debugLabel: widget.debugLabel ?? debugOwnerLabel(context),
+      );
       _subscription = sub;
       sub.onStatusChanged = () {
         if (mounted) setState(() {});
