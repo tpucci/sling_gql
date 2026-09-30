@@ -58,6 +58,7 @@ query {
 | Fetch policies (`cacheAndNetwork`, `networkOnly`), `maxAge` stale-while-revalidate | ✅ per widget or client-wide, `state.isStale`, soft `revalidate()` |
 | Persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`, `changesSince`) |
 | Unions / interfaces (`hit.asLaunch`, `hit.when(launch: …, rocket: …)`) | ✅ inline fragments, every branch recorded on the skeleton; example Search tab |
+| `flutter_hooks` (`useSlingQuery`, `useSlingMutation`, `useSlingSubscription`) | ✅ `packages/sling_gql_hooks`, same scopes as the builders |
 
 ## Layout
 
@@ -65,6 +66,7 @@ query {
 packages/sling_gql/      runtime: Accessor, Selection, Cache, SlingClient, QueryBuilder
 packages/sling_gql_gen/  CLI: introspection JSON → Dart accessor classes
 packages/sling_gql_test/ test helpers: in-memory GraphQL server, pumpUntilSettled
+packages/sling_gql_hooks/ flutter_hooks adapter: useSlingQuery, useSlingMutation, useSlingSubscription
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
 example/                 Flutter app (iOS + web) talking to the mock API
 ```
@@ -91,8 +93,10 @@ Or just [try it live](https://tpucci.github.io/sling_gql/guides/try-it/) on the 
 
 The packages are on pub.dev:
 [`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),
-[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator) and
-[`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers).
+[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator),
+[`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers) and
+[`sling_gql_hooks`](https://pub.dev/packages/sling_gql_hooks) (flutter_hooks
+adapter).
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

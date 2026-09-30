@@ -51,7 +51,7 @@ jobs:
       - name: Format
         run: melos run format --no-select
 
-      - name: Runtime tests
+      - name: Runtime, test-helper and hooks tests
         run: melos run test:runtime --no-select
 
       - name: Generator tests

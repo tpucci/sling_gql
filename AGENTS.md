@@ -31,12 +31,12 @@ on the code.
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
   pass before committing content.
-- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the four
+- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the five
   packages (`workspace:`), each has `resolution: workspace`; only the root
   `pubspec.lock` exists (per-package lockfiles are gitignored). Run
   `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
   config and scripts live in the root `pubspec.yaml` under `melos:`.
-  Gates: `melos run test` (all four: runtime + test helpers, generator,
+  Gates: `melos run test` (all four: runtime + test helpers + hooks, generator,
   example with the mock server auto-started by `scripts/with-mock-api.mjs`,
   website build), or `test:runtime` / `test:gen` / `test:example` /
   `test:website` individually; `melos run analyze`, `melos run format`,
@@ -49,6 +49,14 @@ on the code.
     `pumpUntilSettled` (on `SlingClient.isIdle`/`whenIdle`),
     `useRealNetwork`, `disposeAfterTest`. Tests: `flutter test`. Prefer it
     over hand-rolled `MockClient` + alias regexes in new tests.
+  - `packages/sling_gql_hooks` — `flutter_hooks` adapter (Flutter package):
+    `useSlingQuery` / `useSlingMutation` / `useSlingSubscription` are
+    `QueryBuilder` / `MutationBuilder` / `SubscriptionBuilder` as custom
+    `Hook`s on the same `createScope` / `mutateWith` / `subscribeWith`, and
+    hand out the runtime's `QueryState` / `MutationState` /
+    `SubscriptionState` (public constructors for this). Keep their semantics
+    in lockstep with the builders in `widgets.dart`. Tests: `flutter test`
+    (in `test:runtime`).
   - `example` — Flutter app, **iOS and web** (no other platforms). On the web
     `lib/in_browser_api.dart` (conditional import, the only platform switch)
     swaps the `http.Client` for one answering from the in-page mock API, so
@@ -73,7 +81,7 @@ on the code.
   files bump that package; `feat` -> minor (pre-1.0 as well, melos default),
   `fix`/`perf`/`refactor` -> patch, `BREAKING CHANGE:` footer or `!` -> major.
   Never hand-edit versions or `CHANGELOG.md` files.
-- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`; MIT; each with its own
+- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`; MIT; each with its own
   `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
   independent. Release from a clean, up-to-date `main`:
 
@@ -86,7 +94,8 @@ on the code.
   `.github/workflows/publish.yml` runs once per `<pkg>-vX.Y.Z` tag, checks the
   tag matches that package's `pubspec.yaml`, and publishes via pub.dev
   automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
-  `sling_gql_gen-v{{version}}` / `sling_gql_test-v{{version}}`, no secrets;
+  `sling_gql_gen-v{{version}}` / `sling_gql_test-v{{version}}` /
+  `sling_gql_hooks-v{{version}}`, no secrets;
   the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
   `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos

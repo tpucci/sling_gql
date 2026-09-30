@@ -3,8 +3,8 @@ name: Publish to pub.dev
 # `melos version` tags each bumped package as `<package>-vX.Y.Z`; pushing such
 # a tag publishes that package. pub.dev "Automated publishing" is enabled for
 # tpucci/sling_gql with tag patterns `sling_gql-v{{version}}`,
-# `sling_gql_gen-v{{version}}` and `sling_gql_test-v{{version}}`; auth is the
-# GitHub OIDC token, no secrets.
+# `sling_gql_gen-v{{version}}`, `sling_gql_test-v{{version}}` and
+# `sling_gql_hooks-v{{version}}`; auth is the GitHub OIDC token, no secrets.
 #
 # Release flow (see AGENTS.md "Publishing"):
 #   melos version            # conventional commits → bump + CHANGELOG + commit + tags
@@ -16,6 +16,7 @@ on:
       - 'sling_gql-v[0-9]+.[0-9]+.[0-9]+*'
       - 'sling_gql_gen-v[0-9]+.[0-9]+.[0-9]+*'
       - 'sling_gql_test-v[0-9]+.[0-9]+.[0-9]+*'
+      - 'sling_gql_hooks-v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
   id-token: write # pub.dev OIDC
