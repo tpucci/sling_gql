@@ -83,7 +83,8 @@ final (launches, state) = useSlingQuery(
 ```
 
 `debugLabel` defaults to the widget's key, then (debug builds) the type of the
-`HookWidget` calling the hook. `scheduler:` is there as well, for the rare
+`HookWidget` calling the hook (inside a `HookBuilder`, the enclosing widget's
+type, like the builders). `scheduler:` is there as well, for the rare
 widget that must not wait for the frame (see
 [Batching & waterfalls](/sling_gql/guides/batching-and-waterfalls/)).
 `state` is the regular `QueryState`: `isLoading`, `hasMissingData`,

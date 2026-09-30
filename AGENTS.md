@@ -98,7 +98,12 @@ on the code.
   `sling_gql_hooks-v{{version}}`, no secrets;
   the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
-  `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos
+  `patch` to a `+build` bump). **Release order:** `sling_gql_hooks` needs the
+  public `QueryState`/`MutationState`/`SubscriptionState` constructors, which
+  are not in `sling_gql` 0.2.0 — release `sling_gql` (0.3.0) first and check
+  the hooks pubspec says `sling_gql: ^0.3.0` before publishing it (its first
+  publish is manual; pub.dev only allows automated publishing afterwards).
+  The `<pkg>-v0.1.1` tags are the baseline melos
   reads commits from; before them the history is not conventional. Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
