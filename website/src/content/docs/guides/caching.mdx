@@ -326,12 +326,53 @@ Five launches, each row counting its builds, and a detail card for the first one
 ## Persistence hooks
 
 Reads are synchronous — they happen inside `build()` — so the store is in memory and stays
-in this package. What a persistence layer needs is exposed and deliberately small:
+in this package. What a persistence layer (`sqlite`, `hive`, a file — as separate packages)
+needs is exposed and deliberately small:
 
-- `cache.snapshot` — a JSON-able deep copy (refs as `{"__ref": key}`), and
+- `cache.snapshot` — a JSON-able deep copy of every entity (refs as `{"__ref": key}`), and
   `Cache(initial: json)` to hydrate it back;
-- `cache.onChange` — a `Stream<Set<String>>` of touched dependency keys after every write,
-  for write-behind persistence (`sqlite`, `hive`, a file — as separate packages).
+- `cache.onChange` — a `Stream<Set<String>>` of the dependency keys (`entity.field`) a
+  change touched. It fires **once per change**: a response, a mutation, a subscription
+  event or an optimistic callback is one change, list-rule edits and an automatic `gc`
+  included. Several manual writes become one with `cache.batch(() { ... })`. Nothing fires
+  when a refetch brings the same data;
+- `cache.version` and `cache.changesSince(version)` — a counter bumped once per change, and
+  the entities changed or removed since an earlier value of it, as a `CacheDelta`:
+  JSON copies of those entities only (`changed`), the keys to delete (`removed`), and the
+  `version` to ask from next time. A hydrated cache starts at version 0: what it was
+  hydrated from is the persisted baseline.
+
+So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache:
+
+```dart
+final stored = await store.readAll(); // the JSON a previous run persisted
+final cache = Cache(initial: stored);
+var persisted = cache.version; // 0: `stored` is up to date
+
+Timer? debounce;
+cache.onChange.listen((_) {
+  debounce?.cancel();
+  debounce = Timer(const Duration(milliseconds: 500), () async {
+    final delta = cache.changesSince(persisted);
+    if (delta.isEmpty) return;
+    if (delta.full) await store.deleteAll();
+    await store.delete(delta.removed);
+    await store.putAll(delta.changed);
+    persisted = delta.version; // not reached if a write threw: retried next time
+  });
+});
+```
+
+`delta.full` is set when the delta replaces everything: after `cache.clear()`, or when
+`persisted` is older than the removals the cache remembers (it forgets them once there are
+more than a thousand and more than live entities; the delta then carries every entity).
+A store kept as one JSON map can use `delta.applyTo(json)`.
+
+The copies are real copies: entities are merged in place by later writes (inline objects,
+lists), so neither `snapshot` nor a delta can share maps with the store. `snapshot` copies
+~190 entities in about 50 µs in the example's benchmark, a one-entity delta in about 1.5 µs.
+`fetchedAt` stamps are not persisted: hydrated data counts as stale for `maxAge` (see
+[Fetch policies & freshness](/sling_gql/guides/fetch-policies/)).
 
 ## Not in the PoC
 

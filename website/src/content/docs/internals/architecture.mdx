@@ -83,7 +83,8 @@ joined path; dependency keys are interned per `(entity, field)`. `writeResponse`
 identifiable objects into entities and merges the rest inline; `write` sets a single path
 for optimistic updates. Both return the dependency keys they touched. `Cache` is an
 interface with one implementation, `NormalizedCache`. Apps see the interface through
-`client.cache` (`entity`, `evict`, `gc`, `snapshot`, `onChange`, `fetchedAt`); the
+`client.cache` (`entity`, `evict`, `gc`, `snapshot`, `onChange`, `changesSince`,
+`fetchedAt`); the
 path-level `read`/`write`/`remove`/`writeResponse` are `@internal`, and `NormalizedCache`,
 `Ref`, `missing`, `depKey` come from `package:sling_gql/internal.dart` (no stability
 promise — for adapters and tests). Details in [Caching](/sling_gql/guides/caching/).

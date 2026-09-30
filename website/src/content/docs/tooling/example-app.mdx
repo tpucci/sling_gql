@@ -340,9 +340,11 @@ actually sent."
   to look at. Subscriptions do not go through `transport`.
 - **Cache**: `CacheStats` (`widgets/cache_stats.dart`) counts the objects
   per type in `client.cache.entityKeys` ("20 launches · 4 rockets · …") and
-  the size of `cache.snapshot` (what a persistence layer would store). It
-  rebuilds on every `cache.onChange` event, so the numbers move while the
-  screens behind it fetch, mutate or receive subscription events.
+  the size of `cache.snapshot` (what a persistence layer would store), and
+  of `cache.changesSince` the version it opened at (what an incremental one
+  would write to catch up). It rebuilds on every `cache.onChange` event —
+  one per response, mutation or subscription event — so the numbers move
+  while the screens behind it fetch, mutate or receive subscription events.
 
 ## Skeletons
 
