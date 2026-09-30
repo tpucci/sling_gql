@@ -67,6 +67,7 @@ packages/sling_gql/      runtime: Accessor, Selection, Cache, SlingClient, Query
 packages/sling_gql_gen/  CLI: introspection JSON → Dart accessor classes
 packages/sling_gql_test/ test helpers: in-memory GraphQL server, pumpUntilSettled
 packages/sling_gql_hooks/ flutter_hooks adapter: useSlingQuery, useSlingMutation, useSlingSubscription
+packages/sling_gql_link/ gql_link adapter: a Link chain as the client's transport
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
 example/                 Flutter app (iOS + web) talking to the mock API
 ```
@@ -95,7 +96,8 @@ The packages are on pub.dev:
 [`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),
 [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator) and
 [`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers).
-`packages/sling_gql_hooks` (flutter_hooks adapter) is not published yet.
+`packages/sling_gql_hooks` (flutter_hooks adapter) and `packages/sling_gql_link`
+(gql_link adapter) are not published yet.
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

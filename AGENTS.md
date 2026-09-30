@@ -36,9 +36,9 @@ on the code.
   `pubspec.lock` exists (per-package lockfiles are gitignored). Run
   `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
   config and scripts live in the root `pubspec.yaml` under `melos:`.
-  Gates: `melos run test` (all four: runtime + test helpers + hooks, generator,
-  example with the mock server auto-started by `scripts/with-mock-api.mjs`,
-  website build), or `test:runtime` / `test:gen` / `test:example` /
+  Gates: `melos run test` (all four: runtime + test helpers + hooks + link
+  adapter, generator, example with the mock server auto-started by
+  `scripts/with-mock-api.mjs`, website build), or `test:runtime` / `test:gen` / `test:example` /
   `test:website` individually; `melos run analyze`, `melos run format`,
   `melos run generate`. Add `--no-select` when running non-interactively.
   - `packages/sling_gql` — the runtime (Flutter package). Tests: `flutter test`.
@@ -57,6 +57,13 @@ on the code.
     `SubscriptionState` (public constructors for this). Keep their semantics
     in lockstep with the builders in `widgets.dart`. Tests: `flutter test`
     (in `test:runtime`).
+  - `packages/sling_gql_link` — `gql_link` adapter (Flutter package via
+    `sling_gql`): `linkTransport(link)` / `linkSubscriptionTransport(link)`
+    turn a `Link` chain into the client's `Transport` /
+    `SubscriptionTransport` (printed document parsed with `gql`, headers as
+    `HttpLinkHeaders`, `LinkException` → `SlingLinkException`). The only
+    place `gql`/`gql_link` are allowed. Tests: `flutter test` (fake links +
+    `MockGraphQLServer`, `HttpLink` on a `MockClient`).
   - `example` — Flutter app, **iOS and web** (no other platforms). On the web
     `lib/in_browser_api.dart` (conditional import, the only platform switch)
     swaps the `http.Client` for one answering from the in-page mock API, so
@@ -76,12 +83,12 @@ on the code.
     same build starts normally (`/demo/`, `?demo=`, the Try-it iframe).
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
-  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `docs(website): ...`,
+  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `feat(sling_gql_link): ...`, `docs(website): ...`,
   `chore(repo): ...`, `test(example): ...`. Only commits touching a package's
   files bump that package; `feat` -> minor (pre-1.0 as well, melos default),
   `fix`/`perf`/`refactor` -> patch, `BREAKING CHANGE:` footer or `!` -> major.
   Never hand-edit versions or `CHANGELOG.md` files.
-- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`; MIT; each with its own
+- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`, `sling_gql_link`; MIT; each with its own
   `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
   independent. Release from a clean, up-to-date `main`:
 
@@ -95,7 +102,7 @@ on the code.
   tag matches that package's `pubspec.yaml`, and publishes via pub.dev
   automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
   `sling_gql_gen-v{{version}}` / `sling_gql_test-v{{version}}` /
-  `sling_gql_hooks-v{{version}}`, no secrets;
+  `sling_gql_hooks-v{{version}}` / `sling_gql_link-v{{version}}`, no secrets;
   the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
   `patch` to a `+build` bump). **Release order:** `sling_gql_hooks` needs the
@@ -275,7 +282,8 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
   (`package:meta`). New public symbols go in the main library only if an app
   would call them; everything else in `internal.dart`.
 - Keep the runtime dependency-light (`http` and `meta` only). No `gql`/`ferry` in the
-  runtime for now — the point of the PoC is to see how small the core can be.
+  runtime for now — the point of the PoC is to see how small the core can be;
+  `gql_link` users go through `packages/sling_gql_link`.
 - Every runtime behaviour change gets a test in `packages/sling_gql/test`.
   Never hit the network: the runtime tests use `MockClient` from
   `package:http/testing.dart` (see `test/support/test_schema.dart`); app-level
