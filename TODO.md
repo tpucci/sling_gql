@@ -188,8 +188,8 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 
 61. Example — Plain-language copy: the schedule screen says what you will see (the launch appears, lifts off and lands on its own), `ErrorView` only suggests `npm start` on iOS, the latency picker's no-header option is "Default".
 63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
-
 64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
+
 ## Explicitly not planned
 
 - SSR hydration (not applicable).
