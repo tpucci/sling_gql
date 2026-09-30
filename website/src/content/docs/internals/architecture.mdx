@@ -173,5 +173,7 @@ together.
 <Aside type="note" title="Why no gql / ferry / build_runner?">
 Deliberately. The question was how small the core of this model can be in Dart. The answer
 is: small enough that the transport (`http`) is the only dependency, and the generator is a
-250-line string emitter. Swapping in `gql_link` for transport later is a one-file change.
+250-line string emitter. `gql_link` users hand their chain over as that one transport
+through the separate `sling_gql_link` package (see
+[Transport](/sling_gql/guides/transport/#gql_link)); the core never imports it.
 </Aside>
