@@ -21,7 +21,8 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 #27, #29, #38, #39, #40 done; P3 is empty. The example runs on the web and
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
-the other guides), #22 (`gc()` trigger), #46 (request overlay).
+the other guides), #22 (`gc()` trigger), #46 (request overlay). Tour of the
+guides and the example (2026-09-29): #61–#65.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -45,11 +46,98 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     multi-view embedding (one engine for every demo of a page) instead of
     one iframe each.
 
+61. **Example — Plain-language copy in the app** (tour, 2026-09-29). The app
+    explains itself in library jargon:
+    - detail screen: "Show payloads (2) — no request, thanks to prepare" →
+      "Show payloads (2)"; once expanded, a muted caption "Loaded with the
+      screen, no new request" (the concept name `prepare` belongs in the
+      docs, not the UI);
+    - schedule screen blurb ("subscribes to launchScheduled and
+      launchStatusChanged … written into the same Launch:<id> entity the row
+      reads") → what the user will *see* ("the row appears, lifts off and
+      lands on its own; nothing refreshes");
+    - `ErrorView` says "Is the mock API running? `cd mock-api && npm start`"
+      on the web too, where there is no server to start;
+    - latency picker "Server" → "Default (400 ms)".
+62. **Example — Network log polish.** Today: one long scroll of fully
+    expanded documents, open subscriptions pinned on top, dev tools mixed in.
+    - Title "2 request(s) · 2 subscription(s)" → real plurals.
+    - One collapsed line per request: #, operation type, root fields,
+      variables, time; tap to expand the document. Newest first, the first
+      request of a screen easy to spot.
+    - Separate the parts: Requests · Subscriptions · Dev tools (latency,
+      cache), e.g. segments, instead of one list.
+    - Dim or hide what the printer adds (`__typename`, `id`, aliases) behind
+      a toggle, so what the widgets *read* stands out.
+    - Duration, status and size per request (the latency transport already
+      sees them); errors inline in red; optionally the response JSON.
+    - Monospace font: 'Menlo' does not exist on the web build (falls back to
+      a proportional font); bundle one or add `fontFamilyFallback`.
+    - Cache stats: "31 entities · snapshot 6.7 KB · no change since opened"
+      reads as jargon — label it ("Cache: 20 launches, 4 rockets…").
+    - "Clear" and "copy document" actions.
+    - The antenna + number in the nav bar does not say "network log": a
+      label or first-run hint.
+    - Which widget/screen caused each request: see #46.
+63. **Example — Small UI fixes from the tour.**
+    - Status icons have no legend; the grey "pause" (scrubbed) covers most
+      of the first screen, and there is no Scrubbed segment.
+    - Rocket mass "5000000 kg" unformatted; payload mass "? kg" when unknown.
+    - Crew rows are labelled by agency abbreviation (CSA, JAXA) with no
+      header: read as field names.
+    - Rocket description cut at two lines with no way to expand.
+
 ## P5 — docs & repo hygiene
 
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
+64. **Docs — Stale statements sweep** (tour, 2026-09-29; fix in one pass):
+    - `index.mdx`: "~600 lines of runtime, one dependency (`http`)" (≈4,500
+      lines; `http` + `meta`); "deep-merged into a path-addressed cache"
+      (normalized now); the generated snippet shows `String? get status` (an
+      enum now) and `object('rocket', Rocket.new)` without `keyed:`; no
+      "Try it live" action in the hero.
+    - `getting-started`: "released in lockstep" (versions are independent:
+      0.2.0 / 0.1.2 / 0.1.1); "a constant holder per enum" (real enums since
+      #2); `launch.isFetched('details')` on a nullable `launch`.
+    - `querying`: the "Enums are strings" aside and `LaunchStatus.SUCCESS`,
+      `LaunchOrder.DATE_DESC` in the arguments example (now
+      `LaunchStatus.success`).
+    - `loading-and-errors`: the launch row uses `date.substring(0, 10)`
+      (`DateTime` now) and an undefined `_icon`.
+    - `caching`: "`Company` stays inline" (it is keyed); "Optimistic writes
+      — when mutations land, the pattern will be…" (they have); "replaced
+      the coarse root-alias intersection of the first PoC iteration" and
+      "the old path-addressed behaviour" (history, not guidance).
+    - `mutations`: "Updating lists after a mutation" shows the hand-written
+      `me.favorites` edit and "What is in the example" says the callback
+      prepends/removes — the example uses the `favorites` `ListRule` now;
+      the `refetchQueries` examples call `scheduleLaunch(name:)` (it takes
+      `input:`).
+    - `tooling/example-app`: "Known limitation: `me.favorites` membership
+      does not update" (fixed by #55); test sections ordered 1, 3, 4, 5, 2, 6.
+    - `internals/feasibility`: "What we would need to believe to go to
+      production" lists normalization, mutations, subscriptions — all done.
+      Keep it as the day-one record, add a short "since then".
+    - Consistency: transport, subscriptions, testing and fetch-policies build
+      clients with `rootFactory: Query.root`, the rest with
+      `schema: slingSchema` — use the latter everywhere; `testing` types `me`
+      as `User`, the schema's is `Viewer`.
+65. **Docs — Missing examples.**
+    - `prepare`: the batching guide's excerpt hides the point
+      (`LaunchScreen.prepare(launch); // reads payloads, crew, rocket…`).
+      Show the collapsed section, the request it costs without `prepare`
+      (a second one, on tap), and the one request with it. A demo fits (#60).
+    - Prefetch on tap with `client.resolve` (the example's
+      `LaunchScreen.open`) is only on the example-app page; add it to
+      querying ("Reading outside of build()").
+    - `ErrorView` is used in getting-started and loading-and-errors but never
+      shown: one complete error + retry + pull-to-refresh widget.
+    - The "never branch on list length while loading" rule is stated three
+      times and never shown as a complete widget with a real empty state.
+    - Getting started targets an imaginary `api.example.com` only: add the
+      five-minute path against the mock API (or point at Try it live first).
 
 ## Roadmap items not covered above
 
