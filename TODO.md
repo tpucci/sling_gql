@@ -22,7 +22,7 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Demos in four more
 guides (#60). Demos share one Flutter engine (#67).
-Suggested next picks: #22 (`gc()` trigger), #46 (request overlay). Tour of the
+Automatic `gc()` (#22) done. Suggested next pick: #46 (request overlay). Tour of the
 guides and the example (2026-09-29): #61–#66 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -33,8 +33,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 21. **Perf — `snapshot` is a full deep copy** and `onChange` fires per write;
     persistence adapters will need debouncing and incremental snapshots.
-22. **Perf — `gc()` is manual.** Entities dropped from a replaced list stay
-    until `gc()`; decide on a trigger (after N writes, on app pause).
 
 ## P4 — example app & tooling
 
@@ -133,6 +131,8 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 65. Docs — Missing examples: a `prepare` demo in the batching guide (Without/With prepare, 2 requests vs 1 on "Show payloads"), prefetch on tap with `client.resolve` in querying (`LaunchScreen.open`), a complete screen in loading-and-errors (the Me tab: error + retry, pull-to-refresh, empty state guarded on `isSkeleton`, and `ErrorView`), "Five minutes with the mock API" in getting-started. `DemoSource` reads any `example/lib/<dir>/`.
 60. Docs — Live demos in four more guides: loading & errors (`errors`: placeholders, a sticky error, Retry), pagination (`pagination`: load more fetches one page, refresh both), caching (`caching`: a detail served from the list's entity, a cache write, SlingRow vs plain rows with build counters), subscriptions (`subscriptions`: an event updates banner and row, no request). Harness: `failRequests`, subscriptions counted apart. Multi-view embedding moved to #67.
 67. Docs — One Flutter engine for every demo: `LiveApp` demos are views of a shared engine started with `multiViewEnabled` (`web/flutter_bootstrap.js` template hands over to `window.slingDemoHost`; `DemoViews` runs one `View` per host, demo from the initial data). Loaded once per visit, survives `<ClientRouter />` navigations (views removed before a swap, a demo re-mounts in ~30 ms), iframe fallback on failure; the whole app on Try it stays an iframe. The in-page mock API is shared by the demos of a visit.
+
+22. Perf — Automatic GC: `SlingClient(gcAfterWrites: 100)` sweeps once idle after N responses (`null` = manual); `client.gc()` retains entities live scopes/rows read (`Cache.gc(retain:)`), skips while a mutation is in flight; collected entities lose their `fetchedAt` stamps. App pause: `AppLifecycleListener(onPause: client.gc)` recipe in guides/caching.
 
 ## Explicitly not planned
 

@@ -207,6 +207,11 @@ Design decisions worth knowing before changing things:
   A key is touched only when something under it changed: `_normalize` sets
   `_changed` for leaves, refs, new keys and list lengths, `_mergeEntity`
   reads it per field. Changes inside a referenced entity touch that entity.
+- **GC is the client's.** `Cache.gc(retain:)` only marks from roots +
+  `retain`; `SlingClient.gc()` passes the entities of every live scope's and
+  row's deps (lookups read orphaned entities) and is a no-op while a mutation
+  is in flight (rollbacks restore refs). It runs itself from `_checkIdle`
+  after `gcAfterWrites` responses (default 100, `null` = off).
 - **Rows are scopes for deps only.** `SlingRow` rebinds the accessor it is
   given (`ctor(rowScope, selection, path)`) to a `RowScope`: same cache,
   same selection tree, misses/writes forwarded to the parent `QueryScope`
