@@ -6,12 +6,15 @@ import 'package:sling_gql/sling_gql.dart';
 
 import '../theme.dart';
 
-/// A live summary of `client.cache`: entities per type and the size of
-/// [Cache.snapshot] (what a persistence layer would store).
+/// A live summary of `client.cache`: entities per type, the size of
+/// [Cache.snapshot] (what a persistence layer would store), and of
+/// [Cache.changesSince] the moment it opened (what an incremental one would
+/// write to catch up).
 ///
-/// It listens to [Cache.onChange] — every response, optimistic write,
-/// subscription event or list-rule edit fires it with the dependency keys it
-/// touched — so the numbers move while the screens behind it fetch.
+/// It listens to [Cache.onChange] — each response, mutation, subscription
+/// event or optimistic write fires it once, list-rule edits included, with
+/// the dependency keys it touched — so the numbers move while the screens
+/// behind it fetch.
 class CacheStats extends StatefulWidget {
   const CacheStats({super.key});
 
@@ -25,12 +28,16 @@ class _CacheStatsState extends State<CacheStats> {
   int _changeCount = 0;
   int _lastTouched = 0;
 
+  /// [Cache.version] when this opened: the "last persisted point".
+  int _openedAt = 0;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final cache = SlingScope.clientOf(context).cache;
     if (identical(cache, _cache)) return;
     _cache = cache;
+    _openedAt = cache.version;
     _changes?.cancel();
     _changes = cache.onChange.listen((touched) {
       if (!mounted) return;
@@ -62,7 +69,8 @@ class _CacheStatsState extends State<CacheStats> {
     final entityCount = perType.values.fold(0, (a, b) => a + b);
     final types = perType.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final snapshotKb = utf8.encode(jsonEncode(cache.snapshot)).length / 1024;
+    final snapshotKb = _kb(cache.snapshot);
+    final delta = cache.changesSince(_openedAt);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,13 +98,19 @@ class _CacheStatsState extends State<CacheStats> {
           _changeCount == 0
               ? 'No update since you opened this.'
               : '${_plural(_changeCount, 'update')} since you opened this '
-                    '(last one touched ${_plural(_lastTouched, 'field')}).',
+                    '(last one touched ${_plural(_lastTouched, 'field')}); '
+                    'saving them writes '
+                    '${_plural(delta.changed.length, 'object')} '
+                    '(${_kb(delta.changed).toStringAsFixed(1)} KB)'
+                    '${delta.removed.isEmpty ? '' : ', deletes ${delta.removed.length}'}.',
           style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
         ),
       ],
     );
   }
 }
+
+double _kb(Object json) => utf8.encode(jsonEncode(json)).length / 1024;
 
 String _plural(int n, String one) => '$n ${n == 1 ? one : _many(one)}';
 

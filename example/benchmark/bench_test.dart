@@ -155,7 +155,15 @@ void main() {
       scope.run((q) => q.launches(first: rows)!.nodes![3].name = 'x');
     });
 
-    // 5. Mutation round trip (mock transport, no latency).
+    // 5. Persistence hooks: the full snapshot (deep copy of every entity).
+    final snapshot = timeIt(200, () => client.cache.snapshot);
+    // …versus the delta since the last persisted version, one field written.
+    final persisted = client.cache.version;
+    scope.run((q) => q.launches(first: rows)!.nodes![3].name = 'y');
+    final delta = timeIt(200, () => client.cache.changesSince(persisted));
+    final deltaSize = client.cache.changesSince(persisted).changed.length;
+
+    // 6. Mutation round trip (mock transport, no latency).
     final mutation = Stopwatch()..start();
     for (var i = 0; i < 20; i++) {
       await client.mutateWith(
@@ -176,6 +184,8 @@ sling_gql bench — $rows rows × 7 reads/row (${rows * 7} accessor reads per bu
   raw Map reads, same fields (baseline)          : ${us(rawBuild, 500)} / build
   overhead vs raw maps                           : ${(warmBuild.inMicroseconds / rawBuild.inMicroseconds).toStringAsFixed(1)}×
   optimistic write + notify 50 scopes            : ${us(notify, 200)}
+  cache.snapshot (deep copy of every entity)     : ${us(snapshot, 200)}
+  cache.changesSince after one write             : ${us(delta, 200)}  ($deltaSize entity)
   mutation round trip (mock http)                : ${us(mutation.elapsed, 20)}
 ''';
     // ignore: avoid_print
