@@ -36,7 +36,8 @@ Worth a look:
   for code generated with `--key-field id`, spelled out.
 
 `lib/demos/` holds the small demos embedded in the website's guides (open one
-with `?demo=batching`, `fetch-policies` or `optimistic` on the web build).
+with `?demo=batching`, `prepare`, `fetch-policies` or `optimistic` on the web
+build).
 
 Tests (`test/app_test.dart`) run against the real mock API and assert request
 counts: `melos run test:example --no-select` from the repo root starts the

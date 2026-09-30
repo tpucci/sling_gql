@@ -36,6 +36,7 @@ class LaunchScreen extends StatefulWidget {
   /// sending one: still one request, sent a frame earlier. Awaiting it
   /// before `push` would open the screen fully populated instead (a route
   /// "loader"), at the price of a tap that does nothing for a round trip.
+  // #region open
   static void open(BuildContext context, String id) {
     SlingScope.of<Query>(context)
         .resolve((query) {
@@ -47,6 +48,7 @@ class LaunchScreen extends StatefulWidget {
     Navigator.of(context)
         .push(CupertinoPageRoute<void>(builder: (_) => LaunchScreen(id: id)));
   }
+  // #endregion
 
   @override
   State<LaunchScreen> createState() => _LaunchScreenState();

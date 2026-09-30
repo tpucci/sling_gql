@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 
 import '../in_browser_api.dart';
 
+// #region error-view
 /// Shown by a screen's [QueryBuilder] when `state.error` is set (sticky until
 /// `refetch()`); a hint plus a retry button that calls it.
 class ErrorView extends StatelessWidget {
@@ -38,3 +39,4 @@ class ErrorView extends StatelessWidget {
     ),
   );
 }
+// #endregion

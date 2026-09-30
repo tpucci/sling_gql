@@ -83,6 +83,28 @@ void main() {
     await setOnServer('SCHEDULED');
   });
 
+  testWidgets('prepare: a second request without it, none with it', (
+    tester,
+  ) async {
+    await open(tester, 'prepare');
+    expect(find.text('1 request'), findsOneWidget);
+    await tester.tap(find.text('Show payloads'));
+    await tester.pump();
+    await settle(tester);
+    expect(find.text('2 requests'), findsOneWidget);
+    expect(find.textContaining('Crew Dragon Payload 1'), findsOneWidget);
+
+    await tester.tap(find.text('With prepare'));
+    await tester.pump();
+    await settle(tester);
+    expect(find.text('1 request'), findsOneWidget);
+    await tester.tap(find.text('Show payloads'));
+    await tester.pump();
+    await settle(tester);
+    expect(find.text('1 request'), findsOneWidget);
+    expect(find.textContaining('Crew Dragon Payload 1'), findsOneWidget);
+  });
+
   testWidgets('optimistic: confirmed on success, rolled back on failure', (
     tester,
   ) async {

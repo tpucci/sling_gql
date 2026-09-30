@@ -28,6 +28,7 @@ class MeScreen extends StatelessWidget {
         trailing: NetworkLogButton(),
       ),
       child: SafeArea(
+        // #region me
         child: QueryBuilder<Query>(
           builder: (context, query, state) {
             final me = query.me;
@@ -78,6 +79,7 @@ class MeScreen extends StatelessWidget {
             );
           },
         ),
+        // #endregion
       ),
     );
   }
