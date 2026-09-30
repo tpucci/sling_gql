@@ -66,27 +66,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     - The antenna + number in the nav bar does not say "network log": a
       label or first-run hint.
     - Which widget/screen caused each request: see #46.
-66. **Example — Nicer skeletons.** Today `SkeletonBox` is a flat
-    `kColorSurface` rectangle (radius 4) and `SkeletonText` a box of a
-    fixed width, so every placeholder row is identical and nothing says
-    "loading". Proposal:
-    - one shared shimmer (a gradient sweeping across every placeholder in
-      sync, driven by a single ancestor animation, not one controller per
-      box), off when the platform asks for reduced motion;
-    - pill-shaped text bars sized from the text style (line height, not font
-      size) and varied widths per row (seeded by index) so a list looks like
-      a list;
-    - placeholders that match the real layout: a circle where the status
-      icon goes, the detail screen's sections (title, meta line, rocket
-      table) instead of a few bars;
-    - a short fade from skeleton to content.
-    Keep it one file (`widgets/skeleton.dart`) with the same
-    `SkeletonText(text, …)` call shape — the guides show it as "all the
-    loading UI you need" — and update the loading-and-errors excerpt if the
-    API changes. Check that `app_test.dart` still settles (a repeating
-    animation must not keep `pumpUntilSettled` busy; it only waits on the
-    client).
-
 ## P5 — docs & repo hygiene
 
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
@@ -189,6 +168,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 61. Example — Plain-language copy: the schedule screen says what you will see (the launch appears, lifts off and lands on its own), `ErrorView` only suggests `npm start` on iOS, the latency picker's no-header option is "Default".
 63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
 64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
+66. Example — Nicer skeletons: `SkeletonShimmer` (one animation for every placeholder, runs only while one is on screen, off with reduced motion), pill bars as tall as a line of the style with a fade to the text, `SkeletonBox.circle` for icons, eight varied-width placeholder rows while the Launches list loads.
 
 ## Explicitly not planned
 
