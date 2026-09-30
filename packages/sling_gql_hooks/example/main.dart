@@ -39,8 +39,13 @@ class ProfilePage extends HookWidget {
   Widget build(BuildContext context) {
     // Read everything the build needs inside the selector, unconditionally —
     // a field read only behind an `if` costs a second round trip.
-    final ((me, name, age, friends), state) = useSlingQuery(
-      (Query q) => (q.me, q.me.name, q.me.age, q.me.friends(limit: 3)),
+    final ((me, name, age, friendNames), state) = useSlingQuery(
+      (Query q) => (
+        q.me,
+        q.me.name,
+        q.me.age,
+        q.me.friends(limit: 3).map((f) => f.name).toList(),
+      ),
     );
 
     return Scaffold(
@@ -64,10 +69,10 @@ class ProfilePage extends HookWidget {
                       : RenameButton(user: me),
                 ),
                 const Divider(),
-                for (final friend in friends)
+                for (final friendName in friendNames)
                   ListTile(
                     leading: const Icon(Icons.person),
-                    title: Text(friend.name ?? '…'),
+                    title: Text(friendName ?? '…'),
                   ),
               ],
             ),
@@ -86,6 +91,9 @@ class RenameButton extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Reads through an accessor handed down by ProfilePage, like a
+    // QueryBuilder's child widget: `id` is selected with every keyed type and
+    // `name` was read in the selector, so both are already cached.
     final id = user.id;
     final currentName = user.name;
     final (mutate, state) = useSlingMutation<Mutation>();

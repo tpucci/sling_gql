@@ -44,7 +44,8 @@ import 'debug_label.dart';
 /// there, are read once, when the scope is created (first build, or when the
 /// [SlingScope] above provides another client). [debugLabel] names the scope
 /// in `SlingRequest.scopes` and waterfall warnings; it defaults to this
-/// widget's key, then (debug builds) its type.
+/// widget's key, then (debug builds) its type — inside a [HookBuilder], the
+/// enclosing widget's.
 ///
 /// Needs a `SlingScope<Q>` above. The scope is disposed with the widget.
 (T, QueryState) useSlingQuery<Q extends Accessor, T>(

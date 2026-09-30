@@ -305,9 +305,8 @@ void main() {
     expect(find.text('Ada'), findsOneWidget);
   });
 
-  testWidgets('debugLabel: explicit, then the widget key, then its type', (
-    tester,
-  ) async {
+  testWidgets('debugLabel: explicit, then the widget key, then its type '
+      '(the enclosing widget inside a HookBuilder)', (tester) async {
     final server = MockGraphQLServer(
       query: {
         'me': user('1', 'Ada'),
@@ -326,6 +325,7 @@ void main() {
             _NameOf(id: '2', debugLabel: 'explicit'),
             _NameOf(id: '3', key: ValueKey('keyed')),
             _NameOf(id: '4'),
+            _Screen(),
           ],
         ),
       ),
@@ -334,7 +334,7 @@ void main() {
     expect(requests, hasLength(1));
     expect(
       requests.single.scopes,
-      unorderedEquals(['explicit', "[<'keyed'>]", '_NameOf']),
+      unorderedEquals(['explicit', "[<'keyed'>]", '_NameOf', '_Screen']),
     );
   });
 
@@ -377,4 +377,18 @@ class _NameOf extends HookWidget {
     );
     return Text(name ?? '…');
   }
+}
+
+/// A plain widget hosting the hook in a [HookBuilder]: the label is
+/// `_Screen`, not `HookBuilder`.
+class _Screen extends StatelessWidget {
+  const _Screen();
+
+  @override
+  Widget build(BuildContext context) => HookBuilder(
+    builder: (context) {
+      final (name, _) = useSlingQuery((Query q) => q.user(id: '5')?.name);
+      return Text(name ?? '…');
+    },
+  );
 }
