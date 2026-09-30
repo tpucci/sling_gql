@@ -342,23 +342,31 @@ needs is exposed and deliberately small:
   `version` to ask from next time. A hydrated cache starts at version 0: what it was
   hydrated from is the persisted baseline.
 
-So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache:
+So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache.
+Saves run one after another: a slow save must not land after a newer one and put older
+copies back on disk.
 
 ```dart
 final stored = await store.readAll(); // the JSON a previous run persisted
 final cache = Cache(initial: stored);
 var persisted = cache.version; // 0: `stored` is up to date
 
+Future<void> save() async {
+  final delta = cache.changesSince(persisted);
+  if (delta.isEmpty) return;
+  if (delta.full) await store.deleteAll();
+  await store.delete(delta.removed);
+  await store.putAll(delta.changed);
+  persisted = delta.version; // not reached if a write threw: retried next time
+}
+
 Timer? debounce;
+var saving = Future<void>.value();
 cache.onChange.listen((_) {
   debounce?.cancel();
-  debounce = Timer(const Duration(milliseconds: 500), () async {
-    final delta = cache.changesSince(persisted);
-    if (delta.isEmpty) return;
-    if (delta.full) await store.deleteAll();
-    await store.delete(delta.removed);
-    await store.putAll(delta.changed);
-    persisted = delta.version; // not reached if a write threw: retried next time
+  debounce = Timer(const Duration(milliseconds: 500), () {
+    // Chained, never concurrent: each save starts from the previous one's version.
+    saving = saving.then((_) => save()).catchError((Object e) => log(e));
   });
 });
 ```
