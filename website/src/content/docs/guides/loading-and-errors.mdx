@@ -4,6 +4,7 @@ description: Skeleton values instead of loading branches, what QueryState tells 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import DemoSource from '../../../components/DemoSource.astro';
 
 ## Skeletons, not spinners
 
@@ -131,6 +132,25 @@ if (e is SlingException) {
   e.statusCode;     // for HTTP failures
 }
 ```
+
+## Putting it together
+
+The example's Me tab is all of the above in one builder: every field read first, the
+error with a retry, pull-to-refresh, placeholders while loading, and an empty state
+that waits for real data:
+
+<DemoSource dir="screens" file="me_screen.dart" region="me" />
+
+- **`favorites.isEmpty && !state.isSkeleton`**: while loading, `favorites` is one
+  placeholder launch, so the list shows one skeleton row and never the empty state. The
+  `isSkeleton` guard makes the rule explicit: "No favourites yet" reacts only to what the
+  server sent, never to a placeholder.
+- **`CupertinoSliverRefreshControl(onRefresh: state.refetch)`**: pull to refresh is
+  one line, and the same `refetch` clears a sticky error.
+
+`ErrorView` is the example's shared error widget, a message and a retry button:
+
+<DemoSource dir="widgets" file="error_view.dart" region="error-view" />
 
 <Aside type="note" title="No magic loading or error layer — on purpose">
 Loading is a value you render; errors are a value you check. Both are local to the widget

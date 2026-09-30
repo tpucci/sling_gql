@@ -4,6 +4,7 @@ description: Reading scalars, nested objects, lists and fields with arguments â€
 ---
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import DemoSource from '../../../components/DemoSource.astro';
 
 Querying in sling_gql is reading. This page walks through the generated API for the mock
 API's schema, showing the GraphQL each snippet produces.
@@ -256,6 +257,18 @@ final name = await client.resolve((q) => q.latestLaunch?.name);
 ```
 
 `resolve` batches on a microtask instead of a frame, so it also works in pure Dart tests.
+
+### Prefetch on tap
+
+The example opens a launch this way: the request leaves on the tap, before the route
+exists, with the same `prepare` function the detail screen's `QueryBuilder` uses.
+
+<DemoSource dir="screens" file="launch_screen.dart" region="open" />
+
+The screen builds a frame later, finds the same fields in flight and waits for that
+request instead of sending its own: still one request, sent earlier. `await` the
+`resolve` before `push` if you would rather open the screen fully populated (a route
+"loader"), at the price of a tap that does nothing for a round trip.
 
 ## Imperative refetch
 

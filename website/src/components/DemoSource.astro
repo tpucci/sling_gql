@@ -1,6 +1,7 @@
 ---
 /**
- * A region of a demo's source (`example/lib/demos/<file>`, between
+ * A region of the example's source (`example/lib/<dir>/<file>`, `dir`
+ * `demos` by default, between
  * `// #region <name>` and `// #endregion`), read at build time: the code on
  * the page is the code the demo next to it runs. A missing region fails the
  * build.
@@ -12,16 +13,19 @@ import { Code } from '@astrojs/starlight/components';
 interface Props {
   file: string;
   region: string;
+  /** Folder under `example/lib`; `demos` by default. */
+  dir?: string;
 }
-const { file, region } = Astro.props;
+const { file, region, dir = 'demos' } = Astro.props;
+const path = `example/lib/${dir}/${file}`;
 
 // `astro build` / `astro dev` run from website/.
-const source = readFileSync(join(process.cwd(), '..', 'example', 'lib', 'demos', file), 'utf8');
+const source = readFileSync(join(process.cwd(), '..', path), 'utf8');
 const lines = source.split('\n');
 const start = lines.findIndex((l) => l.trim() === `// #region ${region}`);
 const end = lines.findIndex((l, i) => i > start && l.trim() === '// #endregion');
 if (start < 0 || end < 0) {
-  throw new Error(`DemoSource: no region "${region}" in example/lib/demos/${file}`);
+  throw new Error(`DemoSource: no region "${region}" in ${path}`);
 }
 const body = lines.slice(start + 1, end);
 const indent = Math.min(
@@ -30,4 +34,4 @@ const indent = Math.min(
 const code = body.map((l) => l.slice(indent)).join('\n');
 ---
 
-<Code code={code} lang="dart" title={`example/lib/demos/${file}`} />
+<Code code={code} lang="dart" title={path} />

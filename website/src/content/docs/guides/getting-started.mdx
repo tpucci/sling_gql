@@ -108,6 +108,24 @@ minor versions. Everything below works against any GraphQL endpoint that allows 
 
 </Steps>
 
+## Five minutes with the mock API
+
+No endpoint of your own yet? [Try it live](/sling_gql/guides/try-it/) runs the example
+app in your browser. To run it yourself, and generate against a real server:
+
+```sh
+git clone https://github.com/tpucci/sling_gql && cd sling_gql
+cd mock-api && npm install && npm start        # http://localhost:4000/graphql
+```
+
+```sh
+# In your app: step 2 above, against the mock API
+dart run sling_gql_gen --endpoint http://localhost:4000/graphql --out lib/generated/schema.dart
+```
+
+The iOS simulator reaches `localhost` as-is; the
+[example app](/sling_gql/tooling/example-app/) in the repository is already wired to it.
+
 ## `null` means three things
 
 Every accessor getter is nullable, even for schema fields marked `!`. `null` on its own is
