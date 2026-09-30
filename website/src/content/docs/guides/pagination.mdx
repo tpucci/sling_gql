@@ -4,6 +4,8 @@ description: Cursor and offset pagination with per-argument cache entries — a 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import DemoSource from '../../../components/DemoSource.astro';
+import LiveApp from '../../../components/LiveApp.astro';
 
 sling_gql needs no pagination *machinery*: a field called with different arguments is a
 **different cache entry**, and a widget's selection can include as many of them as it
@@ -94,6 +96,19 @@ While the first page is loading, `state.items` holds one skeleton node (so `.map
 records the row selection). Rows render as placeholders on their own; for counts or empty
 states check `state.isLoading` / `state.hasMissingData` first, as the example does.
 </Aside>
+
+### Try it
+
+Pages of five:
+
+<DemoSource file="pagination_demo.dart" region="pages" />
+
+<LiveApp demo="pagination" />
+
+- **Load more**: one more request, for the next five only (`after:` the last cursor).
+  The first page comes from the cache.
+- **Refresh**: one request with **both** loaded pages, cursors kept, the way a pull to
+  refresh behaves.
 
 ## The manual recipe
 

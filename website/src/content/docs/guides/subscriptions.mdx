@@ -4,6 +4,8 @@ description: client.subscribe and SubscriptionBuilder — record the selection b
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import DemoSource from '../../../components/DemoSource.astro';
+import LiveApp from '../../../components/LiveApp.astro';
 
 ## The same idea, on a stream
 
@@ -101,6 +103,18 @@ example app's list screen has a one-line "Live" banner subscribed to
 they read the same `Launch:<id>` entity, not because the banner tells them
 anything. Tap **+**, schedule a launch, and watch the server fly it.
 </Aside>
+
+### Try it
+
+A banner subscribed to `launchStatusChanged`, above a plain query of four launches:
+
+<DemoSource file="subscriptions_demo.dart" region="banner" />
+
+<LiveApp demo="subscriptions" />
+
+Tap **Change a status on the server** (someone else updates Crew-5). The event arrives,
+the banner shows it, and the row changes too, although the list knows nothing about the
+subscription: both read `Launch:launch-181`. The request count stays at 1.
 
 ## Lists: `launchScheduled` adds a row, `SUCCESS` moves it
 

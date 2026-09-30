@@ -4,6 +4,7 @@ description: Skeleton values instead of loading branches, what QueryState tells 
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import LiveApp from '../../../components/LiveApp.astro';
 import DemoSource from '../../../components/DemoSource.astro';
 
 ## Skeletons, not spinners
@@ -132,6 +133,22 @@ if (e is SlingException) {
   e.statusCode;     // for HTTP failures
 }
 ```
+
+### Try it
+
+One launch, read with no loading branch: `null` fields render as placeholders, and an
+error replaces the card until Retry.
+
+<DemoSource file="errors_demo.dart" region="card" />
+
+<LiveApp demo="errors" />
+
+- **↻** runs the screen again from an empty cache: placeholders for a moment (the demo's
+  server takes 1.2 s), then the launch.
+- **Server fails**, then **↻**: placeholders, then the error.
+- **Rebuild the widget**: the builder runs again and lands on the same error, **without a
+  new request**. That is the sticky rule: a failing query never retries on its own.
+- **Server OK**, then **Retry** (`state.refetch`): one more request, and the launch.
 
 ## Putting it together
 

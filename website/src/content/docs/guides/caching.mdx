@@ -4,6 +4,8 @@ description: The normalized, entity-keyed in-memory cache, how reads follow refe
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import DemoSource from '../../../components/DemoSource.astro';
+import LiveApp from '../../../components/LiveApp.astro';
 
 ## The cache is the API
 
@@ -285,6 +287,23 @@ example's `LaunchRow` is built this way.
 
 `SlingRow` is worth it for long lists and busy entities (live status updates); a short
 screen that rebuilds as a whole is cheaper to write and just as fast.
+
+### Try it
+
+Five launches, each row counting its builds, and a detail card for the first one:
+
+<DemoSource file="caching_demo.dart" region="rows" />
+
+<DemoSource file="caching_demo.dart" region="detail" />
+
+<LiveApp demo="caching" />
+
+- **Open the first launch**: the detail shows its name with **no request**. The list
+  stored `Launch:launch-181`, and `launch(id:)` found it.
+- **Rename it** writes `launch.name` into the cache (a setter, as an optimistic update
+  would). The row and the detail change together, still no request.
+- With **SlingRow**, only the renamed row's count goes up. Switch to **Plain rows** and
+  rename again: every row is rebuilt, because their reads belong to the list's scope.
 
 ## Persistence hooks
 
