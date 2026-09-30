@@ -3,6 +3,7 @@ import 'package:sling_gql/sling_gql.dart';
 
 import 'app.dart';
 import 'demos/demos.dart';
+import 'demos/views.dart';
 import 'generated/schema.dart';
 import 'in_browser_api.dart';
 import 'list_rules.dart';
@@ -15,8 +16,11 @@ import 'network_log.dart';
 const endpoint = 'http://localhost:4000/graphql';
 
 void main() {
-  // `?demo=<name>`: one concept demo instead of the app (the website embeds
-  // them after each guide). Only the web build ever has a query string.
+  // Embedded in a docs page (multi-view): one view per demo, one engine
+  // for all of them.
+  if (isEmbedded) return runWidget(const DemoViews());
+  // `?demo=<name>`: one concept demo instead of the app, in a page of its
+  // own. Only the web build ever has a query string.
   final demo = demoFor(Uri.base.queryParameters['demo'] ?? '');
   if (demo != null) return runApp(DemoApp(demo: demo));
 
