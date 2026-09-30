@@ -174,6 +174,9 @@ abstract class Cache {
   /// [version] once, when the outermost batch returns or throws. The client
   /// batches each response, mutation, subscription event and optimistic
   /// callback, list-rule edits included; batch several manual writes with it.
+  ///
+  /// [body] must be synchronous: a batch ends when [body] returns, so the
+  /// writes after an `await` would each be their own change (asserted).
   T batch<T>(T Function() body);
 
   /// Fires once per change — a write outside a [batch], or a whole batch —
@@ -673,7 +676,13 @@ class NormalizedCache implements Cache {
   T batch<T>(T Function() body) {
     _batchDepth++;
     try {
-      return body();
+      final result = body();
+      assert(
+        result is! Future,
+        'Cache.batch: the body must be synchronous — the batch ends when it '
+        'returns, not after its awaits',
+      );
+      return result;
     } finally {
       if (--_batchDepth == 0) {
         final held = _held;

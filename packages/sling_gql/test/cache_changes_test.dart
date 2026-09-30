@@ -65,6 +65,16 @@ void main() {
       expect(cache.version, 1);
     });
 
+    test('an async body fails an assert (the batch would end at its first '
+        'await)', () {
+      final cache = NormalizedCache();
+      expect(
+        () => cache.batch(() async => cache.write('query', ['count'], 1)),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(cache.version, 1, reason: 'what it wrote is still committed');
+    });
+
     test('nothing fires and the version stays when nothing changed', () {
       final cache = NormalizedCache();
       cache.writeResponse('query', {'me': user('1', name: 'Ada')});
