@@ -64,4 +64,36 @@ void main() {
     // true, hasMissingData false \u2014 is therefore false by construction, and
     // every other combination is covered by the two paints above.
   });
+
+  test(
+    'QueryState(scope) is a live view of a scope run outside a '
+    'QueryBuilder (what adapters such as sling_gql_hooks build on)',
+    () async {
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        rootFactory: Query.root,
+        httpClient: MockClient(
+          (req) async => http.Response(
+            jsonEncode({
+              'data': {
+                'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
+              },
+            }),
+            200,
+          ),
+        ),
+      );
+      addTearDown(client.dispose);
+      final scope = client.createScope(onChanged: () {});
+      final state = QueryState(scope);
+      expect(scope.run((q) => q.me.name), isNull);
+      expect(state.isSkeleton, isTrue);
+
+      await scope.whenSettled;
+      expect(scope.run((q) => q.me.name), 'Ada');
+      expect(state.isLoading, isFalse);
+      expect(state.hasMissingData, isFalse);
+      expect(state.error, isNull);
+    },
+  );
 }

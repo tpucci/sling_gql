@@ -149,4 +149,11 @@ void main() {
     expect(state.error, isNull);
     expect(state.data, 'New');
   });
+
+  test('MutationState() is the idle state (for adapters)', () {
+    const state = MutationState();
+    expect(state.isLoading, isFalse);
+    expect(state.error, isNull);
+    expect(state.data, isNull);
+  });
 }

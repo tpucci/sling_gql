@@ -175,7 +175,9 @@ void frameEndScheduler(void Function() flush) {
 
 /// Read-only view of a [QueryScope]'s status, handed to builders.
 class QueryState {
-  const QueryState._(this._scope);
+  /// A view of [scope]. [QueryBuilder] makes one per build; public for
+  /// adapters that run a [QueryScope] themselves (`sling_gql_hooks`).
+  const QueryState(this._scope);
 
   final QueryScope _scope;
 
@@ -330,7 +332,7 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
     final scope = _scope!;
     return scope.run((query) {
       widget.prepare?.call(query);
-      return widget.builder(context, query, QueryState._(scope));
+      return widget.builder(context, query, QueryState(scope));
     });
   }
 }
@@ -434,7 +436,9 @@ typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
 /// Describes the *latest* `mutate` call only: when calls overlap, an earlier
 /// one finishing later does not overwrite the state of a newer one.
 class MutationState {
-  const MutationState._(this.isLoading, this.error, this.data);
+  /// [MutationBuilder] builds one per build; public for adapters that call
+  /// `SlingClient.mutateWith` themselves (`sling_gql_hooks`).
+  const MutationState({this.isLoading = false, this.error, this.data});
 
   /// A `mutate` call is in flight.
   final bool isLoading;
@@ -577,13 +581,15 @@ class _MutationBuilderState<M extends Accessor>
   Widget build(BuildContext context) => widget.builder(
     context,
     _mutate,
-    MutationState._(_loading, _error, _data),
+    MutationState(isLoading: _loading, error: _error, data: _data),
   );
 }
 
 /// Status of a [SubscriptionBuilder]'s connection.
 class SubscriptionState {
-  const SubscriptionState._({
+  /// [SubscriptionBuilder] builds one per build; public for adapters that
+  /// call `SlingClient.subscribeWith` themselves (`sling_gql_hooks`).
+  const SubscriptionState({
     required this.isActive,
     required this.isConnected,
     required this.isReconnecting,
@@ -770,7 +776,7 @@ class _SubscriptionBuilderState<S extends Accessor>
   Widget build(BuildContext context) => widget.builder(
     context,
     _latest,
-    SubscriptionState._(
+    SubscriptionState(
       isActive: _active && (_subscription?.isActive ?? false),
       isConnected: _subscription?.isConnected ?? false,
       isReconnecting: _subscription?.isReconnecting ?? false,
