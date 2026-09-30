@@ -12,6 +12,9 @@ https://github.com/tpucci/sling_gql
 flutter pub add sling_gql_link gql_link gql_http_link
 ```
 
+Not on pub.dev yet: until its first release, depend on it from git
+(`git: {url: https://github.com/tpucci/sling_gql, path: packages/sling_gql_link}`).
+
 ```dart
 import 'package:gql_http_link/gql_http_link.dart';
 import 'package:gql_link/gql_link.dart';
@@ -50,9 +53,11 @@ A `LinkException` becomes a `SlingLinkException` (a `SlingException`):
 | Link exception | `message` | `statusCode` | `graphqlErrors` |
 | --- | --- | --- | --- |
 | `ServerException` with a status `>= 300` (`HttpLinkServerException`) | `HTTP <code>` | the status | the body's errors |
+| `HttpLinkParserException` with a status `>= 300` (a 502 HTML page, an empty 401: `HttpLink` parses before it checks the status) | `HTTP <code>` | the status | `[]` |
 | `ServerException` with errors, no error status | the errors' messages | the status, if any | the errors |
 | `ServerException` with neither data nor errors | `Empty response` | the status, if any | `[]` |
 | `ServerException` of a failed connection | the cause's message | `null` | `[]` |
+| `HttpLinkParserException` of a `2xx` | the cause's message | the status | `[]` |
 | any other `LinkException` | the cause's message | `null` | `[]` |
 
 `linkException` keeps what the link threw (and its `originalException`).

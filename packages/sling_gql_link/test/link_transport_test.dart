@@ -388,6 +388,45 @@ void main() {
       );
     });
 
+    test('an HTTP error status with a non-JSON body keeps its status code '
+        '(HttpLink fails it as a parse error)', () async {
+      for (final response in [
+        http.Response('<html>Bad gateway</html>', 502),
+        http.Response('', 401),
+      ]) {
+        final client = _client(_httpLink(_server(), send: (_) => response));
+
+        expect(
+          await _scopeError(client),
+          isA<SlingLinkException>()
+              .having(
+                (e) => e.message,
+                'message',
+                'HTTP ${response.statusCode}',
+              )
+              .having((e) => e.statusCode, 'statusCode', response.statusCode)
+              .having(
+                (e) => e.linkException,
+                'linkException',
+                isA<HttpLinkParserException>(),
+              ),
+        );
+      }
+    });
+
+    test('an unparsable 200 is not an HTTP error', () async {
+      final client = _client(
+        _httpLink(_server(), send: (_) => http.Response('not json', 200)),
+      );
+
+      expect(
+        await _scopeError(client),
+        isA<SlingLinkException>()
+            .having((e) => e.message, 'message', contains('FormatException'))
+            .having((e) => e.statusCode, 'statusCode', 200),
+      );
+    });
+
     test('a response with neither data nor errors is an empty '
         'response', () async {
       final client = _client(

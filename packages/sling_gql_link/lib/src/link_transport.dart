@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:gql/ast.dart';
 import 'package:gql/language.dart';
 import 'package:gql_exec/gql_exec.dart';
+import 'package:gql_http_link/gql_http_link.dart' show HttpLinkParserException;
 import 'package:gql_link/gql_link.dart';
 import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
@@ -82,16 +83,15 @@ SubscriptionTransport linkSubscriptionTransport(Link link) => (request) {
 
 /// A [LinkException] a link threw, as the [SlingException] the client and
 /// the widgets report: `HTTP <code>` with [statusCode] for a
-/// [ServerException] with an error status, else the GraphQL errors of its
-/// parsed response, else the original exception's message.
+/// [ServerException] with an error status — or an [HttpLinkParserException]
+/// of one (`HttpLink` parses the body before it checks the status, so a 502
+/// HTML page or an empty 401 fails as a parse error) — else the GraphQL
+/// errors of its parsed response, else the original exception's message.
 class SlingLinkException extends SlingException {
   SlingLinkException(this.linkException)
     : super(
         _message(linkException),
-        statusCode: switch (linkException) {
-          ServerException(:final statusCode) => statusCode,
-          _ => null,
-        },
+        statusCode: _statusCode(linkException),
         graphqlErrors: switch (linkException) {
           ServerException(:final parsedResponse?) => [
             for (final e in parsedResponse.errors ?? const <GraphQLError>[])
@@ -105,10 +105,16 @@ class SlingLinkException extends SlingException {
   /// (the `http.ClientException` of a failed connection, a parse error, …).
   final LinkException linkException;
 
+  static int? _statusCode(LinkException e) => switch (e) {
+    ServerException(:final statusCode) => statusCode,
+    HttpLinkParserException(:final response) => response.statusCode,
+    _ => null,
+  };
+
   static String _message(LinkException e) {
+    final status = _statusCode(e);
+    if (status != null && status >= 300) return 'HTTP $status';
     if (e is ServerException) {
-      final status = e.statusCode;
-      if (status != null && status >= 300) return 'HTTP $status';
       final errors = e.parsedResponse?.errors ?? const [];
       if (errors.isNotEmpty) return errors.map((e) => e.message).join('\n');
       if (e.originalException == null) return 'Empty response';
