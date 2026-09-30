@@ -22,7 +22,7 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Suggested next picks: #60 (demos for
 the other guides), #22 (`gc()` trigger), #46 (request overlay). Tour of the
-guides and the example (2026-09-29): #61–#66.
+guides and the example (2026-09-29): #62, #64–#66 left.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -46,15 +46,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     multi-view embedding (one engine for every demo of a page) instead of
     one iframe each.
 
-61. **Example — Plain-language copy in the app** (tour, 2026-09-29). The app
-    explains itself in library jargon:
-    - schedule screen blurb ("subscribes to launchScheduled and
-      launchStatusChanged … written into the same Launch:<id> entity the row
-      reads") → what the user will *see* ("the row appears, lifts off and
-      lands on its own; nothing refreshes");
-    - `ErrorView` says "Is the mock API running? `cd mock-api && npm start`"
-      on the web too, where there is no server to start;
-    - latency picker "Server" → "Default (400 ms)".
 62. **Example — Network log polish.** Today: one long scroll of fully
     expanded documents, open subscriptions pinned on top, dev tools mixed in.
     - Title "2 request(s) · 2 subscription(s)" → real plurals.
@@ -75,13 +66,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     - The antenna + number in the nav bar does not say "network log": a
       label or first-run hint.
     - Which widget/screen caused each request: see #46.
-63. **Example — Small UI fixes from the tour.**
-    - Status icons have no legend; the grey "pause" (scrubbed) covers most
-      of the first screen, and there is no Scrubbed segment.
-    - Rocket mass "5000000 kg" unformatted.
-    - Crew rows are labelled by agency abbreviation (CSA, JAXA) with no
-      header: read as field names.
-    - Rocket description cut at two lines with no way to expand.
 66. **Example — Nicer skeletons.** Today `SkeletonBox` is a flat
     `kColorSurface` rectangle (radius 4) and `SkeletonText` a box of a
     fixed width, so every placeholder row is identical and nothing says
@@ -233,6 +217,9 @@ Kept for number stability; see git history for details.
 59. Docs — Live demo per concept: `example/lib/demos/` (`DemoHarness`: own client per run, request panel; `?demo=batching|fetch-policies|optimistic`), `DemoSource.astro` pulls `// #region` blocks into the guides (shown code = running code), `LiveApp demo=`; embedded in batching, fetch-policies and mutations guides; `example/test/demos_test.dart`. Found and fixed on the way: a builder saw the previous run's `isStale` / background `isLoading` (the scope now re-runs once when they change).
 
 Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no request, thanks to prepare" toggle is gone (payloads are a plain section, like Crew; unknown mass omitted), with the matching test step and docs; no debug banner in `SlingApp`.
+
+61. Example — Plain-language copy: the schedule screen says what you will see (the launch appears, lifts off and lands on its own), `ErrorView` only suggests `npm start` on iOS, the latency picker's no-header option is "Default".
+63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
 
 ## Explicitly not planned
 
