@@ -46,26 +46,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     multi-view embedding (one engine for every demo of a page) instead of
     one iframe each.
 
-62. **Example — Network log polish.** Today: one long scroll of fully
-    expanded documents, open subscriptions pinned on top, dev tools mixed in.
-    - Title "2 request(s) · 2 subscription(s)" → real plurals.
-    - One collapsed line per request: #, operation type, root fields,
-      variables, time; tap to expand the document. Newest first, the first
-      request of a screen easy to spot.
-    - Separate the parts: Requests · Subscriptions · Dev tools (latency,
-      cache), e.g. segments, instead of one list.
-    - Dim or hide what the printer adds (`__typename`, `id`, aliases) behind
-      a toggle, so what the widgets *read* stands out.
-    - Duration, status and size per request (the latency transport already
-      sees them); errors inline in red; optionally the response JSON.
-    - Monospace font: 'Menlo' does not exist on the web build (falls back to
-      a proportional font); bundle one or add `fontFamilyFallback`.
-    - Cache stats: "31 entities · snapshot 6.7 KB · no change since opened"
-      reads as jargon — label it ("Cache: 20 launches, 4 rockets…").
-    - "Clear" and "copy document" actions.
-    - The antenna + number in the nav bar does not say "network log": a
-      label or first-run hint.
-    - Which widget/screen caused each request: see #46.
 ## P5 — docs & repo hygiene
 
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
@@ -169,6 +149,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
 64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
 66. Example — Nicer skeletons: `SkeletonShimmer` (one animation for every placeholder, runs only while one is on screen, off with reduced motion), pill bars as tall as a line of the style with a fade to the text, `SkeletonBox.circle` for icons, eight varied-width placeholder rows while the Launches list loads.
+62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: still #46.
 
 ## Explicitly not planned
 
