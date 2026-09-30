@@ -1,5 +1,5 @@
 name: sling_gql_workspace
-description: Pub workspace for the sling_gql monorepo (runtime, generator, example).
+description: Pub workspace for the sling_gql monorepo (runtime, generator, test helpers, hooks, example).
 publish_to: none
 
 environment:
@@ -9,6 +9,7 @@ workspace:
   - packages/sling_gql
   - packages/sling_gql_gen
   - packages/sling_gql_test
+  - packages/sling_gql_hooks
   - example
 
 dev_dependencies:
@@ -57,12 +58,12 @@ melos:
         ignore: [sling_gql_workspace]
 
     test:runtime:
-      description: Runtime + test-helper package tests.
+      description: Runtime + test-helper + hooks package tests.
       run: flutter test
       exec:
         concurrency: 1
       packageFilters:
-        scope: [sling_gql, sling_gql_test]
+        scope: [sling_gql, sling_gql_test, sling_gql_hooks]
 
     test:gen:
       description: Generator package tests.
