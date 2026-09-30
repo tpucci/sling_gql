@@ -8,7 +8,7 @@
 library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
-export 'src/cache/cache.dart' show Cache, Normalization;
+export 'src/cache/cache.dart' show Cache, CacheDelta, Normalization;
 export 'src/client.dart'
     show
         SlingClient,

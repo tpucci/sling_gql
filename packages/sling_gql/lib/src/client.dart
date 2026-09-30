@@ -706,7 +706,13 @@ class _BypassCache implements Cache {
   @override
   Map<String, Object?>? entity(String key) => _inner.entity(key);
   @override
+  T batch<T>(T Function() body) => _inner.batch(body);
+  @override
   Stream<Set<String>> get onChange => _inner.onChange;
+  @override
+  int get version => _inner.version;
+  @override
+  CacheDelta changesSince(int version) => _inner.changesSince(version);
   @override
   Map<String, Object?> get snapshot => _inner.snapshot;
   @override
@@ -852,9 +858,11 @@ class CacheScope<Q extends Accessor> implements Recorder, ListLocator {
   bool evict(Accessor entity) {
     final key = _entityKey(entity);
     if (key == null) return false;
-    final touched = cache.evict(key);
-    client._notify(touched);
-    return touched.isNotEmpty;
+    return cache.batch(() {
+      final touched = cache.evict(key);
+      client._notify(touched);
+      return touched.isNotEmpty;
+    });
   }
 
   /// Entity key of the object [entity] points at, or `null` when it is not
@@ -960,10 +968,12 @@ class CacheList<R extends Accessor> {
   void _replace(List<Object?> previous, List<Object?> next) {
     final path = this.path!; // non-null: `_items` was
     final operation = _scope.operation;
-    final touched = _cache.write(operation, path, next);
-    _scope.onWrite(
-      CacheWrite(operation, path, List<Object?>.of(previous), touched),
-    );
+    _cache.batch(() {
+      final touched = _cache.write(operation, path, next);
+      _scope.onWrite(
+        CacheWrite(operation, path, List<Object?>.of(previous), touched),
+      );
+    });
   }
 }
 
@@ -1397,13 +1407,16 @@ class SlingSubscription<T> {
     for (final e in errors) {
       SlingClient._prune(data, e['path']);
     }
-    final touched = _client.cache.writeResponse(
-      'subscription',
-      operation.toCacheKeys(data),
-      at: _client._now(),
-    );
-    _client._notify(touched);
-    _client._countWrite();
+    final cache = _client.cache;
+    cache.batch(() {
+      final touched = cache.writeResponse(
+        'subscription',
+        operation.toCacheKeys(data),
+        at: _client._now(),
+      );
+      _client._notify(touched);
+      _client._countWrite();
+    });
     if (errors.isNotEmpty) {
       _controller.addError(
         SlingException(
@@ -1426,11 +1439,14 @@ class SlingSubscription<T> {
     _record?._finish();
     // The payloads live on in the entities they referenced; the root fields
     // would only pin them.
-    final touched = <String>{};
-    for (final alias in _scope.root.childAliases) {
-      touched.addAll(_client.cache.remove('subscription', [alias]));
-    }
-    _client._notify(touched);
+    final cache = _client.cache;
+    cache.batch(() {
+      final touched = <String>{};
+      for (final alias in _scope.root.childAliases) {
+        touched.addAll(cache.remove('subscription', [alias]));
+      }
+      _client._notify(touched);
+    });
     final done = _controller.isClosed ? null : _controller.close();
     return Future.wait([?up?.cancel(), ?done]);
   }
@@ -1970,17 +1986,20 @@ class SlingClient<Q extends Accessor> {
   }) async {
     final journal = <CacheWrite>[];
     if (optimistic != null) {
-      _journal = journal;
-      try {
-        optimistic();
-      } catch (_) {
-        _journal = null;
-        // Nothing is sent: undo the writes made before the throw.
-        _notify(_rollback(journal));
-        rethrow;
-      } finally {
-        _journal = null;
-      }
+      // One cache change for the whole callback (see `Cache.batch`).
+      cache.batch(() {
+        _journal = journal;
+        try {
+          optimistic();
+        } catch (_) {
+          _journal = null;
+          // Nothing is sent: undo the writes made before the throw.
+          _notify(_rollback(journal));
+          rethrow;
+        } finally {
+          _journal = null;
+        }
+      });
     }
 
     final scope = MutationScope(this);
@@ -1989,46 +2008,59 @@ class SlingClient<Q extends Accessor> {
     onOperation?.call(op);
     final record = _track('mutation', op, scope.root, [?debugLabel]);
 
-    Set<String> touched;
-    SlingException? error;
+    (Map<String, Object?>, SlingException?)? received;
+    (Object, StackTrace)? failure;
     _mutationsInFlight++;
     try {
-      final Map<String, Object?> data;
-      (data, error) = await _receive(op, record);
-      record?._finish(error);
-      // Partial failure: undo the optimistic writes *before* writing the
-      // fields that resolved, so the server's values win over the rollback.
-      final undone = error == null ? const <String>{} : _rollback(journal);
-      touched = cache.writeResponse('mutation', data, at: _now());
-      touched = touched.union(undone);
-      _writesSinceGc++;
-    } catch (e) {
-      record?._finish(e);
-      _notify(_rollback(journal));
-      rethrow;
-    } finally {
-      _mutationsInFlight--;
-      _checkIdle();
+      received = await _receive(op, record);
+    } catch (e, stack) {
+      failure = (e, stack);
     }
-    if (error != null) {
-      _removeMutationRoot(scope.root);
+    // From here on everything is synchronous: one cache change for the
+    // response, the rollback, list rules and the root removal.
+    return cache.batch(() {
+      Set<String> touched;
+      SlingException? error;
+      try {
+        final Map<String, Object?> data;
+        // The request failed: rethrown below, after the rollback.
+        (data, error) =
+            received ?? Error.throwWithStackTrace(failure!.$1, failure.$2);
+        record?._finish(error);
+        // Partial failure: undo the optimistic writes *before* writing the
+        // fields that resolved, so the server's values win over the rollback.
+        final undone = error == null ? const <String>{} : _rollback(journal);
+        touched = cache.writeResponse('mutation', data, at: _now());
+        touched = touched.union(undone);
+        _writesSinceGc++;
+      } catch (e) {
+        record?._finish(e);
+        _notify(_rollback(journal));
+        rethrow;
+      } finally {
+        _mutationsInFlight--;
+        _checkIdle();
+      }
+      if (error != null) {
+        _removeMutationRoot(scope.root);
+        _notify(touched);
+        throw error;
+      }
       _notify(touched);
-      throw error;
-    }
-    _notify(touched);
 
-    if (refetchQueries != null && refetchQueries.isNotEmpty) {
-      final names = refetchQueries.toSet();
-      for (final s in _scopes.toList()) {
-        if (s.root.children.any((c) => names.contains(c.field))) {
-          s.refetch(); // fire-and-forget; errors surface on the scope as usual
+      if (refetchQueries != null && refetchQueries.isNotEmpty) {
+        final names = refetchQueries.toSet();
+        for (final s in _scopes.toList()) {
+          if (s.root.children.any((c) => names.contains(c.field))) {
+            s.refetch(); // fire-and-forget; errors surface on the scope
+          }
         }
       }
-    }
 
-    final result = body(root(scope));
-    _removeMutationRoot(scope.root);
-    return result;
+      final result = body(root(scope));
+      _removeMutationRoot(scope.root);
+      return result;
+    });
   }
 
   /// The payload lives on in the entities it referenced; the root fields
@@ -2141,9 +2173,31 @@ class SlingClient<Q extends Accessor> {
     ]);
 
     Object? error;
+    Map<String, Object?>? data;
+    try {
+      (data, error) = await _receive(op, record);
+    } catch (e) {
+      error = e;
+    }
+    // Synchronous from here: one cache change for the response, list-rule
+    // edits and an automatic gc (see `Cache.batch`).
+    cache.batch(() => _land(op, record, data, error));
+  }
+
+  /// Writes a flush's response [data] (when it came) and settles the scopes
+  /// that waited for it.
+  void _land(
+    PrintedOperation op,
+    SlingRequest? record,
+    Map<String, Object?>? data,
+    Object? error,
+  ) {
     Set<String> touched = {};
     try {
-      (touched, error) = await _send('query', op, record);
+      if (data != null) {
+        touched = cache.writeResponse('query', data, at: _now());
+        _writesSinceGc++; // swept once the flush settles (`_checkIdle`)
+      }
       if (error != null) {
         _failedDocument = op.document;
         _failedAt = _now();
@@ -2203,19 +2257,6 @@ class SlingClient<Q extends Accessor> {
     for (final row in _rows.toList()) {
       if (touched.any(row._deps.contains)) row.onChanged();
     }
-  }
-
-  /// POSTs [op] and writes `data` under [operation]'s root; see [_receive]
-  /// for partial failures.
-  Future<(Set<String>, SlingException?)> _send(
-    String operation,
-    PrintedOperation op, [
-    SlingRequest? record,
-  ]) async {
-    final (data, error) = await _receive(op, record);
-    final touched = cache.writeResponse(operation, data, at: _now());
-    _writesSinceGc++; // swept once the flush settles (`_checkIdle`)
-    return (touched, error);
   }
 
   /// POSTs [op] and returns `data` keyed by cache aliases. On partial failure

@@ -36,15 +36,65 @@ class CacheWrite {
       : cache.write(operation, path, previous);
 }
 
+/// The entities that changed since a [Cache.version]: what a persistence
+/// layer writes to bring its copy up to date, instead of a whole
+/// [Cache.snapshot]. Get one from [Cache.changesSince].
+///
+/// [changed] holds JSON copies of the entities in the [Cache.snapshot] format
+/// (refs as `{"__ref": key}`); an entity is in [changed] or in [removed],
+/// never both.
+final class CacheDelta {
+  const CacheDelta({
+    required this.version,
+    required this.changed,
+    required this.removed,
+    this.full = false,
+  });
+
+  /// The [Cache.version] this delta brings a copy up to: pass it to the next
+  /// [Cache.changesSince] once the delta is stored.
+  final int version;
+
+  /// Entities written since the requested version, by key.
+  final Map<String, Map<String, Object?>> changed;
+
+  /// Keys of the entities evicted, collected or removed since then.
+  final Set<String> removed;
+
+  /// The delta replaces the whole store: drop every stored entity, then
+  /// write [changed] (which is then every entity). Happens after
+  /// [Cache.clear], or when the requested version is older than the
+  /// removals the cache still remembers.
+  final bool full;
+
+  bool get isEmpty => !full && changed.isEmpty && removed.isEmpty;
+
+  /// Applies the delta to a stored [snapshot] (e.g. a JSON file's content)
+  /// in place.
+  void applyTo(Map<String, Object?> snapshot) {
+    if (full) snapshot.clear();
+    for (final key in removed) {
+      snapshot.remove(key);
+    }
+    snapshot.addAll(changed);
+  }
+
+  @override
+  String toString() =>
+      'CacheDelta(version: $version, changed: ${changed.keys.toList()}, '
+      'removed: ${removed.toList()}${full ? ', full' : ''})';
+}
+
 /// The client-side store every accessor reads from.
 ///
 /// Reads are synchronous (they happen inside widget builds), so the store is
-/// in-memory. [snapshot] / `Cache(initial:)` and [onChange] are the hooks a
-/// persistence layer plugs into — they are deliberately kept out of this
-/// package.
+/// in-memory. [snapshot] / `Cache(initial:)`, [onChange], [version] and
+/// [changesSince] are the hooks a persistence layer plugs into — the layers
+/// themselves are deliberately kept out of this package.
 ///
 /// Apps touch it through `client.cache` for introspection and housekeeping
-/// ([entity], [evict], [gc], [clear], [snapshot], [onChange], [fetchedAt]);
+/// ([entity], [evict], [gc], [clear], [snapshot], [onChange], [fetchedAt],
+/// [changesSince]);
 /// typed reads and writes go through `client.cacheScope`. The path-level
 /// [read] / [write] / [remove] / [writeResponse] are the accessors' and the
 /// client's business (`@internal`).
@@ -108,8 +158,9 @@ abstract class Cache {
 
   /// Removes entities not reachable from any operation root nor from one of
   /// the [retain]ed entity keys (extra roots: `SlingClient.gc` passes the
-  /// entities live scopes read). Returns the removed keys. Nothing reads a
-  /// removed entity, so nothing is notified.
+  /// entities live scopes read). Returns the removed keys. No scope reads a
+  /// removed entity, so the client rebuilds nothing; [onChange] still
+  /// reports the removed entities' fields (a persistence layer drops them).
   Set<String> gc({Iterable<String> retain = const []});
 
   bool hasEntity(String key);
@@ -118,10 +169,35 @@ abstract class Cache {
   /// Read-only view of one entity (`ROOT_QUERY`, `Launch:launch-181`, …).
   Map<String, Object?>? entity(String key);
 
-  /// Fires after every write with the dependency keys touched.
+  /// Runs [body] as one change: the writes it makes (nested batches
+  /// included) fire [onChange] once, with every key they touched, and bump
+  /// [version] once, when the outermost batch returns or throws. The client
+  /// batches each response, mutation, subscription event and optimistic
+  /// callback, list-rule edits included; batch several manual writes with it.
+  T batch<T>(T Function() body);
+
+  /// Fires once per change — a write outside a [batch], or a whole batch —
+  /// with the dependency keys (`entity.field`, see `depKey`) it touched,
+  /// synchronously. Nothing fires when nothing changed (a refetch returning
+  /// the same data).
+  ///
+  /// A persistence layer debounces on it and reads [changesSince] rather
+  /// than a whole [snapshot].
   Stream<Set<String>> get onChange;
 
+  /// Change counter: bumped once per change that altered an entity (see
+  /// [batch]). 0 for a new cache and for a hydrated one — `Cache(initial:)`
+  /// is the persisted baseline.
+  int get version;
+
+  /// The entities changed or removed since [version] (an earlier value of
+  /// [Cache.version]), as JSON copies of those entities only. Store it, then
+  /// ask again from [CacheDelta.version].
+  CacheDelta changesSince(int version);
+
   /// JSON-able deep copy of the whole store (refs as `{"__ref": key}`).
+  /// Entities are merged in place by later writes, so it is a copy, not a
+  /// view; [changesSince] copies only what changed.
   Map<String, Object?> get snapshot;
 
   void clear();
@@ -149,6 +225,31 @@ class NormalizedCache implements Cache {
 
   /// Set while a stamped [writeResponse] runs: every key written is added.
   Set<String>? _writing;
+
+  // Change tracking ([batch], [version], [changesSince]). Entities changed
+  // or removed since the last commit are stamped `_version + 1`.
+  int _version = 0;
+  int _batchDepth = 0;
+  Set<String>? _held;
+  bool _dirty = false;
+  final Map<String, int> _changedAt = {};
+  final Map<String, int> _removedAt = {};
+
+  /// [changesSince] an older version answers with a full delta: set by
+  /// [clear] and when the tombstones in [_removedAt] are dropped.
+  int _fullSince = 0;
+
+  void _markChanged(String key) {
+    _changedAt[key] = _version + 1;
+    if (_removedAt.isNotEmpty) _removedAt.remove(key);
+    _dirty = true;
+  }
+
+  void _markRemoved(String key) {
+    _changedAt.remove(key);
+    _removedAt[key] = _version + 1;
+    _dirty = true;
+  }
 
   static String rootKey(String operation) => switch (operation) {
     // Constant for the three operations: `read` runs this on every getter.
@@ -297,6 +398,7 @@ class NormalizedCache implements Cache {
       list[index] = _normalize(list[index], value, touched);
     }
     if (topField != null) touched.add(depKey(entityKey, topField));
+    _markChanged(entityKey);
     _emit(touched);
     return touched;
   }
@@ -352,6 +454,7 @@ class NormalizedCache implements Cache {
       container.removeAt(index);
     }
     if (topField != null) touched.add(depKey(entityKey, topField));
+    _markChanged(entityKey);
     _emit(touched);
     return touched;
   }
@@ -387,13 +490,15 @@ class NormalizedCache implements Cache {
     Map<String, Object?> fields,
     Set<String> touched,
   ) {
-    final entity = _entities.putIfAbsent(key, () => {});
+    final existing = _entities[key];
+    final entity = existing ?? (_entities[key] = {});
+    var entityChanged = existing == null;
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
-      final existing = entity[e.key];
+      final previous = entity[e.key];
       final outer = _changed;
       _changed = false;
-      final value = _normalize(existing, e.value, touched);
+      final value = _normalize(previous, e.value, touched);
       // Inline containers are merged in place: `_normalize` tells whether
       // anything under this field actually differs (an identical `pageInfo`
       // or `stats` in a refetch must not rebuild its readers).
@@ -402,8 +507,12 @@ class NormalizedCache implements Cache {
       entity[e.key] = value;
       final dep = depKey(key, e.key);
       _writing?.add(dep);
-      if (changed) touched.add(dep);
+      if (changed) {
+        touched.add(dep);
+        entityChanged = true;
+      }
     }
+    if (entityChanged) _markChanged(key);
   }
 
   /// Set by [_normalize] when the value it returns differs from `existing`
@@ -458,6 +567,7 @@ class NormalizedCache implements Cache {
     final removed = _entities.remove(key);
     _depKeys.remove(key);
     if (removed == null) return touched;
+    _markRemoved(key);
     for (final field in removed.keys) {
       final dep = depKey(key, field);
       touched.add(dep);
@@ -465,15 +575,19 @@ class NormalizedCache implements Cache {
     }
     final ref = Ref(key);
     for (final e in _entities.entries) {
+      var scrubbed = false;
       for (final field in e.value.keys.toList()) {
         final value = e.value[field];
         if (value == ref) {
           e.value.remove(field);
           touched.add(depKey(e.key, field));
+          scrubbed = true;
         } else if (_scrub(value, ref)) {
           touched.add(depKey(e.key, field));
+          scrubbed = true;
         }
       }
+      if (scrubbed) _markChanged(e.key);
     }
     _emit(touched);
     return touched;
@@ -521,13 +635,18 @@ class NormalizedCache implements Cache {
       if (entity != null && live.add(key)) mark(entity);
     }
     final dead = _entities.keys.where((k) => !live.contains(k)).toSet();
+    final touched = <String>{};
     for (final key in dead) {
       final removed = _entities.remove(key)!;
       _depKeys.remove(key);
+      _markRemoved(key);
       for (final field in removed.keys) {
-        _fetchedAt.remove(depKey(key, field));
+        final dep = depKey(key, field);
+        _fetchedAt.remove(dep);
+        touched.add(dep);
       }
     }
+    _emit(touched);
     return dead;
   }
 
@@ -550,14 +669,92 @@ class NormalizedCache implements Cache {
   @override
   Stream<Set<String>> get onChange => _changes.stream;
 
+  @override
+  T batch<T>(T Function() body) {
+    _batchDepth++;
+    try {
+      return body();
+    } finally {
+      if (--_batchDepth == 0) {
+        final held = _held;
+        _held = null;
+        _commit(held ?? const {});
+      }
+    }
+  }
+
+  /// Ends one write: held until the outermost [batch] ends, committed now
+  /// outside one.
   void _emit(Set<String> touched) {
+    if (_batchDepth > 0) {
+      if (touched.isNotEmpty) (_held ??= {}).addAll(touched);
+      return;
+    }
+    _commit(touched);
+  }
+
+  void _commit(Set<String> touched) {
+    if (_dirty) {
+      _dirty = false;
+      _version++;
+      // Tombstones outnumbering the entities: forget them, and answer older
+      // versions with a full delta instead (bounded memory under churn).
+      if (_removedAt.length > _maxTombstones &&
+          _removedAt.length > _entities.length) {
+        _removedAt.clear();
+        _fullSince = _version;
+      }
+    }
     if (touched.isNotEmpty && _changes.hasListener) _changes.add(touched);
+  }
+
+  static const _maxTombstones = 1000;
+
+  @override
+  int get version => _version;
+
+  @override
+  CacheDelta changesSince(int version) {
+    if (version < _fullSince) {
+      return CacheDelta(
+        version: _version,
+        changed: {
+          for (final e in _entities.entries) e.key: _entityJson(e.value),
+        },
+        removed: {},
+        full: true,
+      );
+    }
+    return CacheDelta(
+      version: _version,
+      changed: {
+        for (final e in _changedAt.entries)
+          if (e.value > version) e.key: _entityJson(_entities[e.key]!),
+      },
+      removed: {
+        for (final e in _removedAt.entries)
+          if (e.value > version) e.key,
+      },
+    );
   }
 
   @override
   Map<String, Object?> get snapshot => {
-    for (final e in _entities.entries) e.key: _toJson(e.value),
+    for (final e in _entities.entries) e.key: _entityJson(e.value),
   };
+
+  /// [_toJson] of one entity: a map copy (fast for the scalar fields most
+  /// entities are made of), then the refs and containers converted.
+  static Map<String, Object?> _entityJson(Map<String, Object?> entity) {
+    final json = Map<String, Object?>.of(entity);
+    for (final e in entity.entries) {
+      final value = e.value;
+      if (value is Ref || value is Map || value is List) {
+        json[e.key] = _toJson(value);
+      }
+    }
+    return json;
+  }
 
   static Object? _toJson(Object? node) => switch (node) {
     Ref() => node.toJson(),
@@ -595,6 +792,10 @@ class NormalizedCache implements Cache {
     _entities.clear();
     _depKeys.clear();
     _fetchedAt.clear();
+    _changedAt.clear();
+    _removedAt.clear();
+    _fullSince = _version + 1;
+    _dirty = true;
     _emit(touched);
   }
 }

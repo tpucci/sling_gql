@@ -334,8 +334,13 @@ abstract class Accessor {
     final target = [...path, field];
     final cache = recorder.cache;
     final previous = cache.read(recorder.operation, target);
-    final touched = cache.write(recorder.operation, target, value);
-    recorder.onWrite(CacheWrite(recorder.operation, target, previous, touched));
+    // One cache change with the list-rule edits the recorder makes.
+    cache.batch(() {
+      final touched = cache.write(recorder.operation, target, value);
+      recorder.onWrite(
+        CacheWrite(recorder.operation, target, previous, touched),
+      );
+    });
   }
 
   static T? _coerce<T>(Object? value) {

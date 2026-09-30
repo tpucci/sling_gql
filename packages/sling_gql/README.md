@@ -83,7 +83,8 @@ query {
 - One HTTP request per frame, arguments turned into variables.
 - Normalized cache (`Launch:launch-181`), per-field rebuild notifications
   (only on real changes, inline objects included), `evict`, `gc`,
-  `snapshot` / `onChange` for persistence.
+  `snapshot` / `onChange` / `changesSince` (incremental deltas) for
+  persistence.
 - `SlingRow`: a list row with its own dependencies, so a write to one entity
   rebuilds that row instead of the whole list.
 - Skeleton state (`null` scalars, one-element lists) before data arrives;
