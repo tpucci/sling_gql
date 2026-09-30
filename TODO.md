@@ -9,7 +9,7 @@ while building the normalized cache and mutations, and the roadmap (website
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · fine-grained rebuilds done but #54 ·
-~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · dev experience #46, #47 ·
+~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · dev experience ~~#46~~, #47 ·
 `gql_link` #48.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
@@ -22,7 +22,8 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Demos in four more
 guides (#60). Demos share one Flutter engine (#67).
-Automatic `gc()` (#22) done. Suggested next pick: #46 (request overlay). Tour of the
+Automatic `gc()` (#22) done. Request overlay + log line (#46) done; suggested next pick: #47
+(`flutter_hooks` adapter). Tour of the
 guides and the example (2026-09-29): #61–#66 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
@@ -46,9 +47,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## Roadmap items not covered above
 
-46. **DX — In-app request overlay.** Attribute each request to the widgets
-    that recorded it (builds on #1's per-scope attribution); a `pixel`-style
-    one-line log per operation (duration, bytes, fields, scopes).
 47. **DX — `flutter_hooks` adapter** (`useSlingQuery`, `useSlingMutation`) on
     top of `QueryScope`/`mutateWith`, as a separate small package.
 48. **Runtime — `gql_link` adapter** for auth, retries and persisted queries,
@@ -107,6 +105,7 @@ Kept for number stability; see git history for details.
 24. Runtime — `QueryBuilder(scheduler:)` (default `frameEndScheduler`); when `microtaskScheduler` fits documented in `guides/batching-and-waterfalls`.
 25. Runtime/Gen — `slingSchema` carries `keyField` (always emitted, `SlingSchema<Query, Accessor>` without a Mutation type); `SlingClient(schema:)` supplies `rootFactory` + default cache normalization, asserts on a mismatching `cache:`; `SlingScope` falls back to `client.schema`.
 17. Perf — Read path: `Cache.readField` (no `[...path, alias]` per getter), dep keys interned per `(entity, field)`, constant `rootKey`, single map lookup per step, `scalarAs` memoizes parsed values per `(parse, wire value)` (`DateTime.parse` was ~⅓ of a warm list build). Bench warm build 720 → 330 ns/read; bench now reports best of 5 rounds. A per-accessor location memo (`Expando`) was measured slower and dropped; object accessors still copy their path.
+46. DX — Request log: `SlingRequest` on `client.requests` (kind, root fields, field count, duration, bytes, status, error, events; `scopes` = labels of the scopes in the batch, `scopeSummary` folds repeats), `SlingClient(logRequests:)` one-line log, `SlingRequestOverlay` (debug-only chip + panel); `QueryBuilder`/`MutationBuilder`/`SubscriptionBuilder` default their label to the enclosing widget in debug builds, `debugLabel:` on `mutateWith`/`subscribeWith`. Example network log reads `client.requests`.
 18. Perf — `Selection.child`: no-args fast path, arg-bearing children memoized by structural args key (`_ArgsKey`, deep equality, order-free, nulls ignored, `10` ≠ `10.0`), `jsonEncode` + FNV only on a node's first creation.
 28. Runtime — `MutationState.data` (last successful result, kept while loading, cleared on failure); only the latest overlapping `mutate` call updates the state; `mutate` never throws (documented).
 57. Runtime — Same response name across fragments: printed `<alias>__<Type>: field` per fragment when repeated (type-free, conservative), `PrintedOperation.toCacheKeys` maps responses back (merging direct + fragment selections) after error pruning, for queries, mutations and subscriptions.
@@ -127,7 +126,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 63. Example — Tour UI fixes: rows name their status next to the date (the icons' legend) and a Scrubbed segment; masses as `5,000,000 kg` (`number_format.dart`); crew as name + agency; launch details in full, rocket description three lines + More/Less.
 64. Docs — Stale statements sweep: landing (runtime size/deps, normalized cache, generated snippet with enums and `keyed:`, "Try it live" action), getting-started (independent versions, Dart enums, `launch?.isFetched`), querying (Dart enums aside and arguments), loading-and-errors (row excerpt), caching (`Company` is keyed, optimistic writes, history lines), mutations (list rule in the example, `scheduleLaunch(input:)`), example-app (favourites limitation gone, tests in order), feasibility ("since then"), every client built with `schema: slingSchema`.
 66. Example — Nicer skeletons: `SkeletonShimmer` (one animation for every placeholder, runs only while one is on screen, off with reduced motion), pill bars as tall as a line of the style with a fade to the text, `SkeletonBox.circle` for icons, eight varied-width placeholder rows while the Launches list loads.
-62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: still #46.
+62. Example — Network log: "N requests" button; Requests · Subscriptions · Dev tools; one line per request (number, type, root fields by name, time, duration, size, variables; red with the error on failure), tap for the document, the response and "Copy document"; documents without `__typename`/aliases unless switched on; bundled JetBrains Mono (the web has no system monospace); plain cache labels ("20 launches · 4 rockets"); Clear. `NetworkLog.transport` records status/size/time. Which widget caused a request: #46 (`← _Header, LaunchesScreen`).
 65. Docs — Missing examples: a `prepare` demo in the batching guide (Without/With prepare, 2 requests vs 1 on "Show payloads"), prefetch on tap with `client.resolve` in querying (`LaunchScreen.open`), a complete screen in loading-and-errors (the Me tab: error + retry, pull-to-refresh, empty state guarded on `isSkeleton`, and `ErrorView`), "Five minutes with the mock API" in getting-started. `DemoSource` reads any `example/lib/<dir>/`.
 60. Docs — Live demos in four more guides: loading & errors (`errors`: placeholders, a sticky error, Retry), pagination (`pagination`: load more fetches one page, refresh both), caching (`caching`: a detail served from the list's entity, a cache write, SlingRow vs plain rows with build counters), subscriptions (`subscriptions`: an event updates banner and row, no request). Harness: `failRequests`, subscriptions counted apart. Multi-view embedding moved to #67.
 67. Docs — One Flutter engine for every demo: `LiveApp` demos are views of a shared engine started with `multiViewEnabled` (`web/flutter_bootstrap.js` template hands over to `window.slingDemoHost`; `DemoViews` runs one `View` per host, demo from the initial data). Loaded once per visit, survives `<ClientRouter />` navigations (views removed before a swap, a demo re-mounts in ~30 ms), iframe fallback on failure; the whole app on Try it stays an iframe. The in-page mock API is shared by the demos of a visit.

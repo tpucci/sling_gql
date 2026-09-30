@@ -112,6 +112,7 @@ on the code.
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
 | `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch), `RowScope` (`QueryScope.row`: own deps, everything else forwarded to the parent). |
 | `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `SlingRow` (rebinds an accessor to a `RowScope`), `frameEndScheduler`. |
+| `request_overlay.dart` | `SlingRequestOverlay`: debug-only chip + panel over the app listing `client.requests` (`SlingRequest`, defined in `client.dart`: kind, root fields, duration, bytes, error, `scopes` = the `debugLabel`s of the scopes in the batch). Widgets default their label to the enclosing widget (`debugOwnerLabel`, debug builds only). |
 
 Design decisions worth knowing before changing things:
 
