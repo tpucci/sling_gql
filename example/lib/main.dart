@@ -39,13 +39,17 @@ void main() {
     // Requests (not subscriptions) carry the latency picked in the network
     // log screen; subscriptions share the same `http.Client`.
     httpClient: httpClient,
-    // Timing, status and response of each request, for the network log.
+    // The response body of each request, for the network log.
     transport: log.transport(latency.transport(httpClient)),
-    onOperation: log.add,
+    // One line per operation in the console: timing, size, fields, and the
+    // widgets that asked for it (`client.requests` feeds the network log
+    // and the request overlay).
+    logRequests: true,
     listRules: listRules,
     // A dropped subscription (server restarted) reopens itself.
     subscriptionRetryAfter: const Duration(seconds: 3),
   );
+  log.attach(client);
 
   runApp(
     SlingScope<Query>(

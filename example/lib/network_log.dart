@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
@@ -10,63 +10,46 @@ import 'mock_latency.dart';
 import 'theme.dart';
 import 'widgets/cache_stats.dart';
 
-/// One operation the client sent: the printed document, and — for requests,
-/// once [NetworkLog.transport] saw the response — how it went.
+/// One operation the client sent, as [SlingClient.requests] reports it
+/// (timing, size, error, the widgets that asked for it), plus the response
+/// body [NetworkLog.transport] saw.
 class LogEntry {
-  LogEntry(this.operation, this.number) : sentAt = DateTime.now();
+  LogEntry(this.request, this.number);
 
-  final PrintedOperation operation;
+  final SlingRequest request;
 
   /// 1 for the first request (or subscription) of the session.
   final int number;
-  final DateTime sentAt;
 
+  PrintedOperation get operation => request.operation;
+  DateTime get sentAt => request.startedAt;
   String get document => operation.document;
   Map<String, Object?> get variables => operation.variables;
 
   /// `query`, `mutation` or `subscription`.
-  String get type => document.substring(0, document.indexOf(RegExp(r'[\s({]')));
+  String get type => request.kind;
 
   /// The root fields, by name (not alias): `company · stats · launches`.
-  List<String> get rootFields => [
-    for (final line in document.split('\n'))
-      if (line.startsWith('  ') &&
-          !line.startsWith('   ') &&
-          _name.hasMatch(line.trim()))
-        (_aliased.firstMatch(line.trim())?.group(1) ??
-            line.trim().split(RegExp(r'[\s({]')).first),
-  ];
+  List<String> get rootFields => request.rootFields;
 
-  Duration? duration;
-  int? statusCode;
-  int? bytes;
+  /// The widgets whose reads are in the document:
+  /// `LaunchesScreen, LaunchRow ×20`.
+  String get scopes => request.scopeSummary;
+
+  Duration? get duration => request.isDone ? request.duration : null;
+  int? get statusCode => request.statusCode;
+  int? get bytes => request.bytes;
   String? responseBody;
-  Object? failure;
 
-  bool get isDone => statusCode != null || failure != null;
+  bool get isDone => request.isDone;
 
   /// HTTP error, transport failure or GraphQL `errors`.
-  String? get problem {
-    if (failure != null) return '$failure';
-    final code = statusCode;
-    if (code != null && code >= 400) return 'HTTP $code';
-    final body = responseBody;
-    if (body != null && body.contains('"errors"')) {
-      try {
-        final errors = (jsonDecode(body) as Map)['errors'] as List?;
-        if (errors != null && errors.isNotEmpty) {
-          return errors.map((e) => (e as Map)['message']).join('\n');
-        }
-      } on FormatException {
-        // Not JSON: nothing more to say than the status.
-      }
-    }
-    return null;
-  }
+  String? get problem => switch (request.error) {
+    null => null,
+    SlingException(:final message) => message,
+    final e => '$e',
+  };
 }
-
-final _aliased = RegExp(r'^\w+:\s*(\w+)');
-final _name = RegExp(r'^\w');
 
 /// Keeps every GraphQL operation the client sent, newest first. The whole
 /// point of the PoC is to *see* what the widgets produce.
@@ -76,42 +59,27 @@ final _name = RegExp(r'^\w');
 class NetworkLog extends ChangeNotifier {
   final List<LogEntry> entries = [];
   final List<LogEntry> subscriptions = [];
+  final Map<SlingRequest, LogEntry> _byRequest = {};
 
-  /// For `SlingClient(onOperation:)`.
-  void add(PrintedOperation op) {
-    final isSubscription = op.document.startsWith('subscription');
-    final list = isSubscription ? subscriptions : entries;
-    list.insert(0, LogEntry(op, list.length + 1));
-    if (kDebugMode) {
-      final label = isSubscription
-          ? 'subscription #${subscriptions.length}'
-          : 'request #${entries.length}';
-      debugPrint('[sling_gql] $label\n${op.document}\n${op.variables}');
-    }
-    notifyListeners();
-  }
+  /// Records every operation [client] sends from now on. Call it before the
+  /// first request (right after building the client).
+  StreamSubscription<SlingRequest> attach(SlingClient<Accessor> client) =>
+      client.requests.listen((request) {
+        if (!_byRequest.containsKey(request)) {
+          final list = request.kind == 'subscription' ? subscriptions : entries;
+          final entry = LogEntry(request, list.length + 1);
+          _byRequest[request] = entry;
+          list.insert(0, entry);
+        }
+        notifyListeners();
+      });
 
-  /// Wraps a [Transport] to record each request's status, size, response
-  /// and duration on its entry.
+  /// Wraps a [Transport] to keep each request's response body on its entry.
   Transport transport(Transport next) => (request) async {
     final entry = _pendingFor(request);
-    final stopwatch = Stopwatch()..start();
-    try {
-      final response = await next(request);
-      entry
-        ?..duration = stopwatch.elapsed
-        ..statusCode = response.statusCode
-        ..bytes = response.bodyBytes.length
-        ..responseBody = response.body;
-      return response;
-    } catch (e) {
-      entry
-        ?..duration = stopwatch.elapsed
-        ..failure = e;
-      rethrow;
-    } finally {
-      notifyListeners();
-    }
+    final response = await next(request);
+    entry?.responseBody = response.body;
+    return response;
   };
 
   /// The oldest request still waiting whose document is [request]'s.
@@ -131,6 +99,7 @@ class NetworkLog extends ChangeNotifier {
   void clear() {
     entries.clear();
     subscriptions.clear();
+    _byRequest.clear();
     notifyListeners();
   }
 }
@@ -321,8 +290,11 @@ class _EntryTileState extends State<_EntryTile> {
     final e = widget.entry;
     final problem = e.problem;
     final isSubscription = e.type == 'subscription';
+    final events = e.request.events == 1
+        ? '1 event'
+        : '${e.request.events} events';
     final result = isSubscription
-        ? 'open'
+        ? '${e.isDone ? 'closed' : 'open'} · $events'
         : !e.isDone
         ? 'sending…'
         : [
@@ -380,6 +352,15 @@ class _EntryTileState extends State<_EntryTile> {
               maxLines: _expanded ? null : 1,
               overflow: _expanded ? null : TextOverflow.ellipsis,
             ),
+            if (e.scopes.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                '\u2190 ${e.scopes}',
+                style: const TextStyle(fontSize: 12, color: kColorAccent),
+                maxLines: _expanded ? null : 1,
+                overflow: _expanded ? null : TextOverflow.ellipsis,
+              ),
+            ],
             if (problem != null) ...[
               const SizedBox(height: 4),
               Text(

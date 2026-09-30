@@ -35,11 +35,11 @@ void main() {
         schema: slingSchema,
         httpClient: httpClient,
         transport: log.transport(latency.transport(httpClient)),
-        onOperation: log.add,
         listRules: listRules,
         subscriptionRetryAfter: const Duration(seconds: 3),
       ),
     );
+    log.attach(client);
   });
 
   Future<void> pumpApp(WidgetTester tester) async {
@@ -71,6 +71,8 @@ void main() {
       await settle(tester);
 
       expect(log.entries, hasLength(1), reason: 'header + list + rows batched');
+      // Attributed to the widgets that recorded it (the request overlay).
+      expect(log.entries.single.request.scopes, contains('_Header'));
       expect(find.text('Sling Space'), findsOneWidget);
 
       // The launches list uses a ValueKey so we can scroll it unambiguously even

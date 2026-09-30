@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:sling_gql/sling_gql.dart';
 
 import 'screens/launches_screen.dart';
 import 'screens/me_screen.dart';
@@ -21,8 +22,11 @@ class SlingApp extends StatelessWidget {
     return CupertinoApp(
       title: 'sling_gql',
       debugShowCheckedModeBanner: false,
-      // One shimmer for every loading placeholder in the app.
-      builder: (context, child) => SkeletonShimmer(child: child!),
+      // One shimmer for every loading placeholder in the app, and the
+      // request overlay (debug builds): every operation, one line each,
+      // with the widgets that asked for it.
+      builder: (context, child) =>
+          SlingRequestOverlay(child: SkeletonShimmer(child: child!)),
       theme: slingTheme(),
       home: CupertinoTabScaffold(
         tabBar: CupertinoTabBar(
