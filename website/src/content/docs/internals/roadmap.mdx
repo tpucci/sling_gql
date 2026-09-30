@@ -16,8 +16,9 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
 
    Objects with `__typename` + `id` are stored once, referenced from the tree, and scopes
    are notified per entity field. `launch(id:)` is served from the entity the list wrote.
-   See [Caching](/sling_gql/guides/caching/). Left for later: type policies (custom merge
-   per field, connection merging) and automatic `gc()`.
+   See [Caching](/sling_gql/guides/caching/). Unreachable entities are swept automatically
+   (`SlingClient(gcAfterWrites:)`). Left for later: type policies (custom merge per field,
+   connection merging).
 
 2. **Mutations** — done
 

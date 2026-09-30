@@ -106,8 +106,26 @@ A list of references is replaced wholesale by the incoming list (there is nothin
 element-wise — the elements themselves merge as entities). Inline objects deep-merge as
 before, and inline lists still merge by index.
 
-Entities that a replaced list no longer references are **not** removed automatically;
-`cache.gc()` sweeps everything unreachable from the roots and returns the keys it dropped.
+## Garbage collection
+
+Entities a replaced list no longer references (or that only an evicted parent or a
+mutation's result pointed to) stay in the cache until a sweep. The client runs one by
+itself every 100 server responses, the next time it is idle: `client.gc()` removes
+everything unreachable from the roots **except the entities a live widget reads** — a
+detail screen served from `launch(id:)` keeps its `Launch` even after the list that
+brought it moved on. It returns the keys it dropped, and never runs while a mutation is in
+flight (a rollback could bring references back).
+
+```dart
+SlingClient(schema: slingSchema, gcAfterWrites: 500); // sweep less often
+SlingClient(schema: slingSchema, gcAfterWrites: null); // only when you call client.gc()
+
+// e.g. sweep when the app goes to the background:
+final listener = AppLifecycleListener(onPause: client.gc);
+```
+
+`cache.gc()` is the raw version: it only keeps what the roots reach (plus any
+`retain:` keys you pass), whatever is on screen.
 
 ## Optimistic writes
 
