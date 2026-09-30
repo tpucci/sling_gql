@@ -5,8 +5,9 @@ name: Publish to pub.dev
 # tpucci/sling_gql with tag patterns `sling_gql-v{{version}}`,
 # `sling_gql_gen-v{{version}}` and `sling_gql_test-v{{version}}`; auth is the
 # GitHub OIDC token, no secrets. `sling_gql_hooks-v{{version}}` and
-# `sling_gql_link-v{{version}}` are listed below but must be enabled on pub.dev
-# after each package's first (manual) publish.
+# `sling_gql_link-v{{version}}` are listed below but work only once that
+# package's first version was published by hand and the pattern enabled on its
+# pub.dev admin page (see AGENTS.md "Publishing").
 #
 # Release flow (see AGENTS.md "Publishing"):
 #   melos version            # conventional commits → bump + CHANGELOG + commit + tags

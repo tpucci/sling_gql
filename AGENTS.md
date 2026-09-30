@@ -108,10 +108,15 @@ on the code.
   `patch` to a `+build` bump). **Release order:** `sling_gql_hooks` needs the
   public `QueryState`/`MutationState`/`SubscriptionState` constructors, which
   are not in `sling_gql` 0.2.0 — release `sling_gql` (0.3.0) first and check
-  the hooks pubspec says `sling_gql: ^0.3.0` before publishing it (its first
-  publish is manual; pub.dev only allows automated publishing afterwards).
+  the hooks pubspec says `sling_gql: ^0.3.0` before publishing it.
   The `<pkg>-v0.1.1` tags are the baseline melos
-  reads commits from; before them the history is not conventional. Code must be
+  reads commits from; before them the history is not conventional. A **new**
+  package (`sling_gql_hooks`, `sling_gql_link`, not on pub.dev yet) cannot go
+  through the tag workflow the first time — pub.dev only enables automated
+  publishing on an existing package: publish its first version by hand
+  (`dart pub publish` in the package), enable its tag pattern on the package's
+  pub.dev admin page, then tag that commit `<pkg>-vX.Y.Z` as its melos
+  baseline. Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
