@@ -53,7 +53,12 @@ Flags:
   `extension SlingSubscriptions` (`client.subscribe(...)`), and the
   `slingSchema` constant bundling the roots and `--key-field` for
   `SlingClient(schema: slingSchema)` (the client's cache then normalizes on
-  the same key field; no hand-kept `Normalization(keyField:)`).
+  the same key field; no hand-kept `Normalization(keyField:)`), and
+  `hash:` — a 64-bit FNV-1a of the generated file itself, so it changes
+  whenever the schema, `--key-field`, a `--scalar` mapping or the generator
+  changes the output, and is the same on every run and platform.
+  Persistence adapters (`sling_gql_sqflite`) drop a store written under
+  another hash.
 - One `class <Name> extends Accessor` per other `OBJECT` type (skipping the
   operation roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)

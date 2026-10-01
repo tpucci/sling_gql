@@ -171,7 +171,11 @@ String generate(
     _emitInputClass(out, t, ctx.registry);
   }
 
-  return out.toString();
+  final code = out.toString();
+  return code.replaceFirst(
+    _hashArgument(_hashPlaceholder),
+    _hashArgument(generatedCodeHash(code)),
+  );
 }
 
 void _emitDocAndDeprecation(
@@ -266,7 +270,8 @@ void _emitRootClass(
 /// `SlingClient(schema: slingSchema, ...)` (or `SlingScope(schema: ...)`) and
 /// `MutationBuilder` / `SubscriptionBuilder` resolve their roots without a
 /// `root:` argument. Also carries `--key-field`, so the client's cache
-/// normalizes on the same field the generator decided keyed types by.
+/// normalizes on the same field the generator decided keyed types by, and
+/// the [generatedCodeHash] of the file (filled in by [generate]).
 void _emitSlingSchema(
   StringBuffer out, {
   required bool mutation,
@@ -278,14 +283,49 @@ void _emitSlingSchema(
       '/// Pass to `SlingClient(schema: slingSchema)`: query/mutation/'
       'subscription',
     )
-    ..writeln('/// roots and the key field this file was generated with.')
+    ..writeln(
+      '/// roots, the key field this file was generated with and its hash.',
+    )
     ..writeln(
       'const slingSchema = SlingSchema<Query, '
       '${mutation ? 'Mutation' : 'Accessor'}>(query: Query.root'
       '${mutation ? ', mutation: Mutation.root' : ''}'
       '${subscription ? ', subscription: Subscription.root' : ''}'
-      ', keyField: ${dartStringLiteral(keyField)});',
+      ', keyField: ${dartStringLiteral(keyField)}, '
+      '${_hashArgument(_hashPlaceholder)});',
     );
+}
+
+String _hashArgument(String hash) => "hash: '$hash'";
+
+/// Stands for `slingSchema.hash` while the file is generated; [generate]
+/// replaces it (the `hash:` argument only) with [generatedCodeHash] of the
+/// whole output.
+const _hashPlaceholder = '__sling_schema_hash__';
+
+/// `slingSchema.hash`: the 64-bit FNV-1a (base 36) of the generated [code]
+/// with the hash itself left out (as [_hashPlaceholder]). The output is a
+/// pure function of the introspection, `--key-field`, `--scalar` mappings,
+/// the import and the generator version, so the hash changes exactly when
+/// one of them changes what the runtime caches; it is the same on every
+/// platform and run (UTF-16 code units, no `Object.hashCode`).
+///
+/// Persistence adapters store it and drop a store written under another.
+String generatedCodeHash(String code) {
+  const two32 = 0x100000000;
+  // Offset basis 0xcbf29ce484222325, prime 0x100000001b3 = 2^40 + 0x1b3;
+  // the same two-halves arithmetic as the runtime's alias hash.
+  var hi = 0xcbf29ce4, lo = 0x84222325;
+  for (final unit in code.codeUnits) {
+    final low16 = lo % 0x10000;
+    lo = lo - low16 + (low16 ^ unit);
+    final loProduct = lo * 0x1b3;
+    final carry = loProduct ~/ two32;
+    final hiProduct = hi * 0x1b3 + carry + (lo % 0x1000000) * 0x100;
+    lo = loProduct % two32;
+    hi = hiProduct % two32;
+  }
+  return hi.toRadixString(36) + lo.toRadixString(36).padLeft(7, '0');
 }
 
 /// `client.subscribe((s) => s.launchStatusChanged?.status)` without the

@@ -2,7 +2,7 @@
 /// `sling_gql`-compatible typed `Accessor` classes.
 library;
 
-export 'src/emitter.dart' show generate;
+export 'src/emitter.dart' show generate, generatedCodeHash;
 export 'src/naming.dart';
 export 'src/scalars.dart';
 export 'src/schema.dart';

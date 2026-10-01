@@ -353,10 +353,12 @@ void main() {
   test('emits the slingSchema convenience constant', () {
     expect(
       code,
-      contains(
-        'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-        'mutation: Mutation.root, subscription: Subscription.root, '
-        "keyField: 'id');",
+      matches(
+        RegExp(
+          r'const slingSchema = SlingSchema<Query, Mutation>\(query: Query\.root, '
+          r'mutation: Mutation\.root, subscription: Subscription\.root, '
+          r"keyField: 'id', hash: '[0-9a-z]+'\);",
+        ),
       ),
     );
   });
@@ -366,7 +368,62 @@ void main() {
       IntrospectionSchema.fromJson(_schemaJson),
       keyField: 'uuid',
     );
-    expect(code, contains("keyField: 'uuid');"));
+    expect(code, contains("keyField: 'uuid', hash: '"));
+  });
+
+  group('slingSchema.hash', () {
+    String hashOf(String code) =>
+        RegExp(r"hash: '([0-9a-z]+)'\);").firstMatch(code)!.group(1)!;
+
+    test('is the FNV-1a of the output with the hash left out', () {
+      final hash = hashOf(code);
+      final placeholder = code.replaceFirst(
+        "hash: '$hash'",
+        "hash: '__sling_schema_hash__'",
+      );
+      expect(generatedCodeHash(placeholder), hash);
+      expect(hash, hasLength(lessThanOrEqualTo(14)));
+    });
+
+    test('is stable across runs', () {
+      final again = generate(IntrospectionSchema.fromJson(_schemaJson));
+      expect(hashOf(again), hashOf(code));
+      expect(again, code);
+    });
+
+    test('changes with the schema, --key-field and --scalar', () {
+      final hash = hashOf(code);
+      final json = Map<String, Object?>.from(_schemaJson);
+      final schema = Map<String, Object?>.from(
+        json['__schema'] as Map<String, Object?>,
+      )..['subscriptionType'] = null;
+      final otherSchema = generate(
+        IntrospectionSchema.fromJson({'__schema': schema}),
+      );
+      final otherKey = generate(
+        IntrospectionSchema.fromJson(_schemaJson),
+        keyField: 'uuid',
+      );
+      final otherScalars = generate(
+        IntrospectionSchema.fromJson(_schemaJson),
+        scalars: [const ScalarMapping('Date', 'DateTime')],
+      );
+      expect({
+        hash,
+        hashOf(otherSchema),
+        hashOf(otherKey),
+        hashOf(otherScalars),
+      }, hasLength(4));
+    });
+
+    test('generatedCodeHash is FNV-1a 64 (two base-36 halves)', () {
+      // Reference values of 64-bit FNV-1a over UTF-16 code units, printed
+      // like the runtime's alias hash: high half, then the low half padded.
+      String halves(int hi, int lo) =>
+          hi.toRadixString(36) + lo.toRadixString(36).padLeft(7, '0');
+      expect(generatedCodeHash(''), halves(0xcbf29ce4, 0x84222325));
+      expect(generatedCodeHash('a'), halves(0xaf63dc4c, 0x8601ec8c));
+    });
   });
 
   test('no Subscription class when the schema has no subscription type', () {
@@ -382,7 +439,7 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-        "mutation: Mutation.root, keyField: 'id');",
+        "mutation: Mutation.root, keyField: 'id', hash: '",
       ),
     );
   });
@@ -456,7 +513,7 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Accessor>(query: Query.root, '
-        "subscription: Subscription.root, keyField: 'id');",
+        "subscription: Subscription.root, keyField: 'id', hash: '",
       ),
     );
   });
