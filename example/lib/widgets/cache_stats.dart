@@ -75,6 +75,15 @@ class _CacheStatsState extends State<CacheStats> {
       ..sort((a, b) => b.value.compareTo(a.value));
     final snapshotKb = _kb(cache.snapshot);
     final delta = cache.changesSince(_openedAt);
+    // Objects copied whole, plus the query root's fields (one per query),
+    // which a delta reports one by one.
+    final rootFields = delta.changedFields.values.fold(
+      0,
+      (n, fields) => n + fields.length,
+    );
+    final deletes =
+        delta.removed.length +
+        delta.removedFields.values.fold(0, (n, fields) => n + fields.length);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -104,9 +113,10 @@ class _CacheStatsState extends State<CacheStats> {
               : '${_plural(_changeCount, 'update')} since you opened this '
                     '(last one touched ${_plural(_lastTouched, 'field')}); '
                     'saving them writes '
-                    '${_plural(delta.changed.length, 'object')} '
-                    '(${_kb(delta.changed).toStringAsFixed(1)} KB)'
-                    '${delta.removed.isEmpty ? '' : ', deletes ${delta.removed.length}'}.',
+                    '${_plural(delta.changed.length, 'object')}'
+                    '${rootFields == 0 ? '' : ' and ${_plural(rootFields, 'query result')}'} '
+                    '(${_kb([delta.changed, delta.changedFields]).toStringAsFixed(1)} KB)'
+                    '${deletes == 0 ? '' : ', deletes $deletes'}.',
           style: const TextStyle(fontSize: 12, color: kColorTextSecondary),
         ),
       ],
