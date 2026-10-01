@@ -79,7 +79,10 @@ A flat `Map<entityKey, fields>` where the operation roots (`ROOT_QUERY`) are ent
 records every `entity.field` dependency it crosses into `deps`, and returns the `missing`
 sentinel when a key is absent — distinct from a stored `null`. Generated getters go
 through `readField(operation, path, field, deps:)`, the same walk without allocating the
-joined path; dependency keys are interned per `(entity, field)`. `writeResponse` normalizes
+joined path; dependency keys are interned per `(entity, field)`. Inside a list held by an
+entity field, a read through an inline element records `entity.field[i]` and
+`Accessor.list` of inline objects `entity.field[length]` (`readListField`), so writes
+touch the elements that changed rather than every reader of the field. `writeResponse` normalizes
 identifiable objects into entities and merges the rest inline; `write` sets a single path
 for optimistic updates. Both return the dependency keys they touched. `Cache` is an
 interface with one implementation, `NormalizedCache`. Apps see the interface through

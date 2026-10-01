@@ -274,6 +274,23 @@ they are merged, so a refetch that returns the same `pageInfo` rebuilds nobody w
 it. A changed field inside a referenced entity touches that entity's key
 (`Launch:launch-181.name`), not the list holding the reference.
 
+### Inline lists: per element
+
+A list of objects without an `id` (`Launch.links`, say) held by an entity field is split
+further. A read *through* element 2 (`launch.links[2].url`) records
+`Launch:launch-181.links[2]`, and `launch.links` itself records only the list's length,
+`Launch:launch-181.links[length]`. A response or a setter changing the `url` of one link
+touches `links` and `links[2]`, so only the readers of that element rebuild; a link added
+or removed touches `links[length]` too (and the elements that went away or shifted).
+
+- A list nested inside an element (`links[2].parts`) is part of that element.
+- Lists of entities keep depending on the whole field: their elements change by
+  themselves (`Launch:launch-182.name`), and a reordering rebuilds every reader of the list.
+- Lists of scalars (`tags`) are read whole, so their readers depend on the whole field.
+
+A scope that calls the list getter depends on the length either way; what gains is a
+[`SlingRow`](#per-row-rebuilds-slingrow) per element, whose only key is its element's.
+
 ### Per-row rebuilds: `SlingRow`
 
 The unit of rebuilding is the **scope**, and a `QueryBuilder` is one scope. Rows that are
