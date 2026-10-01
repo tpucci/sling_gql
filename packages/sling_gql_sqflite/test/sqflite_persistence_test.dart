@@ -53,6 +53,7 @@ void main() {
     Duration maxWait = const Duration(hours: 1),
     bool hydrateInIsolate = false,
     bool flushOnLifecycle = false,
+    bool compact = true,
     SlingSchema<Accessor, Accessor> schema = slingSchema,
     void Function(Object error, StackTrace stack)? onError,
     DateTime Function()? now,
@@ -66,6 +67,7 @@ void main() {
       maxWait: maxWait,
       hydrateInIsolate: hydrateInIsolate,
       flushOnLifecycle: flushOnLifecycle,
+      compact: compact,
       onError: onError,
       now: now,
     );
@@ -282,11 +284,44 @@ void main() {
       expect(again.cache.entityKeys, isEmpty);
     });
 
-    test('a full delta (forgotten tombstones) rewrites the entities; '
-        'untouched root fields keep their age', () async {
+    // #69: compacting after each save keeps the tombstones of a big gc.
+    test('a gc of more than a thousand entities deletes their rows and '
+        'rewrites nothing else', () async {
       var clock = DateTime.utc(2026, 1, 1);
       final t0 = clock.millisecondsSinceEpoch;
       final p = await open(tempDatabasePath(), now: () => clock);
+      final users = [for (var i = 0; i < 1002; i++) user('u$i')];
+      server.query['users'] = (Map<String, Object?> args) => users;
+      final client = server.client(Query.root, cache: p.cache);
+      await client.resolve(
+        (q) => [q.me?.name, q.users(first: 1)?.map((u) => u.name).toList()],
+      );
+      await p.flush();
+      clock = clock.add(const Duration(days: 1));
+
+      users.removeRange(1, users.length);
+      await client.resolve(
+        (q) => q.users(first: 1)?.map((u) => u.name).toList(),
+        fetchPolicy: FetchPolicy.networkOnly,
+      );
+      p.cache.gc();
+      final delta = p.cache.changesSince(p.savedVersion);
+      expect(delta.full, isFalse);
+      expect(delta.removed, hasLength(1001));
+      await p.flush();
+      expect(await entityUpdatedAt(p), {'User:1': t0, 'User:u0': t0});
+      expect(await storedSnapshot(p), p.cache.snapshot);
+    });
+
+    test('without compact, a full delta (forgotten tombstones) rewrites the '
+        'entities; untouched root fields keep their age', () async {
+      var clock = DateTime.utc(2026, 1, 1);
+      final t0 = clock.millisecondsSinceEpoch;
+      final p = await open(
+        tempDatabasePath(),
+        now: () => clock,
+        compact: false,
+      );
       final users = [for (var i = 0; i < 1002; i++) user('u$i')];
       server.query['users'] = (Map<String, Object?> args) => users;
       final client = server.client(Query.root, cache: p.cache);

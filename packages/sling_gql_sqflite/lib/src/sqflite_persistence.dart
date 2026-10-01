@@ -105,6 +105,7 @@ final class SqflitePersistence {
     this._onError, {
     required this.debounce,
     required this.maxWait,
+    required this.compact,
     required bool flushOnLifecycle,
   }) : _storedRootFields = {...?cache.entity(queryRoot)?.keys} {
     if (flushOnLifecycle) {
@@ -145,6 +146,13 @@ final class SqflitePersistence {
   /// anyway). Background save failures and undecodable stores go to
   /// [onError] (default: `FlutterError.reportError`); [now] is the clock
   /// behind `updated_at` and [maxAge], only worth overriding in tests.
+  ///
+  /// With [compact] (default) every stored save calls `Cache.compact` with
+  /// the version it stored, so the cache forgets the change records the
+  /// database already holds: a large `gc` then costs a delete per entity
+  /// instead of a rewrite of every entity. Turn it off when something else
+  /// reads `cache.changesSince` from versions this store already saved (a
+  /// debug screen): those would get full deltas.
   static Future<SqflitePersistence> open(
     String path, {
     required SlingSchema<Accessor, Accessor> schema,
@@ -155,6 +163,7 @@ final class SqflitePersistence {
     Duration maxWait = const Duration(seconds: 5),
     bool hydrateInIsolate = false,
     bool flushOnLifecycle = true,
+    bool compact = true,
     void Function(Object error, StackTrace stack)? onError,
     DateTime Function() now = DateTime.now,
   }) async {
@@ -208,6 +217,7 @@ final class SqflitePersistence {
         reportError,
         debounce: debounce,
         maxWait: maxWait,
+        compact: compact,
         flushOnLifecycle: flushOnLifecycle,
       );
     } catch (_) {
@@ -227,6 +237,9 @@ final class SqflitePersistence {
 
   /// Longest a change waits for a save while changes keep coming.
   final Duration maxWait;
+
+  /// Each stored save compacts the cache up to its version (see [open]).
+  final bool compact;
 
   final Database _db;
   final DateTime Function() _now;
@@ -345,6 +358,7 @@ final class SqflitePersistence {
     }
     _storedRootFields = storedRootFields;
     _savedVersion = delta.version;
+    if (compact) cache.compact(upTo: delta.version);
   }
 
   /// Adds [delta] to [batch]; returns the root fields stored once it is
@@ -358,11 +372,10 @@ final class SqflitePersistence {
     // A full delta carries every entity: the others are gone. Root rows are
     // reconciled field by field below, so untouched ones keep their age.
     if (delta.full) batch.delete(_entities);
-    for (final key in delta.removed) {
-      if (!_isRoot(key)) {
-        batch.delete(_entities, where: 'key = ?', whereArgs: [key]);
-      }
-    }
+    _deleteRows(batch, _entities, 'key', [
+      for (final key in delta.removed)
+        if (!_isRoot(key)) key,
+    ]);
     for (final MapEntry(:key, value: entity) in delta.changed.entries) {
       if (_isRoot(key)) continue;
       batch.insert(_entities, {
@@ -386,11 +399,10 @@ final class SqflitePersistence {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
         stored.add(field);
       }
-      for (final field in removedFields ?? const <String>{}) {
-        if (stored.remove(field)) {
-          batch.delete(_rootFields, where: 'field = ?', whereArgs: [field]);
-        }
-      }
+      _deleteRows(batch, _rootFields, 'field', [
+        for (final field in removedFields ?? const <String>{})
+          if (stored.remove(field)) field,
+      ]);
       return stored;
     }
 
@@ -417,15 +429,36 @@ final class SqflitePersistence {
         'updated_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
-    for (final field in _storedRootFields) {
-      if (!root.containsKey(field)) {
-        batch.delete(_rootFields, where: 'field = ?', whereArgs: [field]);
-      }
-    }
+    _deleteRows(batch, _rootFields, 'field', [
+      for (final field in _storedRootFields)
+        if (!root.containsKey(field)) field,
+    ]);
     return root.keys.toSet();
   }
 
   static bool _isRoot(String key) => key.startsWith('ROOT_');
+
+  /// Deletes the rows of [table] whose [column] is in [values], a few
+  /// hundred per statement: one `DELETE` per row made a large `gc` cost as
+  /// much as rewriting the live entities (#69). 500 stays under SQLite's
+  /// oldest bound-variable limit (999).
+  static void _deleteRows(
+    Batch batch,
+    String table,
+    String column,
+    List<String> values,
+  ) {
+    const chunk = 500;
+    for (var start = 0; start < values.length; start += chunk) {
+      final end = start + chunk < values.length ? start + chunk : values.length;
+      final args = values.sublist(start, end);
+      batch.delete(
+        table,
+        where: '$column IN (${List.filled(args.length, '?').join(', ')})',
+        whereArgs: args,
+      );
+    }
+  }
 
   /// Logout: empties the cache (every query refetches) and the database.
   Future<void> clear() {
@@ -521,12 +554,8 @@ final class SqflitePersistence {
     if (fields.isEmpty && loaded.unreachableEntities.isEmpty) return;
     await db.transaction((txn) async {
       final batch = txn.batch();
-      for (final field in fields) {
-        batch.delete(_rootFields, where: 'field = ?', whereArgs: [field]);
-      }
-      for (final key in loaded.unreachableEntities) {
-        batch.delete(_entities, where: 'key = ?', whereArgs: [key]);
-      }
+      _deleteRows(batch, _rootFields, 'field', fields);
+      _deleteRows(batch, _entities, 'key', loaded.unreachableEntities);
       await batch.commit(noResult: true);
     });
   }

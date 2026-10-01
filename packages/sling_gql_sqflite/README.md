@@ -89,6 +89,7 @@ generator changed — the store is wiped and the app starts cold.
 | `debounce` / `maxWait` | 1 s / 5 s | save timing |
 | `hydrateInIsolate` | `false` | decode and build the cache in a background isolate (`compute`) |
 | `flushOnLifecycle` | `true` | save when the app goes to the background |
+| `compact` | `true` | `cache.compact` after each save; off if something else reads `changesSince` |
 | `onError` | `FlutterError.reportError` | background save failures, undecodable stores (wiped) |
 
 ## Numbers
@@ -99,13 +100,16 @@ macOS, `sqflite_common_ffi`; ~600 B of JSON per entity):
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
 | open: read rows | 4 ms | 14 ms |
-| open: decode + prune + hydrate | 5–6 ms | 46–57 ms |
-| same with `hydrateInIsolate` (off the UI thread) | 6–7 ms | 55–70 ms |
-| `changesSince`: new root field + 20 changed entities | 0.05 ms | 0.1 ms |
+| open: decode + prune + hydrate | 5–6 ms | 46–76 ms |
+| same with `hydrateInIsolate` (off the UI thread) | 6–8 ms | 55–86 ms |
+| `changesSince`: new root field + 20 changed entities | 0.03 ms | 0.03 ms |
 | save of that delta | 2 ms | 2–3 ms |
-| first save, or a full delta (every entity) | 38 ms | 180–190 ms |
+| save after a `gc` of 60% of the entities | 4–5 ms | 37–44 ms |
+| first save, or a full delta (every entity) | 38–47 ms | 165–190 ms |
 
-A save costs what changed (the runtime reports `ROOT_QUERY` field by field);
-opening is mostly `jsonDecode` of the rows. A full delta —
-after `clear()`, or once the cache forgot its removals (a `gc` of more than a
-thousand entities) — rewrites every entity.
+A save costs what changed (the runtime reports `ROOT_QUERY` field by field,
+and each save compacts the cache's change records, so a big `gc` is a few
+`DELETE … IN (…)` statements, not a rewrite of every live entity); opening is
+mostly `jsonDecode` of the rows. Only `clear()` (or a store opened with
+`compact: false` once the cache forgot over a thousand removals) gets a full
+delta.

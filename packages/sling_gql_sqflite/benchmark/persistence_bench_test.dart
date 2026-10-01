@@ -68,16 +68,19 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       final path = '${dir.path}/bench.db';
 
-      Future<SqflitePersistence> open({bool isolate = false}) =>
-          SqflitePersistence.open(
-            path,
-            schema: _schema,
-            databaseFactory: databaseFactoryFfi,
-            maxEntities: null,
-            flushOnLifecycle: false,
-            debounce: const Duration(hours: 1),
-            hydrateInIsolate: isolate,
-          );
+      Future<SqflitePersistence> open({
+        bool isolate = false,
+        bool compact = true,
+      }) => SqflitePersistence.open(
+        path,
+        schema: _schema,
+        databaseFactory: databaseFactoryFfi,
+        maxEntities: null,
+        flushOnLifecycle: false,
+        debounce: const Duration(hours: 1),
+        hydrateInIsolate: isolate,
+        compact: compact,
+      );
 
       var p = await open();
       // ignore: invalid_use_of_internal_member
@@ -134,6 +137,35 @@ void main() {
       final deltaSave = _median(saveTimes);
       await p.close();
 
+      // A large gc (#69): 60% of the pages dropped, their launches collected
+      // — more removals than live entities. Without `compact` the cache has
+      // forgotten them and the save is a full delta.
+      final gcSaves = <bool, Duration>{};
+      for (final compact in [true, false]) {
+        p = await open(compact: compact);
+        // ignore: invalid_use_of_internal_member
+        p.cache.writeResponse('query', _pages(n, name: 'Gc $compact'));
+        await p.flush();
+        for (var page = 0; page < n * 6 ~/ 500; page++) {
+          // ignore: invalid_use_of_internal_member
+          p.cache.remove('query', ['launches_$page']);
+        }
+        for (var round = 0; round < 5; round++) {
+          // ignore: invalid_use_of_internal_member
+          p.cache.remove('query', ['launches_new_$round']);
+        }
+        p.cache.gc();
+        watch = Stopwatch()..start();
+        await p.flush();
+        gcSaves[compact] = watch.elapsed;
+        await p.close();
+        // Back to every page for the next round.
+        p = await open();
+        // ignore: invalid_use_of_internal_member
+        p.cache.writeResponse('query', _pages(n));
+        await p.close();
+      }
+
       // ignore: avoid_print
       print(
         '$n entities, ${(json / 1024 / 1024).toStringAsFixed(1)} MB JSON: '
@@ -142,7 +174,8 @@ void main() {
         'open hydrateInIsolate: read ${_ms(isolate.readTime)} + hydrate '
         '${_ms(isolate.hydrateTime)} ms; delta of $changed entities '
         '(ROOT_QUERY field by field): changesSince ${_ms(changesSince)} ms, save '
-        '${_ms(deltaSave)} ms',
+        '${_ms(deltaSave)} ms; save after a gc of 60%: '
+        '${_ms(gcSaves[true]!)} ms (${_ms(gcSaves[false]!)} ms without compact)',
       );
     }, timeout: const Timeout(Duration(minutes: 2)));
   }

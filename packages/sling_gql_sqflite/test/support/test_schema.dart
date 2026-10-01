@@ -113,6 +113,7 @@ Future<SqflitePersistence> openStore(
   Duration maxWait = const Duration(hours: 1),
   bool hydrateInIsolate = false,
   bool flushOnLifecycle = false,
+  bool compact = true,
   void Function(Object error, StackTrace stack)? onError,
   DateTime Function()? now,
 }) => SqflitePersistence.open(
@@ -125,6 +126,7 @@ Future<SqflitePersistence> openStore(
   maxWait: maxWait,
   hydrateInIsolate: hydrateInIsolate,
   flushOnLifecycle: flushOnLifecycle,
+  compact: compact,
   onError: onError,
   now: now ?? DateTime.now,
 );
