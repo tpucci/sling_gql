@@ -358,7 +358,10 @@ and deliberately small:
 - `cache.version` and `cache.changesSince(version)` — a counter bumped once per change, and
   the entities changed or removed since an earlier value of it, as a `CacheDelta`:
   JSON copies of those entities only (`changed`), the keys to delete (`removed`), and the
-  `version` to ask from next time. A hydrated cache starts at version 0: what it was
+  `version` to ask from next time. The operation roots (`ROOT_QUERY`, …), which hold one
+  field per query, come field by field instead (`changedFields`, `removedFields`), so a
+  save does not grow with the session; `delta.applyTo(json)` applies all of it to a stored
+  snapshot. A hydrated cache starts at version 0: what it was
   hydrated from is the persisted baseline.
 
 So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache
@@ -378,6 +381,8 @@ Future<void> save() async {
   if (delta.full) await store.deleteAll();
   await store.delete(delta.removed);
   await store.putAll(delta.changed);
+  // Roots: merge the changed fields into the stored root, drop the removed ones.
+  await store.patchAll(delta.changedFields, delta.removedFields);
   persisted = delta.version; // not reached if a write threw: retried next time
 }
 

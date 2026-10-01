@@ -78,14 +78,10 @@ size. That is why the *store* is bounded, not the reads.
 
 The query root is split per field because every response touches it: a page of launches
 rewrites its own root field (and the entities that changed), not every other query the app
-ever made. Which fields changed comes from the `onChange` keys (`ROOT_QUERY.<alias>`,
-`[i]` / `[length]` suffixes included). Per-field rows are also what lets old queries age
-out one by one. `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
-
-Only the changed fields are *encoded and written*, but `changesSince` still hands over a
-JSON copy of the whole `ROOT_QUERY` whenever one of its fields changed (the runtime's delta
-is per entity): a cost that grows with the root — every page's list of refs — not with the
-change. It is measured below; under a millisecond for a 10 000-entity root.
+ever made. The runtime's delta already reports the roots field by field
+(`delta.changedFields` / `delta.removedFields`), so a save copies, encodes and writes only
+the root fields that changed. Per-field rows are also what lets old queries age out one by
+one. `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
 
 ## Bounds
 
@@ -158,15 +154,16 @@ entity, launches in pages of 50 per root field):
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
 | open: read the rows | 4 ms | 14 ms |
-| open: decode + prune + hydrate | 6 ms | 57–65 ms |
-| the same with `hydrateInIsolate` (off the UI thread) | 7 ms | 63–80 ms |
-| `changesSince`: a new root field with 20 changed entities, in a session that wrote every entity | 0.1 ms | 0.8 ms |
-| save of that delta | 2 ms | 4 ms |
+| open: decode + prune + hydrate | 5–6 ms | 46–57 ms |
+| the same with `hydrateInIsolate` (off the UI thread) | 6–7 ms | 55–70 ms |
+| `changesSince`: a new root field with 20 changed entities, in a session that wrote every entity | 0.05 ms | 0.1 ms |
+| save of that delta | 2 ms | 2–3 ms |
 | first save, or a full delta (every entity) | 38 ms | 180–190 ms |
 
-The entities and root fields written cost what changed; `changesSince` adds a copy of
-`ROOT_QUERY` (and a scan of the entities the session changed), which is what grows from
-0.1 to 0.8 ms. The heap holds about twice the JSON size, which `maxEntities` caps for
+A save costs what changed: the entities and root fields written, plus a scan of the
+entities the session changed. Opening is mostly `jsonDecode` of the rows (about 30 of the
+50 ms at 10 000 entities); the decoded maps become the cache as they are, without a second
+copy. The heap holds about twice the JSON size, which `maxEntities` caps for
 entities (see [Bounds](#bounds)).
 
 ## Testing with a persisted cache
