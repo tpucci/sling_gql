@@ -43,7 +43,11 @@ class _CacheStatsState extends State<CacheStats> {
       if (!mounted) return;
       setState(() {
         _changeCount++;
-        _lastTouched = touched.length;
+        // Inline lists add `field[i]` / `field[length]` keys; count fields.
+        _lastTouched = {
+          for (final k in touched)
+            k.endsWith(']') ? k.substring(0, k.lastIndexOf('[')) : k,
+        }.length;
       });
     });
   }
