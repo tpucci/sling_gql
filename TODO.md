@@ -26,7 +26,7 @@ Automatic `gc()` (#22) done. Request overlay + log line (#46) done. Tour of the
 guides and the example (2026-09-29): #61–#66 done. 2026-09-30: #21 (coalesced
 `onChange`, `changesSince` deltas), #47 (`sling_gql_hooks`), #48
 (`sling_gql_link`), #54 (per-element inline list deps) done. 2026-10-01: #49
-(`sling_gql_sqflite`) done; open follow-ups #68, #69.
+(`sling_gql_sqflite`) done; open follow-ups #68, #69. 2026-10-02: #68 done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -48,11 +48,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## Roadmap items not covered above
 
-68. **Perf — `changesSince` copies the whole `ROOT_QUERY`** whenever one root
-    field changed (0.8 ms at 10k entities); `sling_gql_sqflite` encodes only
-    the dirty fields. A per-field root delta (or lazy copies) would make a
-    save cost only what changed. Also: hydrate copies decoded maps a second
-    time (an owning internal hydrate would save ~half of the 57 ms at 10k).
 69. **Perf — Full-delta spike**: after `clear()` or once the cache forgets
     its tombstones (a `gc` of >1000 entities), the next save rewrites every
     entity (180 ms at 10k). A `Cache.compact(upTo:)` acknowledging a saved
@@ -140,6 +135,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 54. Perf — Inline lists notify per element: reads through an inline element of an entity-field list record `entity.field[i]`, `Accessor.list` of inline objects `entity.field[length]` (`Cache.readListField`); writes touch changed elements + length on resize; keyed/scalar lists unchanged (`elementDepKey`/`lengthDepKey` in `internal.dart`; ~4–6% on the warm read bench).
 
 49. Runtime — `packages/sling_gql_sqflite`: `SqflitePersistence.open(path, schema:)` restores the cache before the client starts (optionally in an isolate), saves `changesSince` deltas in one transaction (debounced 1 s / max 5 s, flushed on app pause, serialized, retried after failure), one row per entity and per `ROOT_QUERY` field with `updated_at`; bounds `maxAge` 7 d + `maxEntities` 10k pruned on the stored JSON at open; wipes on format / key field / `slingSchema.hash` mismatch (new generated FNV fingerprint of the generated code). Example persists on iOS, web stays in memory. Guide: guides/persistence. Hive/file adapters dropped until needed.
+68. Perf — Roots in `CacheDelta` field by field (`changedFields` / `removedFields`, per-field stamps on the operation roots, a root copied whole only for versions before its removal or a stamp purge; `applyTo` merges): `changesSince` at 10k entities 0.8 → 0.1 ms, a delta save 4 → 2–3 ms; `sling_gql_sqflite` writes exactly those root rows. `NormalizedCache.adopt` hydrates decoded JSON in place (no second copy): open at 10k 57 → 46–57 ms — `jsonDecode` is ~30 ms of it, the copy was less than estimated.
 
 ## Explicitly not planned
 

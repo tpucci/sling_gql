@@ -73,8 +73,9 @@ on the code.
     client exists and listens to `onChange`; saves are
     `changesSince(savedVersion)` deltas (debounce / `maxWait` /
     lifecycle / `flush()`), one transaction each, chained. Rows: one per
-    entity, one per `ROOT_QUERY` field (the touched `ROOT_QUERY.<alias>`
-    keys say which; `ROOT_MUTATION`/`ROOT_SUBSCRIPTION` never stored). A
+    entity, one per `ROOT_QUERY` field (`delta.changedFields` says which;
+    for a whole-root copy in a full delta, the touched `ROOT_QUERY.<alias>`
+    keys; `ROOT_MUTATION`/`ROOT_SUBSCRIPTION` never stored). A
     `sling_meta` mismatch (format version, key field, `slingSchema.hash`)
     wipes the store. Bump `sqfliteFormatVersion` when the tables change.
     Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
@@ -154,7 +155,7 @@ on the code.
 | File | Role |
 | --- | --- |
 | `selection.dart` | `Selection` tree (field + args → alias), `Arg`, `PrintedOperation` (tree → document + variables). Alias = `field_<fnv1a64(json(args))>` (64-bit, web-safe); the alias is **also the cache key**. |
-| `cache/cache.dart` | `Cache` interface + `NormalizedCache`: flat entity map (`ROOT_QUERY`, `Launch:launch-181`), `Ref` values, `read` follows refs and fills the caller's `deps` with `entity.field` keys, returns the `missing` sentinel on miss (distinct from a server `null`); `readField(path, field)` is the allocation-free variant getters use, dep keys are interned. `writeResponse` normalizes + merges and returns touched keys. `evict`, `gc`, `snapshot`/`initial`, `onChange` (once per change: a write outside `batch`, or a whole `batch` — the client batches every response/mutation/subscription event/optimistic callback), `version`/`changesSince` → `CacheDelta` (entities stamped per change, tombstones for removals). Imports only its siblings in `cache/` (`normalization.dart` imports `selection.dart`) — keep it that way. |
+| `cache/cache.dart` | `Cache` interface + `NormalizedCache`: flat entity map (`ROOT_QUERY`, `Launch:launch-181`), `Ref` values, `read` follows refs and fills the caller's `deps` with `entity.field` keys, returns the `missing` sentinel on miss (distinct from a server `null`); `readField(path, field)` is the allocation-free variant getters use, dep keys are interned. `writeResponse` normalizes + merges and returns touched keys. `evict`, `gc`, `snapshot`/`initial`, `onChange` (once per change: a write outside `batch`, or a whole `batch` — the client batches every response/mutation/subscription event/optimistic callback), `version`/`changesSince` → `CacheDelta` (entities stamped per change, tombstones for removals; operation roots stamped per field and reported as `changedFields`/`removedFields`, copied whole only before a root removal / stamp purge); `NormalizedCache.adopt` hydrates decoded JSON without copying. Imports only its siblings in `cache/` (`normalization.dart` imports `selection.dart`) — keep it that way. |
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
