@@ -61,7 +61,12 @@ size. That is why the *store* is bounded, not the reads.
   cannot land after a newer one.
 - **Failures.** A failed save rolls back and leaves `savedVersion` where it was; the next
   change (or `flush()`) saves everything since the last stored version. Background failures
-  go to `onSaveError` (default `FlutterError.reportError`); `flush()` throws them.
+  go to `onError` (default `FlutterError.reportError`); `flush()` throws them.
+- **Full deltas.** After `cache.clear()`, or once the cache has forgotten its removals (more
+  than a thousand, and more than live entities — a big `gc`), `changesSince` answers with
+  every entity: that save empties and rewrites `sling_entities` (the "first save" cost
+  below). Root-field rows are still reconciled field by field, so untouched ones keep their
+  age.
 
 ### Rows
 
@@ -76,6 +81,11 @@ rewrites its own root field (and the entities that changed), not every other que
 ever made. Which fields changed comes from the `onChange` keys (`ROOT_QUERY.<alias>`,
 `[i]` / `[length]` suffixes included). Per-field rows are also what lets old queries age
 out one by one. `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
+
+Only the changed fields are *encoded and written*, but `changesSince` still hands over a
+JSON copy of the whole `ROOT_QUERY` whenever one of its fields changed (the runtime's delta
+is per entity): a cost that grows with the root — every page's list of refs — not with the
+change. It is measured below; under a millisecond for a 10 000-entity root.
 
 ## Bounds
 
@@ -94,6 +104,15 @@ Dropped rows are deleted from the database before `open` returns.
 `persistence.loaded` (a `SqfliteLoadReport`) tells what was kept, dropped and how long it
 took. The bounds hold at each launch: a long session can grow past `maxEntities`, and the
 next launch trims it.
+
+`maxEntities` counts entities only. Inline data held directly by root fields (objects
+without an id, scalar root fields) and the number of root fields are bounded by `maxAge`
+alone — and not at all when it is `null`.
+
+A store whose rows cannot be decoded (a damaged page, a hand edit) is wiped at open and the
+error reported to `onError`: it is a cache, starting cold beats failing every launch. A file
+that is not a database at all makes `open` throw; the example app then deletes it
+(`deleteDatabase`) and tries once more, falling back to an in-memory cache.
 
 ## Restored data is stale
 
@@ -138,15 +157,17 @@ entity, launches in pages of 50 per root field):
 
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
-| open: read the rows | 4 ms | 15 ms |
-| open: decode + prune + hydrate | 8 ms | 63–86 ms |
-| the same with `hydrateInIsolate` (off the UI thread) | 10 ms | 76 ms |
-| `changesSince` of 20 changed entities | 0.04 ms | 0.01 ms |
-| save of that delta | 2 ms | 2.5 ms |
-| first save (every entity) | 39 ms | 210 ms |
+| open: read the rows | 4 ms | 14 ms |
+| open: decode + prune + hydrate | 6 ms | 57–65 ms |
+| the same with `hydrateInIsolate` (off the UI thread) | 7 ms | 63–80 ms |
+| `changesSince`: a new root field with 20 changed entities, in a session that wrote every entity | 0.1 ms | 0.8 ms |
+| save of that delta | 2 ms | 4 ms |
+| first save, or a full delta (every entity) | 38 ms | 180–190 ms |
 
-A save costs what changed, not what is stored. The heap holds about twice the JSON size,
-which is what `maxEntities` caps.
+The entities and root fields written cost what changed; `changesSince` adds a copy of
+`ROOT_QUERY` (and a scan of the entities the session changed), which is what grows from
+0.1 to 0.8 ms. The heap holds about twice the JSON size, which `maxEntities` caps for
+entities (see [Bounds](#bounds)).
 
 ## Testing with a persisted cache
 

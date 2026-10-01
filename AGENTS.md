@@ -136,7 +136,10 @@ on the code.
   pub.dev admin page, then tag that commit `<pkg>-vX.Y.Z` as its melos
   baseline (`sling_gql_hooks` and `sling_gql_link` went this way at 0.1.0;
   `sling_gql_sqflite` 0.1.0 is next, and needs the `sling_gql` release that
-  has `SlingSchema.hash` first). Code must be
+  has `SlingSchema.hash` first: its `sling_gql: ^0.2.1` constraint must name
+  that release before the manual publish — `melos version` raises
+  dependents' constraints when it bumps `sling_gql`; check the pubspec, the
+  in-workspace dry run resolves the local path and will not catch it). Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
