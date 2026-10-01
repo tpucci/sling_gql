@@ -94,10 +94,10 @@ Or just [try it live](https://tpucci.github.io/sling_gql/guides/try-it/) on the 
 
 The packages are on pub.dev:
 [`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),
-[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator) and
-[`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers).
-`packages/sling_gql_hooks` (flutter_hooks adapter) and `packages/sling_gql_link`
-(gql_link adapter) are not published yet.
+[`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator),
+[`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers),
+[`sling_gql_hooks`](https://pub.dev/packages/sling_gql_hooks) (flutter_hooks adapter) and
+[`sling_gql_link`](https://pub.dev/packages/sling_gql_link) (gql_link adapter).
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

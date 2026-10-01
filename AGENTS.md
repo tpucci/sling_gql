@@ -85,8 +85,11 @@ on the code.
   bumps and changelogs from them. Scope by package or area:
   `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `feat(sling_gql_link): ...`, `docs(website): ...`,
   `chore(repo): ...`, `test(example): ...`. Only commits touching a package's
-  files bump that package; `feat` -> minor (pre-1.0 as well, melos default),
-  `fix`/`perf`/`refactor` -> patch, `BREAKING CHANGE:` footer or `!` -> major.
+  files bump that package; `feat` -> minor, `fix`/`perf`/`refactor` -> patch,
+  `BREAKING CHANGE:` footer or `!` -> major — but below 1.0 melos shifts
+  down one step (`feat` -> patch, 0.2.0 -> 0.2.1; observed on the 2026-10
+  release), and a package bumped only because a dependency moved gets a
+  `+1` build bump (`sling_gql_test` 0.1.1 -> 0.1.1+1).
   Never hand-edit versions or `CHANGELOG.md` files.
 - **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`, `sling_gql_link`; MIT; each with its own
   `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
@@ -105,18 +108,13 @@ on the code.
   `sling_gql_hooks-v{{version}}` / `sling_gql_link-v{{version}}`, no secrets;
   the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
-  `patch` to a `+build` bump). **Release order:** `sling_gql_hooks` needs the
-  public `QueryState`/`MutationState`/`SubscriptionState` constructors, which
-  are not in `sling_gql` 0.2.0 — release `sling_gql` (0.3.0) first and check
-  the hooks pubspec says `sling_gql: ^0.3.0` before publishing it.
-  The `<pkg>-v0.1.1` tags are the baseline melos
+  `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos
   reads commits from; before them the history is not conventional. A **new**
-  package (`sling_gql_hooks`, `sling_gql_link`, not on pub.dev yet) cannot go
-  through the tag workflow the first time — pub.dev only enables automated
+  package cannot go through the tag workflow the first time — pub.dev only enables automated
   publishing on an existing package: publish its first version by hand
   (`dart pub publish` in the package), enable its tag pattern on the package's
   pub.dev admin page, then tag that commit `<pkg>-vX.Y.Z` as its melos
-  baseline. Code must be
+  baseline (`sling_gql_hooks` and `sling_gql_link` went this way at 0.1.0). Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves

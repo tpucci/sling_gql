@@ -119,20 +119,9 @@ turns it into the client's `transport` (and `subscriptionTransport`). The
 runtime stays `http`-only; `gql`, `gql_exec`, `gql_link` and `gql_http_link`
 are that package's dependencies.
 
-<Aside type="note">
-`sling_gql_link` is not on pub.dev yet. Until its first release, depend on it
-from git:
-
-```yaml
-dependencies:
-  sling_gql_link:
-    git:
-      url: https://github.com/tpucci/sling_gql
-      path: packages/sling_gql_link
-  gql_link: ^1.1.0
-  gql_http_link: ^1.2.0
+```sh
+flutter pub add sling_gql_link gql_link gql_http_link
 ```
-</Aside>
 
 ```dart
 import 'package:gql_http_link/gql_http_link.dart';

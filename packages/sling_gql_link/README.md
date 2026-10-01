@@ -12,9 +12,6 @@ https://github.com/tpucci/sling_gql
 flutter pub add sling_gql_link gql_link gql_http_link
 ```
 
-Not on pub.dev yet: until its first release, depend on it from git
-(`git: {url: https://github.com/tpucci/sling_gql, path: packages/sling_gql_link}`).
-
 ```dart
 import 'package:gql_http_link/gql_http_link.dart';
 import 'package:gql_link/gql_link.dart';
