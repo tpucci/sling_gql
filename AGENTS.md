@@ -229,8 +229,16 @@ Design decisions worth knowing before changing things:
   (the builder saw the previous run's values): `run()` schedules one more
   `onChanged` (microtask) when they differ from what the body saw.
 - **Notification is per entity field** (`Launch:launch-181.name`). Inline
-  objects and lists notify at the granularity of the entity field that
-  contains them.
+  objects notify at the granularity of the entity field that contains them.
+  A list held directly by an entity field is finer (#54): a read through an
+  inline element records `elementDepKey` (`Launch:x.links[2]`), a read
+  through a `Ref` element keeps the field key, `Accessor.list` of inline
+  objects (`keyed: false`) records `lengthDepKey` (`Launch:x.links[length]`)
+  via `Cache.readListField`. Writes (`_mergeList`, `write`, `remove`,
+  `evict`, `clear`) touch the field key plus the element keys of changed
+  inline elements and the length key on resize — every writer of an
+  entity-level list must keep doing so. Deeper lists belong to their element
+  / field; `fetchedAt` maps the finer keys to the field's stamp.
   A key is touched only when something under it changed: `_normalize` sets
   `_changed` for leaves, refs, new keys and list lengths, `_mergeEntity`
   reads it per field. Changes inside a referenced entity touch that entity.
