@@ -105,8 +105,8 @@ void main() {
 
       // Then the common response: a new root field (a page alias) holding
       // 20 launches that changed, five times (median reported). Each one
-      // changes ROOT_QUERY, so `changesSince` copies the whole root (every
-      // page's refs) besides the 21 changed entities.
+      // changes ROOT_QUERY by one field: `changesSince` copies that field
+      // (not every page's refs, #68) besides the 20 changed entities.
       final changesSinceTimes = <Duration>[];
       final saveTimes = <Duration>[];
       var changed = 0;
@@ -123,7 +123,8 @@ void main() {
           },
         });
         watch = Stopwatch()..start();
-        changed = p.cache.changesSince(p.savedVersion).changed.length;
+        final delta = p.cache.changesSince(p.savedVersion);
+        changed = delta.changed.length + delta.changedFields.length;
         changesSinceTimes.add(watch.elapsed);
         watch = Stopwatch()..start();
         await p.flush();
@@ -140,7 +141,7 @@ void main() {
         '${_ms(main.readTime)} + hydrate ${_ms(main.hydrateTime)} ms; '
         'open hydrateInIsolate: read ${_ms(isolate.readTime)} + hydrate '
         '${_ms(isolate.hydrateTime)} ms; delta of $changed entities '
-        '(ROOT_QUERY included): changesSince ${_ms(changesSince)} ms, save '
+        '(ROOT_QUERY field by field): changesSince ${_ms(changesSince)} ms, save '
         '${_ms(deltaSave)} ms',
       );
     }, timeout: const Timeout(Duration(minutes: 2)));

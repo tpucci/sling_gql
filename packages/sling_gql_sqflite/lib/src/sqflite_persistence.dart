@@ -249,7 +249,8 @@ final class SqflitePersistence {
   int _savedVersion = 0;
 
   /// `ROOT_QUERY` fields touched since the last stored save: which root
-  /// rows a delta holding `ROOT_QUERY` rewrites.
+  /// rows a delta holding a whole `ROOT_QUERY` copy (a full delta) rewrites;
+  /// other deltas name their root fields (`CacheDelta.changedFields`).
   Set<String> _dirtyRootFields = {};
 
   /// The `ROOT_QUERY` fields the database has a row for. A root field that
@@ -371,6 +372,30 @@ final class SqflitePersistence {
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
 
+    final changedFields = delta.changedFields[queryRoot];
+    final removedFields = delta.removedFields[queryRoot];
+    if (changedFields != null || removedFields != null) {
+      // The usual delta: the root field by field (#68).
+      final stored = {..._storedRootFields};
+      for (final MapEntry(key: field, :value)
+          in (changedFields ?? const {}).entries) {
+        batch.insert(_rootFields, {
+          'field': field,
+          'json': jsonEncode(value),
+          'updated_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        stored.add(field);
+      }
+      for (final field in removedFields ?? const <String>{}) {
+        if (stored.remove(field)) {
+          batch.delete(_rootFields, where: 'field = ?', whereArgs: [field]);
+        }
+      }
+      return stored;
+    }
+
+    // The root copied whole (a full delta, a root removed and written
+    // again), or not changed.
     final root = delta.changed[queryRoot];
     if (root == null) {
       if (!delta.full && !delta.removed.contains(queryRoot)) {

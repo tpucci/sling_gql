@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:sling_gql/internal.dart' show Ref;
+import 'package:sling_gql/internal.dart' show NormalizedCache, Ref;
 import 'package:sling_gql/sling_gql.dart';
 
 /// The cache root persisted field by field; every other root
@@ -120,15 +120,13 @@ LoadedCache loadCache((StoredRows, LoadOptions) input) {
     entities.addAll(reached);
   }
 
-  final initial = <String, Object?>{
-    if (root.isNotEmpty) queryRoot: root,
-    ...entities,
-  };
+  // The decoded maps are ours: the cache takes them over instead of copying
+  // them a second time (#68).
   return LoadedCache(
-    cache: Cache(
-      normalization: Normalization(keyField: options.keyField),
-      initial: initial,
-    ),
+    cache: NormalizedCache.adopt({
+      if (root.isNotEmpty) queryRoot: root,
+      ...entities,
+    }, normalization: Normalization(keyField: options.keyField)),
     expiredRootFields: expired,
     cappedRootFields: capped,
     unreachableEntities: [

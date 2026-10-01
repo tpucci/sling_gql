@@ -99,13 +99,13 @@ macOS, `sqflite_common_ffi`; ~600 B of JSON per entity):
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
 | open: read rows | 4 ms | 14 ms |
-| open: decode + prune + hydrate | 6 ms | 57–65 ms |
-| same with `hydrateInIsolate` (off the UI thread) | 7 ms | 63–80 ms |
-| `changesSince`: new root field + 20 changed entities | 0.1 ms | 0.8 ms |
-| save of that delta | 2 ms | 4 ms |
+| open: decode + prune + hydrate | 5–6 ms | 46–57 ms |
+| same with `hydrateInIsolate` (off the UI thread) | 6–7 ms | 55–70 ms |
+| `changesSince`: new root field + 20 changed entities | 0.05 ms | 0.1 ms |
+| save of that delta | 2 ms | 2–3 ms |
 | first save, or a full delta (every entity) | 38 ms | 180–190 ms |
 
-Rows written cost what changed; `changesSince` also copies the whole
-`ROOT_QUERY` when one of its fields changed (the 0.1 → 0.8 ms). A full delta —
+A save costs what changed (the runtime reports `ROOT_QUERY` field by field);
+opening is mostly `jsonDecode` of the rows. A full delta —
 after `clear()`, or once the cache forgot its removals (a `gc` of more than a
 thousand entities) — rewrites every entity.
