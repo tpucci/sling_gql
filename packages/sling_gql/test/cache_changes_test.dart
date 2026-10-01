@@ -101,9 +101,10 @@ void main() {
       expect(first.full, isFalse);
       expect(
         first.changed.keys,
-        unorderedEquals(['ROOT_QUERY', 'User:1', 'User:a', 'User:b']),
+        unorderedEquals(['User:1', 'User:a', 'User:b']),
       );
-      expect(first.changed['ROOT_QUERY'], {
+      // Roots are reported field by field.
+      expect(first.changedFields['ROOT_QUERY'], {
         'me': {'__ref': 'User:1'},
       });
       expect(first.changed['User:1']!['friends'], [
@@ -274,6 +275,134 @@ void main() {
     });
   });
 
+  // #68: a root holds one field per query; copying it whole on every change
+  // made a save cost the size of the session.
+  group('Cache.changesSince roots field by field', () {
+    test('only the root fields written since the version', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {
+        'me': user('1', name: 'Ada'),
+        'other': user('2', name: 'Bob'),
+      });
+      final v = cache.version;
+
+      cache.writeResponse('query', {'third': user('3', name: 'Cy')});
+      final delta = cache.changesSince(v);
+      expect(delta.changed.keys, ['User:3']);
+      expect(delta.changedFields, {
+        'ROOT_QUERY': {
+          'third': {'__ref': 'User:3'},
+        },
+      });
+      expect(delta.removedFields, isEmpty);
+
+      // Rewriting the same value changes nothing.
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      expect(cache.changesSince(delta.version).isEmpty, isTrue);
+    });
+
+    test('removed root fields', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {
+        'me': user('1', name: 'Ada'),
+        'other': user('2', name: 'Bob'),
+      });
+      final stored = json(cache.snapshot);
+      final v = cache.version;
+
+      cache.remove('query', ['other']);
+      cache.evict('User:1'); // scrubs `me`
+      final delta = cache.changesSince(v);
+      expect(delta.changedFields, isEmpty);
+      expect(delta.removedFields, {
+        'ROOT_QUERY': {'other', 'me'},
+      });
+      expect(delta.removed, {'User:1'});
+      delta.applyTo(stored);
+      expect(stored, json(cache.snapshot));
+    });
+
+    test('a root removed and written again is copied whole for versions '
+        'before the removal', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      final before = json(cache.snapshot);
+      final v = cache.version;
+
+      cache.evict('ROOT_QUERY');
+      final removedAt = cache.version;
+      cache.writeResponse('query', {'other': user('2', name: 'Bob')});
+
+      final delta = cache.changesSince(v);
+      expect(delta.removed, isEmpty);
+      expect(delta.changed['ROOT_QUERY'], {
+        'other': {'__ref': 'User:2'},
+      });
+      expect(delta.changedFields, isEmpty);
+      delta.applyTo(before);
+      expect(before, json(cache.snapshot));
+
+      // After the removal: field by field again.
+      final after = cache.changesSince(removedAt);
+      expect(after.changed.keys, ['User:2']);
+      expect(after.changedFields['ROOT_QUERY']!.keys, ['other']);
+    });
+
+    test('too many stamps of removed root fields: older versions get the '
+        'root whole', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      final stored = json(cache.snapshot);
+      final v = cache.version;
+      for (var i = 0; i < 1100; i++) {
+        cache.write('query', ['f$i'], i);
+        cache.remove('query', ['f$i']);
+      }
+
+      final delta = cache.changesSince(v);
+      expect(delta.changed['ROOT_QUERY'], {
+        'me': {'__ref': 'User:1'},
+      });
+      expect(delta.removedFields, isEmpty);
+      delta.applyTo(stored);
+      expect(stored, json(cache.snapshot));
+
+      cache.write('query', ['late'], 1);
+      expect(cache.changesSince(cache.version - 1).changedFields, {
+        'ROOT_QUERY': {'late': 1},
+      });
+    });
+
+    test('NormalizedCache.adopt hydrates decoded JSON in place', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {
+        'me': user('1', name: 'Ada', friends: ['a', 'b']),
+      });
+      final decoded = (jsonDecode(jsonEncode(cache.snapshot)) as Map)
+          .cast<String, Map<String, Object?>>();
+      final user1 = decoded['User:1']!;
+
+      final adopted = NormalizedCache.adopt(decoded);
+      expect(adopted.version, 0);
+      expect(adopted.changesSince(0).isEmpty, isTrue);
+      expect(json(adopted.snapshot), json(cache.snapshot));
+      expect(adopted.read('query', ['me', 'friends', 1, 'name']), 'B');
+      // Taken over, not copied: the refs were converted in the given maps.
+      expect((user1['friends']! as List).first, const Ref('User:a'));
+
+      adopted.writeResponse('query', {'me': user('1', name: 'Grace')});
+      expect(adopted.changesSince(0).changed['User:1']!['name'], 'Grace');
+    });
+
+    test('applyTo creates a root missing from the copy', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      final stored = <String, Object?>{};
+      cache.changesSince(0).applyTo(stored);
+      expect(json(stored), json(cache.snapshot));
+    });
+  });
+
   group('the client batches', () {
     SlingClient<Query> clientWith({
       bool failMutation = false,
@@ -384,7 +513,8 @@ void main() {
       expect(c.cache.version, v + 2);
       final delta = c.cache.changesSince(v);
       expect(delta.changed['User:1']!['name'], 'Grace');
-      expect(delta.changed['ROOT_MUTATION'], isEmpty);
+      expect(delta.changed['ROOT_MUTATION'], isNull);
+      expect(delta.changedFields['ROOT_MUTATION'], isNull);
     });
 
     test('a failed mutation: the rollback is one change and the delta holds '

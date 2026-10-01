@@ -64,12 +64,17 @@ class CacheWrite {
 ///
 /// [changed] holds JSON copies of the entities in the [Cache.snapshot] format
 /// (refs as `{"__ref": key}`); an entity is in [changed] or in [removed],
-/// never both.
+/// never both. The operation roots (`ROOT_QUERY`, `ROOT_MUTATION`, …) are
+/// usually reported field by field instead
+/// ([changedFields] / [removedFields]): they hold one field per query and
+/// would otherwise be copied whole whenever one query changed.
 final class CacheDelta {
   const CacheDelta({
     required this.version,
     required this.changed,
     required this.removed,
+    this.changedFields = const {},
+    this.removedFields = const {},
     this.full = false,
   });
 
@@ -83,13 +88,30 @@ final class CacheDelta {
   /// Keys of the entities evicted, collected or removed since then.
   final Set<String> removed;
 
+  /// Operation roots changed field by field: per root key, JSON copies of
+  /// the fields written since the requested version (the root's other
+  /// fields are unchanged). A root is in [changed] (copied whole, e.g. in a
+  /// [full] delta or after the root itself was removed), in [removed], or
+  /// here (with [removedFields]): never two of these.
+  final Map<String, Map<String, Object?>> changedFields;
+
+  /// Per root key, the fields removed since the requested version (a
+  /// mutation's root fields once it settled, a `CacheScope` remove, an
+  /// evicted entity a root field pointed to). Never also in [changedFields].
+  final Map<String, Set<String>> removedFields;
+
   /// The delta replaces the whole store: drop every stored entity, then
   /// write [changed] (which is then every entity). Happens after
   /// [Cache.clear], or when the requested version is older than the
   /// removals the cache still remembers.
   final bool full;
 
-  bool get isEmpty => !full && changed.isEmpty && removed.isEmpty;
+  bool get isEmpty =>
+      !full &&
+      changed.isEmpty &&
+      removed.isEmpty &&
+      changedFields.isEmpty &&
+      removedFields.isEmpty;
 
   /// Applies the delta to a stored [snapshot] (e.g. a JSON file's content)
   /// in place.
@@ -99,12 +121,27 @@ final class CacheDelta {
       snapshot.remove(key);
     }
     snapshot.addAll(changed);
+    for (final key in {...changedFields.keys, ...removedFields.keys}) {
+      final stored = snapshot[key];
+      final entity = switch (stored) {
+        Map<String, Object?>() => stored,
+        Map() => snapshot[key] = Map<String, Object?>.from(stored),
+        _ => snapshot[key] = <String, Object?>{},
+      };
+      entity.addAll(changedFields[key] ?? const {});
+      for (final field in removedFields[key] ?? const <String>{}) {
+        entity.remove(field);
+      }
+    }
   }
 
   @override
   String toString() =>
       'CacheDelta(version: $version, changed: ${changed.keys.toList()}, '
-      'removed: ${removed.toList()}${full ? ', full' : ''})';
+      'removed: ${removed.toList()}'
+      '${changedFields.isEmpty ? '' : ', changedFields: ${{for (final e in changedFields.entries) e.key: e.value.keys.toList()}}'}'
+      '${removedFields.isEmpty ? '' : ', removedFields: $removedFields'}'
+      '${full ? ', full' : ''})';
 }
 
 /// The client-side store every accessor reads from.
@@ -230,8 +267,9 @@ abstract class Cache {
   int get version;
 
   /// The entities changed or removed since [version] (an earlier value of
-  /// [Cache.version]), as JSON copies of those entities only. Store it, then
-  /// ask again from [CacheDelta.version].
+  /// [Cache.version]), as JSON copies of those entities only (for the operation roots:
+  /// of the fields that changed, see [CacheDelta.changedFields]). Store it,
+  /// then ask again from [CacheDelta.version].
   CacheDelta changesSince(int version);
 
   /// JSON-able deep copy of the whole store (refs as `{"__ref": key}`).
@@ -253,6 +291,20 @@ class NormalizedCache implements Cache {
     Map<String, Object?>? initial,
   }) {
     if (initial != null) _hydrate(initial);
+  }
+
+  /// A cache hydrated from [entities] (the [snapshot] format) *without
+  /// copying them*: the maps and lists are taken over and converted in
+  /// place (`{"__ref": key}` maps become refs), so the caller must not
+  /// touch them afterwards. For a persistence layer that just decoded
+  /// them (`jsonDecode` output is mutable); `Cache(initial:)` copies.
+  NormalizedCache.adopt(
+    Map<String, Map<String, Object?>> entities, {
+    this.normalization = const Normalization(),
+  }) {
+    for (final e in entities.entries) {
+      _entities[e.key] = _adopted(e.value);
+    }
   }
 
   @override
@@ -278,15 +330,36 @@ class NormalizedCache implements Cache {
   /// [clear] and when the tombstones in [_removedAt] are dropped.
   int _fullSince = 0;
 
-  void _markChanged(String key) {
+  /// Per operation root (`ROOT_QUERY`, …): the version each field last
+  /// changed or was removed at. Roots hold one field per query alias and
+  /// grow with the session, so [changesSince] reports them field by field
+  /// ([CacheDelta.changedFields]) instead of copying them whole (#68).
+  final Map<String, Map<String, int>> _fieldChangedAt = {};
+
+  /// Per root: [changesSince] an older version copies the root whole (in
+  /// [CacheDelta.changed]) — set when the root was removed and when its
+  /// field stamps of removed fields were dropped.
+  final Map<String, int> _fieldsSince = {};
+
+  /// Marks the entity [key] changed; [field] is the entity field that
+  /// changed (or was removed), required for a root to be reported field by
+  /// field.
+  void _markChanged(String key, [String? field]) {
     _changedAt[key] = _version + 1;
     if (_removedAt.isNotEmpty) _removedAt.remove(key);
+    if (field != null && isRootKey(key)) {
+      (_fieldChangedAt[key] ??= {})[field] = _version + 1;
+    }
     _dirty = true;
   }
 
   void _markRemoved(String key) {
     _changedAt.remove(key);
     _removedAt[key] = _version + 1;
+    if (isRootKey(key)) {
+      _fieldChangedAt.remove(key);
+      _fieldsSince[key] = _version + 1;
+    }
     _dirty = true;
   }
 
@@ -530,7 +603,7 @@ class NormalizedCache implements Cache {
         touched.add(keys.element(topIndex));
       }
     }
-    _markChanged(entityKey);
+    _markChanged(entityKey, topField);
     _emit(touched);
     return touched;
   }
@@ -612,7 +685,7 @@ class NormalizedCache implements Cache {
     if (topIndex != null) {
       touched.add(_listDeps(entityKey, topField!).element(topIndex));
     }
-    _markChanged(entityKey);
+    _markChanged(entityKey, topField);
     _emit(touched);
     return touched;
   }
@@ -656,7 +729,7 @@ class NormalizedCache implements Cache {
   ) {
     final existing = _entities[key];
     final entity = existing ?? (_entities[key] = {});
-    var entityChanged = existing == null;
+    if (existing == null) _markChanged(key);
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
       final previous = entity[e.key];
@@ -682,10 +755,9 @@ class NormalizedCache implements Cache {
       _writing?.add(dep);
       if (changed) {
         touched.add(dep);
-        entityChanged = true;
+        _markChanged(key, e.key);
       }
     }
-    if (entityChanged) _markChanged(key);
   }
 
   /// Set by [_normalize] when the value it returns differs from `existing`
@@ -801,18 +873,18 @@ class NormalizedCache implements Cache {
     _listDepKeys.remove(key);
     final ref = Ref(key);
     for (final e in _entities.entries) {
-      var scrubbed = false;
+      List<String>? scrubbed;
       for (final field in e.value.keys.toList()) {
         final value = e.value[field];
         if (value == ref) {
           e.value.remove(field);
           touched.add(depKey(e.key, field));
-          scrubbed = true;
+          (scrubbed ??= []).add(field);
         } else {
           final length = value is List ? value.length : 0;
           if (!_scrub(value, ref)) continue;
           touched.add(depKey(e.key, field));
-          scrubbed = true;
+          (scrubbed ??= []).add(field);
           if (length > 0) {
             // Elements shifted or changed inside: all of them, to be safe.
             final keys = _listDeps(e.key, field);
@@ -823,7 +895,11 @@ class NormalizedCache implements Cache {
           }
         }
       }
-      if (scrubbed) _markChanged(e.key);
+      if (scrubbed != null) {
+        for (final field in scrubbed) {
+          _markChanged(e.key, field);
+        }
+      }
     }
     _emit(touched);
     return touched;
@@ -948,6 +1024,18 @@ class NormalizedCache implements Cache {
         _removedAt.clear();
         _fullSince = _version;
       }
+      // Same for the stamps of fields a root no longer has.
+      for (final e in _fieldChangedAt.entries) {
+        final root = _entities[e.key];
+        final stamps = e.value;
+        if (stamps.length > _maxTombstones &&
+            stamps.length > 2 * (root?.length ?? 0)) {
+          stamps.removeWhere(
+            (field, _) => !(root?.containsKey(field) ?? false),
+          );
+          _fieldsSince[e.key] = _version;
+        }
+      }
     }
     if (touched.isNotEmpty && _changes.hasListener) _changes.add(touched);
   }
@@ -969,16 +1057,46 @@ class NormalizedCache implements Cache {
         full: true,
       );
     }
+    final changed = <String, Map<String, Object?>>{};
+    Map<String, Map<String, Object?>>? changedFields;
+    Map<String, Set<String>>? removedFields;
+    for (final e in _changedAt.entries) {
+      if (e.value <= version) continue;
+      final key = e.key;
+      final entity = _entities[key]!;
+      final stamps = _fieldChangedAt[key];
+      if (!isRootKey(key) || version < (_fieldsSince[key] ?? 0)) {
+        changed[key] = _entityJson(entity);
+        continue;
+      }
+      // A root, field by field: the fields stamped since [version].
+      final fields = <String, Object?>{};
+      Set<String>? gone;
+      if (stamps != null) {
+        for (final s in stamps.entries) {
+          if (s.value <= version) continue;
+          if (entity.containsKey(s.key)) {
+            fields[s.key] = _toJson(entity[s.key]);
+          } else {
+            (gone ??= {}).add(s.key);
+          }
+        }
+      }
+      // An empty entry for a root created empty, so it exists in the copy.
+      if (fields.isNotEmpty || gone == null) {
+        (changedFields ??= {})[key] = fields;
+      }
+      if (gone != null) (removedFields ??= {})[key] = gone;
+    }
     return CacheDelta(
       version: _version,
-      changed: {
-        for (final e in _changedAt.entries)
-          if (e.value > version) e.key: _entityJson(_entities[e.key]!),
-      },
+      changed: changed,
       removed: {
         for (final e in _removedAt.entries)
           if (e.value > version) e.key,
       },
+      changedFields: changedFields ?? const {},
+      removedFields: removedFields ?? const {},
     );
   }
 
@@ -1015,6 +1133,33 @@ class NormalizedCache implements Cache {
     }
   }
 
+  /// [_fromJson] in place: [map] itself becomes the entity.
+  static Map<String, Object?> _adopted(Map<String, Object?> map) {
+    for (final e in map.entries) {
+      final value = e.value;
+      if (value is Map || value is List) map[e.key] = _adoptJson(value);
+    }
+    return map;
+  }
+
+  static Object? _adoptJson(Object? node) {
+    if (node is Map) {
+      final ref = Ref.tryParse(node);
+      if (ref != null) return ref;
+      return _adopted(
+        node is Map<String, Object?> ? node : Map<String, Object?>.from(node),
+      );
+    }
+    if (node is List<Object?>) {
+      for (var i = 0; i < node.length; i++) {
+        final value = node[i];
+        if (value is Map || value is List) node[i] = _adoptJson(value);
+      }
+      return node;
+    }
+    return node;
+  }
+
   static Object? _fromJson(Object? node) {
     if (node is Map) {
       final ref = Ref.tryParse(node);
@@ -1043,6 +1188,8 @@ class NormalizedCache implements Cache {
     _fetchedAt.clear();
     _changedAt.clear();
     _removedAt.clear();
+    _fieldChangedAt.clear();
+    _fieldsSince.clear();
     _fullSince = _version + 1;
     _dirty = true;
     _emit(touched);
