@@ -15,6 +15,8 @@ dependencies:
   http: ^1.2.0
   sling_gql:
     path: ../packages/sling_gql
+  sling_gql_sqflite:
+    path: ../packages/sling_gql_sqflite
   web: ^1.1.1
 
 dev_dependencies:
