@@ -678,6 +678,14 @@ class _BypassCache implements Cache {
   }) => missing;
 
   @override
+  Object? readListField(
+    String operation,
+    List<Object> path,
+    String field, {
+    Set<String>? deps,
+  }) => missing;
+
+  @override
   bool hasEntity(String key) => false;
 
   @override

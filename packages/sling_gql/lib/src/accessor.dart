@@ -19,7 +19,8 @@ abstract class Recorder {
 
   Cache get cache;
 
-  /// Dependency keys (`entity.field`) read so far in the current scope.
+  /// Dependency keys (`entity.field`, `entity.field[2]` for an inline list
+  /// element — see `depKey`) read so far in the current scope.
   /// Filled by the cache on every read; used to decide which scopes to
   /// rebuild when data changes.
   Set<String> get deps;
@@ -243,7 +244,17 @@ abstract class Accessor {
     bool keyed = false,
   }) {
     final sel = _selectObject(field, args, keyed);
-    final value = _read(sel);
+    // Inline elements are read through their own paths (element keys): the
+    // list itself only needs its length. A keyed list keeps depending on the
+    // whole field (its membership).
+    final value = keyed
+        ? _read(sel)
+        : recorder.cache.readListField(
+            recorder.operation,
+            path,
+            sel.alias,
+            deps: recorder.deps,
+          );
     final List<R>? result;
     if (value == missing) {
       recorder.onMiss(sel);

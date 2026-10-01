@@ -16,7 +16,29 @@ export 'ref.dart';
 /// `User:a` + `name`): [field] is a cache alias — a GraphQL name, optionally
 /// with an `_<hash>` suffix — and never contains `.`, so the entity is always
 /// everything before the *last* dot (what list rules rely on) (#26).
+///
+/// A list held by an entity field has two finer keys (#54), which keep that
+/// property: [elementDepKey] (read through one inline element) and
+/// [lengthDepKey] (`Accessor.list` of inline objects). A write touches
+/// [depKey] whenever anything under the field changed, plus the finer keys
+/// of what changed in the list.
 String depKey(String entity, String field) => '$entity.$field';
+
+/// Dependency key for element [index] of the list held by [field] on
+/// [entity] (`Launch:launch-181.links[2]`): what a read *through* an inline
+/// element (not a [Ref]) records instead of [depKey], so a change to one
+/// element rebuilds its readers only. Readers through a [Ref] element keep
+/// [depKey]. Lists nested deeper (in an element, in an inline object) are
+/// part of the element / field holding them.
+String elementDepKey(String entity, String field, int index) =>
+    '$entity.$field[$index]';
+
+/// Dependency key for the length of the list held by [field] on [entity]
+/// (`Launch:launch-181.links[length]`): what `Accessor.list` of inline
+/// objects records instead of [depKey] — it builds one accessor per index
+/// and reads nothing else. Touched when the length changes or the list is
+/// replaced by something else.
+String lengthDepKey(String entity, String field) => '$entity.$field[length]';
 
 /// Description of one manual write (`launch.favorite = true`), enough to undo
 /// it: the [previous] value is [missing] when the path did not exist.
@@ -125,6 +147,18 @@ abstract class Cache {
     Set<String>? deps,
   });
 
+  /// [readField] for a caller that uses only the *length* of the list it
+  /// returns (`Accessor.list` of inline objects: its elements are read
+  /// through their own paths). When [field] is an entity field holding a
+  /// list, [deps] gets its [lengthDepKey] instead of its [depKey].
+  @internal
+  Object? readListField(
+    String operation,
+    List<Object> path,
+    String field, {
+    Set<String>? deps,
+  });
+
   /// Writes an optimistic/manual value at a path, creating containers as
   /// needed. Returns the dependency keys touched.
   @internal
@@ -149,7 +183,8 @@ abstract class Cache {
 
   /// When [depKey] (`entity.field`) was last written by a server response,
   /// or `null` if never: hydrated snapshots, optimistic writes and manual
-  /// [write]s carry no stamp, so they count as stale for `maxAge`.
+  /// [write]s carry no stamp, so they count as stale for `maxAge`. An
+  /// [elementDepKey] / [lengthDepKey] answers for the field holding the list.
   DateTime? fetchedAt(String depKey);
 
   /// Removes an entity and every reference to it (list elements are dropped,
@@ -269,7 +304,7 @@ class NormalizedCache implements Cache {
 
   @override
   Object? read(String operation, List<Object> path, {Set<String>? deps}) =>
-      _walk(operation, path, null, deps);
+      _walk(operation, path, null, deps, false);
 
   @override
   Object? readField(
@@ -277,7 +312,15 @@ class NormalizedCache implements Cache {
     List<Object> path,
     String field, {
     Set<String>? deps,
-  }) => _walk(operation, path, field, deps);
+  }) => _walk(operation, path, field, deps, false);
+
+  @override
+  Object? readListField(
+    String operation,
+    List<Object> path,
+    String field, {
+    Set<String>? deps,
+  }) => _walk(operation, path, field, deps, true);
 
   /// Interned dependency keys per `(entity, field)`: reads add the same
   /// strings to scopes' deps build after build, so they are built once
@@ -287,6 +330,33 @@ class NormalizedCache implements Cache {
   String _internedDep(String entity, String field) =>
       (_depKeys[entity] ??= {})[field] ??= depKey(entity, field);
 
+  /// Interned [elementDepKey]s / [lengthDepKey] per `(entity, field)`
+  /// holding a list, apart from [_depKeys] so scalar reads stay one lookup.
+  final Map<String, Map<String, _ListDepKeys>> _listDepKeys = {};
+
+  _ListDepKeys _listDeps(String entity, String field) =>
+      (_listDepKeys[entity] ??= {})[field] ??= _ListDepKeys(entity, field);
+
+  /// The key a read of the entity field [field] holding [list] records:
+  /// [next] is the path element after it (`null` when the read ends there).
+  String _listDep(
+    String entity,
+    String field,
+    List<Object?> list,
+    Object? next,
+    bool lengthOnly,
+  ) {
+    if (next == null) {
+      return lengthOnly
+          ? _listDeps(entity, field).length
+          : _internedDep(entity, field);
+    }
+    if (next is int && next < list.length && list[next] is! Ref) {
+      return _listDeps(entity, field).element(next);
+    }
+    return _internedDep(entity, field);
+  }
+
   /// Walks [path] (then [last], when given) from the operation root.
   /// Allocation-free: this runs once per generated getter.
   Object? _walk(
@@ -294,6 +364,7 @@ class NormalizedCache implements Cache {
     List<Object> path,
     String? last,
     Set<String>? deps,
+    bool lengthOnly,
   ) {
     var start = 0;
     String entityKey;
@@ -316,9 +387,24 @@ class NormalizedCache implements Cache {
         atEntity = true;
       }
       if (key is String) {
-        if (atEntity && deps != null) deps.add(_internedDep(entityKey, key));
-        if (node is! Map) return missing;
+        if (node is! Map) {
+          if (atEntity && deps != null) deps.add(_internedDep(entityKey, key));
+          return missing;
+        }
         final value = node[key];
+        if (atEntity && deps != null) {
+          if (value is List) {
+            final j = i + 1;
+            final next = j < length
+                ? path[j]
+                : j < end
+                ? last
+                : null;
+            deps.add(_listDep(entityKey, key, value, next, lengthOnly));
+          } else {
+            deps.add(_internedDep(entityKey, key));
+          }
+        }
         // One lookup on a hit; `containsKey` only to tell `null` from absent.
         if (value == null && !node.containsKey(key)) return missing;
         node = value;
@@ -356,6 +442,11 @@ class NormalizedCache implements Cache {
 
     Object? container = _entities.putIfAbsent(entityKey, () => {});
     String? topField;
+    // The list [topField] held before this write (and its length then), and
+    // the index of it the path goes through: which list keys to touch.
+    List<Object?>? topList;
+    var topLength = 0;
+    int? topIndex;
     for (var i = start; i < path.length - 1; i++) {
       final key = path[i];
       final next = path[i + 1];
@@ -363,16 +454,26 @@ class NormalizedCache implements Cache {
         entityKey = container.key;
         container = _entities.putIfAbsent(entityKey, () => {});
         topField = null;
+        topList = null;
+        topIndex = null;
       }
       if (key is String) {
         final map = container as Map<String, Object?>;
-        topField ??= key;
+        if (topField == null) {
+          topField = key;
+          final held = map[key];
+          if (held is List<Object?>) {
+            topList = held;
+            topLength = held.length;
+          }
+        }
         container = map[key] ??= next is int
             ? <Object?>[]
             : <String, Object?>{};
       } else {
         final list = container as List<Object?>;
         final index = key as int;
+        if (identical(list, topList)) topIndex = index;
         while (list.length <= index) {
           list.add(null);
         }
@@ -385,22 +486,49 @@ class NormalizedCache implements Cache {
       entityKey = container.key;
       container = _entities.putIfAbsent(entityKey, () => {});
       topField = null;
+      topList = null;
+      topIndex = null;
     }
 
     final last = path.last;
     if (last is String) {
       final map = container as Map<String, Object?>;
-      map[last] = _normalize(map[last], value, touched);
-      topField ??= last;
+      final previous = map[last];
+      if (topField != null) {
+        map[last] = _normalize(previous, value, touched);
+      } else {
+        // A field of the entity itself.
+        topField = last;
+        if (previous is List<Object?> && value is List<Object?>) {
+          map[last] = _mergeList(entityKey, last, previous, value, touched);
+        } else {
+          if (previous is List<Object?>) {
+            _touchList(entityKey, last, previous, 0, touched);
+          }
+          map[last] = _normalize(previous, value, touched);
+        }
+      }
     } else {
       final list = container as List<Object?>;
       final index = last as int;
       while (list.length <= index) {
         list.add(null);
       }
-      list[index] = _normalize(list[index], value, touched);
+      final previous = list[index];
+      list[index] = _normalize(previous, value, touched);
+      if (identical(list, topList)) {
+        // Readers of a ref element depend on the whole field.
+        topIndex = previous is Ref ? null : index;
+      }
     }
     if (topField != null) touched.add(depKey(entityKey, topField));
+    if (topList != null) {
+      final keys = _listDeps(entityKey, topField!);
+      if (topList.length != topLength) touched.add(keys.length);
+      if (topIndex != null && topIndex < topLength) {
+        touched.add(keys.element(topIndex));
+      }
+    }
     _markChanged(entityKey);
     _emit(touched);
     return touched;
@@ -423,20 +551,30 @@ class NormalizedCache implements Cache {
 
     Object? container = _entities[entityKey];
     String? topField;
+    // As in [write]: the list [topField] holds and the index walked through.
+    List<Object?>? topList;
+    int? topIndex;
     for (var i = start; i < path.length - 1; i++) {
       final key = path[i];
       if (container is Ref) {
         entityKey = container.key;
         container = _entities[entityKey];
         topField = null;
+        topList = null;
+        topIndex = null;
       }
       if (key is String) {
         if (container is! Map) return touched;
-        topField ??= key;
-        container = container[key];
+        final held = container[key];
+        if (topField == null) {
+          topField = key;
+          if (held is List<Object?>) topList = held;
+        }
+        container = held;
       } else {
         final index = key as int;
         if (container is! List || index >= container.length) return touched;
+        if (identical(container, topList)) topIndex = index;
         container = container[index];
       }
     }
@@ -444,19 +582,35 @@ class NormalizedCache implements Cache {
       entityKey = container.key;
       container = _entities[entityKey];
       topField = null;
+      topList = null;
+      topIndex = null;
     }
 
     final last = path.last;
     if (last is String) {
       if (container is! Map || !container.containsKey(last)) return touched;
-      container.remove(last);
-      topField ??= last;
+      final previous = container.remove(last);
+      if (topField == null) {
+        topField = last;
+        if (previous is List<Object?>) {
+          _touchList(entityKey, last, previous, 0, touched);
+        }
+      }
     } else {
       final index = last as int;
-      if (container is! List || index >= container.length) return touched;
+      if (container is! List<Object?> || index >= container.length) {
+        return touched;
+      }
+      if (identical(container, topList)) {
+        // The elements from [index] on shift: all of them changed.
+        _touchList(entityKey, topField!, container, index, touched);
+      }
       container.removeAt(index);
     }
     if (topField != null) touched.add(depKey(entityKey, topField));
+    if (topIndex != null) {
+      touched.add(_listDeps(entityKey, topField!).element(topIndex));
+    }
     _markChanged(entityKey);
     _emit(touched);
     return touched;
@@ -486,7 +640,13 @@ class NormalizedCache implements Cache {
   }
 
   @override
-  DateTime? fetchedAt(String depKey) => _fetchedAt[depKey];
+  DateTime? fetchedAt(String depKey) {
+    final at = _fetchedAt[depKey];
+    // A field alias never ends with `]`: an element/length key, stamped
+    // with the field that holds the list.
+    if (at != null || !depKey.endsWith(']')) return at;
+    return _fetchedAt[depKey.substring(0, depKey.lastIndexOf('['))];
+  }
 
   void _mergeEntity(
     String key,
@@ -499,9 +659,18 @@ class NormalizedCache implements Cache {
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
       final previous = entity[e.key];
+      final incoming = e.value;
       final outer = _changed;
       _changed = false;
-      final value = _normalize(previous, e.value, touched);
+      final Object? value;
+      if (previous is List<Object?> && incoming is List<Object?>) {
+        value = _mergeList(key, e.key, previous, incoming, touched);
+      } else {
+        value = _normalize(previous, incoming, touched);
+        if (previous is List<Object?> && _changed) {
+          _touchList(key, e.key, previous, 0, touched);
+        }
+      }
       // Inline containers are merged in place: `_normalize` tells whether
       // anything under this field actually differs (an identical `pageInfo`
       // or `stats` in a refetch must not rebuild its readers).
@@ -560,6 +729,56 @@ class NormalizedCache implements Cache {
     return incoming;
   }
 
+  /// [_normalize] of the list [incoming] into [old], the list the entity
+  /// field [field] of [entity] holds, element by element: also touches the
+  /// [elementDepKey] of each inline element that changed and, when the
+  /// length changes, the [lengthDepKey] (see [_touchList]).
+  List<Object?> _mergeList(
+    String entity,
+    String field,
+    List<Object?> old,
+    List<Object?> incoming,
+    Set<String> touched,
+  ) {
+    final outer = _changed;
+    final resized = old.length != incoming.length;
+    var changed = resized;
+    _ListDepKeys? keys;
+    final merged = List<Object?>.filled(incoming.length, null);
+    for (var i = 0; i < incoming.length; i++) {
+      final previous = i < old.length ? old[i] : null;
+      _changed = false;
+      merged[i] = _normalize(previous, incoming[i], touched);
+      if (!_changed) continue;
+      changed = true;
+      // Readers of a new index or a ref element depend on the whole field.
+      if (i < old.length && previous is! Ref) {
+        touched.add((keys ??= _listDeps(entity, field)).element(i));
+      }
+    }
+    if (resized) _touchList(entity, field, old, incoming.length, touched);
+    _changed = outer || changed;
+    return merged;
+  }
+
+  /// Touches what the readers of [old], the list the entity field [field] of
+  /// [entity] held, recorded from index [from] on, now that it changed from
+  /// there or was replaced: its [lengthDepKey] and the [elementDepKey] of
+  /// each inline element (readers of a [Ref] element recorded [depKey]).
+  void _touchList(
+    String entity,
+    String field,
+    List<Object?> old,
+    int from,
+    Set<String> touched,
+  ) {
+    final keys = _listDeps(entity, field);
+    touched.add(keys.length);
+    for (var i = from; i < old.length; i++) {
+      if (old[i] is! Ref) touched.add(keys.element(i));
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Eviction / GC
   // ---------------------------------------------------------------------------
@@ -571,11 +790,14 @@ class NormalizedCache implements Cache {
     _depKeys.remove(key);
     if (removed == null) return touched;
     _markRemoved(key);
-    for (final field in removed.keys) {
-      final dep = depKey(key, field);
+    for (final e in removed.entries) {
+      final dep = depKey(key, e.key);
       touched.add(dep);
       _fetchedAt.remove(dep);
+      final value = e.value;
+      if (value is List<Object?>) _touchList(key, e.key, value, 0, touched);
     }
+    _listDepKeys.remove(key);
     final ref = Ref(key);
     for (final e in _entities.entries) {
       var scrubbed = false;
@@ -585,9 +807,19 @@ class NormalizedCache implements Cache {
           e.value.remove(field);
           touched.add(depKey(e.key, field));
           scrubbed = true;
-        } else if (_scrub(value, ref)) {
+        } else {
+          final length = value is List ? value.length : 0;
+          if (!_scrub(value, ref)) continue;
           touched.add(depKey(e.key, field));
           scrubbed = true;
+          if (length > 0) {
+            // Elements shifted or changed inside: all of them, to be safe.
+            final keys = _listDeps(e.key, field);
+            touched.add(keys.length);
+            for (var i = 0; i < length; i++) {
+              touched.add(keys.element(i));
+            }
+          }
         }
       }
       if (scrubbed) _markChanged(e.key);
@@ -642,6 +874,8 @@ class NormalizedCache implements Cache {
     for (final key in dead) {
       final removed = _entities.remove(key)!;
       _depKeys.remove(key);
+      // No live reader: the list keys are not reported (see [Cache.gc]).
+      _listDepKeys.remove(key);
       _markRemoved(key);
       for (final field in removed.keys) {
         final dep = depKey(key, field);
@@ -794,17 +1028,40 @@ class NormalizedCache implements Cache {
 
   @override
   void clear() {
-    final touched = <String>{
-      for (final e in _entities.entries)
-        for (final field in e.value.keys) depKey(e.key, field),
-    };
+    final touched = <String>{};
+    for (final e in _entities.entries) {
+      for (final f in e.value.entries) {
+        touched.add(depKey(e.key, f.key));
+        final value = f.value;
+        if (value is List<Object?>) _touchList(e.key, f.key, value, 0, touched);
+      }
+    }
     _entities.clear();
     _depKeys.clear();
+    _listDepKeys.clear();
     _fetchedAt.clear();
     _changedAt.clear();
     _removedAt.clear();
     _fullSince = _version + 1;
     _dirty = true;
     _emit(touched);
+  }
+}
+
+/// The interned [lengthDepKey] and [elementDepKey]s of one entity field
+/// holding a list (see `NormalizedCache._listDepKeys`).
+final class _ListDepKeys {
+  _ListDepKeys(this.entity, this.field) : length = lengthDepKey(entity, field);
+
+  final String entity;
+  final String field;
+  final String length;
+  final List<String?> _elements = [];
+
+  String element(int index) {
+    while (_elements.length <= index) {
+      _elements.add(null);
+    }
+    return _elements[index] ??= elementDepKey(entity, field, index);
   }
 }
