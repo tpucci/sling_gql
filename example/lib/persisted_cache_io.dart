@@ -21,6 +21,10 @@ Future<Cache> openCache() async {
       final persistence = await SqflitePersistence.open(
         _path,
         schema: slingSchema,
+        // The network log's CacheStats asks `changesSince` the version it
+        // opened at: a compacted cache would answer with full deltas. The
+        // example's cache is small; an app without such a reader keeps it.
+        compact: false,
       );
       debugPrint('sling_gql_sqflite: ${persistence.loaded}');
       return persistence.cache;
