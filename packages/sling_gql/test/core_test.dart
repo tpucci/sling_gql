@@ -118,10 +118,12 @@ extension on SlingClient<Query> {
 
 /// What the generator emits so apps never name roots by hand: pass to
 /// `SlingScope(schema: slingSchema, ...)` and `MutationBuilder` resolves its
-/// root without a `root:` argument.
+/// root without a `root:` argument. `hash` fingerprints the generated file
+/// (persistence adapters drop a store written under another one).
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
+  hash: 'core-test',
 );
 
 /// What the generator emits for typed, non-fetching cache access: one

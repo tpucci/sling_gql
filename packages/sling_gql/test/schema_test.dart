@@ -62,6 +62,17 @@ void main() {
     expect(slingSchema.normalization.keyField, 'id');
   });
 
+  test(
+    'SlingSchema.hash is the generated code fingerprint, null by default',
+    () {
+      expect(
+        const SlingSchema<Query, Mutation>(query: Query.root, hash: 'abc').hash,
+        'abc',
+      );
+      expect(_uuidSchema.hash, isNull);
+    },
+  );
+
   test('a cache normalizing on another key field fails an assert', () {
     expect(
       () => SlingClient<Query>(

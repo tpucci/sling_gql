@@ -36,12 +36,14 @@ typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
 /// Also carries the facts the runtime must agree on with the generated code:
 /// [keyField] (`--key-field`). `SlingClient(schema: slingSchema)` builds its
 /// default cache from it, so the two never have to be kept in sync by hand.
+/// [hash] identifies the generated code, for stores that outlive it.
 class SlingSchema<Q extends Accessor, M extends Accessor> {
   const SlingSchema({
     required this.query,
     this.mutation,
     this.subscription,
     this.keyField = 'id',
+    this.hash,
   });
 
   final RootFactory<Q> query;
@@ -60,6 +62,16 @@ class SlingSchema<Q extends Accessor, M extends Accessor> {
   /// The generated `Subscription.root`, when the schema has a subscription
   /// type.
   final RootFactory<Accessor>? subscription;
+
+  /// Fingerprint of the generated code this schema belongs to (the
+  /// generator emits a 64-bit FNV-1a of its output, which covers the
+  /// introspection it read, `--key-field`, `--scalar` mappings and the
+  /// generator's own version); `null` for a hand-written schema.
+  ///
+  /// The runtime never reads it. A persisted cache stores it and drops its
+  /// copy when the app starts with another hash: cache aliases, keyed types
+  /// and lookups may have changed with the code.
+  final String? hash;
 }
 
 /// True when asserts are enabled (debug builds and tests).
