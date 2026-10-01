@@ -56,7 +56,7 @@ query {
 | Subscriptions (`client.subscribe((s) => s.launchStatusChanged?..status)`, `SubscriptionBuilder`) | ✅ GraphQL over SSE by default, `subscriptionTransport:` to swap; events normalized into the same entities |
 | List rules (`ListRule`: "`launches(filter:)` holds a launch iff its status matches") | ✅ cached lists gain/lose entities on mutations, subscription events and setters; query responses only remove |
 | Fetch policies (`cacheAndNetwork`, `networkOnly`), `maxAge` stale-while-revalidate | ✅ per widget or client-wide, `state.isStale`, soft `revalidate()` |
-| Persistence adapters | ❌ not in this PoC (hooks exist: `snapshot`, `onChange`, `changesSince`) |
+| Persistence (`SqflitePersistence.open(path, schema: slingSchema)`) | ✅ `packages/sling_gql_sqflite`: SQLite write-behind copy saved as `changesSince` deltas, bounded by age and entity count, wiped on a new `slingSchema.hash` |
 | Unions / interfaces (`hit.asLaunch`, `hit.when(launch: …, rocket: …)`) | ✅ inline fragments, every branch recorded on the skeleton; example Search tab |
 | `flutter_hooks` (`useSlingQuery`, `useSlingMutation`, `useSlingSubscription`) | ✅ `packages/sling_gql_hooks`, same scopes as the builders |
 
@@ -68,6 +68,7 @@ packages/sling_gql_gen/  CLI: introspection JSON → Dart accessor classes
 packages/sling_gql_test/ test helpers: in-memory GraphQL server, pumpUntilSettled
 packages/sling_gql_hooks/ flutter_hooks adapter: useSlingQuery, useSlingMutation, useSlingSubscription
 packages/sling_gql_link/ gql_link adapter: a Link chain as the client's transport
+packages/sling_gql_sqflite/ sqflite adapter: the cache persisted in SQLite
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
 example/                 Flutter app (iOS + web) talking to the mock API
 ```
@@ -97,7 +98,8 @@ The packages are on pub.dev:
 [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator),
 [`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers),
 [`sling_gql_hooks`](https://pub.dev/packages/sling_gql_hooks) (flutter_hooks adapter) and
-[`sling_gql_link`](https://pub.dev/packages/sling_gql_link) (gql_link adapter).
+[`sling_gql_link`](https://pub.dev/packages/sling_gql_link) (gql_link adapter);
+`sling_gql_sqflite` (SQLite persistence) is not published yet.
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

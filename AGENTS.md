@@ -1,7 +1,7 @@
 # AGENTS.md — sling_gql
 
 GQty-style GraphQL client for Flutter, **proof of concept** (queries,
-normalized cache, mutations, subscriptions over SSE).
+normalized cache, mutations, subscriptions over SSE, SQLite persistence).
 Read `README.md` first for the user-facing picture; this file is for working
 on the code.
 
@@ -31,13 +31,13 @@ on the code.
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
   pass before committing content.
-- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the five
+- **Pub workspace + melos 7.** The root `pubspec.yaml` lists the six
   packages (`workspace:`), each has `resolution: workspace`; only the root
   `pubspec.lock` exists (per-package lockfiles are gitignored). Run
   `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
   config and scripts live in the root `pubspec.yaml` under `melos:`.
   Gates: `melos run test` (all four: runtime + test helpers + hooks + link
-  adapter, generator, example with the mock server auto-started by
+  and sqflite adapters, generator, example with the mock server auto-started by
   `scripts/with-mock-api.mjs`, website build), or `test:runtime` / `test:gen` / `test:example` /
   `test:website` individually; `melos run analyze`, `melos run format`,
   `melos run generate`. Add `--no-select` when running non-interactively.
@@ -64,10 +64,29 @@ on the code.
     `HttpLinkHeaders`, `LinkException` → `SlingLinkException`). The only
     place `gql`/`gql_link` are allowed. Tests: `flutter test` (fake links +
     `MockGraphQLServer`, `HttpLink` on a `MockClient`).
+  - `packages/sling_gql_sqflite` — SQLite persistence (Flutter package;
+    `sqflite` + `sqflite_common`, the only place they are allowed).
+    `SqflitePersistence.open(path, schema:)` reads the rows, prunes them
+    (`load.dart`, pure so `hydrateInIsolate` can `compute` it: root fields
+    past `maxAge`, the oldest over `maxEntities`, unreachable entities —
+    the `gc` set, computed on the JSON), builds the `Cache` before the
+    client exists and listens to `onChange`; saves are
+    `changesSince(savedVersion)` deltas (debounce / `maxWait` /
+    lifecycle / `flush()`), one transaction each, chained. Rows: one per
+    entity, one per `ROOT_QUERY` field (the touched `ROOT_QUERY.<alias>`
+    keys say which; `ROOT_MUTATION`/`ROOT_SUBSCRIPTION` never stored). A
+    `sling_meta` mismatch (format version, key field, `slingSchema.hash`)
+    wipes the store. Bump `sqfliteFormatVersion` when the tables change.
+    Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
+    files; `tester.runAsync` in `testWidgets`); `benchmark/` is run by
+    hand (`flutter test benchmark/persistence_bench_test.dart`).
   - `example` — Flutter app, **iOS and web** (no other platforms). On the web
-    `lib/in_browser_api.dart` (conditional import, the only platform switch)
-    swaps the `http.Client` for one answering from the in-page mock API, so
-    the site's "Try it live" page needs no server. `melos run build:web`
+    `lib/in_browser_api.dart` (conditional import) swaps the `http.Client`
+    for one answering from the in-page mock API, so the site's "Try it
+    live" page needs no server; `lib/persisted_cache.dart` (the other
+    platform switch) opens the cache from SQLite (`sling_gql_sqflite`) on
+    iOS and keeps it in memory on the web. The widget tests build their own
+    client and never call `openCache()`, so no state survives a run. `melos run build:web`
     (`scripts/build-web-demo.mjs`) bundles the mock API, runs `flutter build
     web --base-href /sling_gql/demo/` and copies it to `website/public/demo/`
     (gitignored; `website.yml` does it before `astro build`). Keep
@@ -83,7 +102,7 @@ on the code.
     same build starts normally (`/demo/`, `?demo=`, the Try-it iframe).
 - **Commit messages are Conventional Commits** -- `melos version` derives
   bumps and changelogs from them. Scope by package or area:
-  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `feat(sling_gql_link): ...`, `docs(website): ...`,
+  `feat(sling_gql): ...`, `fix(sling_gql_gen): ...`, `feat(sling_gql_test): ...`, `feat(sling_gql_link): ...`, `feat(sling_gql_sqflite): ...`, `docs(website): ...`,
   `chore(repo): ...`, `test(example): ...`. Only commits touching a package's
   files bump that package; `feat` -> minor, `fix`/`perf`/`refactor` -> patch,
   `BREAKING CHANGE:` footer or `!` -> major — but below 1.0 melos shifts
@@ -91,7 +110,7 @@ on the code.
   release), and a package bumped only because a dependency moved gets a
   `+1` build bump (`sling_gql_test` 0.1.1 -> 0.1.1+1).
   Never hand-edit versions or `CHANGELOG.md` files.
-- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`, `sling_gql_link`; MIT; each with its own
+- **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`, `sling_gql_link`, `sling_gql_sqflite`; MIT; each with its own
   `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
   independent. Release from a clean, up-to-date `main`:
 
@@ -105,7 +124,8 @@ on the code.
   tag matches that package's `pubspec.yaml`, and publishes via pub.dev
   automated publishing (OIDC; pub.dev tag patterns `sling_gql-v{{version}}` /
   `sling_gql_gen-v{{version}}` / `sling_gql_test-v{{version}}` /
-  `sling_gql_hooks-v{{version}}` / `sling_gql_link-v{{version}}`, no secrets;
+  `sling_gql_hooks-v{{version}}` / `sling_gql_link-v{{version}}` /
+  `sling_gql_sqflite-v{{version}}`, no secrets;
   the pattern must be enabled on pub.dev for each package). Manual escape hatch:
   `melos version <package> x.y.z` (give the exact version: below 1.0 melos maps
   `patch` to a `+build` bump). The `<pkg>-v0.1.1` tags are the baseline melos
@@ -114,7 +134,9 @@ on the code.
   publishing on an existing package: publish its first version by hand
   (`dart pub publish` in the package), enable its tag pattern on the package's
   pub.dev admin page, then tag that commit `<pkg>-vX.Y.Z` as its melos
-  baseline (`sling_gql_hooks` and `sling_gql_link` went this way at 0.1.0). Code must be
+  baseline (`sling_gql_hooks` and `sling_gql_link` went this way at 0.1.0;
+  `sling_gql_sqflite` 0.1.0 is next, and needs the `sling_gql` release that
+  has `SlingSchema.hash` first). Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
@@ -266,7 +288,11 @@ and likewise the `Subscription` root with `extension SlingSubscriptions`
 providing `client.subscribe(...)`; `slingSchema` carries all three roots and
 the `--key-field`, so `SlingClient(schema: slingSchema)` needs no other wiring
 (its default cache normalizes on that key field; `SlingScope` falls back to
-`client.schema` for its roots).
+`client.schema` for its roots). It also carries `hash`: `generatedCodeHash`
+(64-bit FNV-1a) of the generated file with the `hash:` argument left out
+(a placeholder), so it moves with the introspection, `--key-field`,
+`--scalar` and the generator's output; the runtime never reads it,
+`sling_gql_sqflite` wipes its store when it changes.
 
 The generator decides which types are *keyed* (have a scalar `--key-field`,
 default `id`) and which fields are *lookups* (single `id` argument returning a
