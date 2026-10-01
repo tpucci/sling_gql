@@ -275,6 +275,86 @@ void main() {
     });
   });
 
+  // #69: a store acknowledging what it saved keeps a big gc from turning
+  // the next save into a rewrite of every entity.
+  group('Cache.compact', () {
+    test('drops the records up to the version; later ones still count', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {
+        'me': user('1', name: 'Ada', friends: ['a', 'b']),
+      });
+      final saved = cache.version;
+      cache.write('query', [const Ref('User:a'), 'name'], 'Al');
+      final middle = cache.version;
+      cache.compact(upTo: saved);
+
+      final delta = cache.changesSince(saved);
+      expect(delta.full, isFalse);
+      expect(delta.changed.keys, ['User:a']);
+      expect(delta.changedFields, isEmpty);
+
+      cache.compact(upTo: middle);
+      expect(cache.changesSince(middle).isEmpty, isTrue);
+      expect(
+        cache.changesSince(saved).full,
+        isTrue,
+        reason: 'records before the compacted version are gone',
+      );
+    });
+
+    test('a gc of more than a thousand entities after a compact: no full '
+        'delta', () {
+      final cache = NormalizedCache();
+      final ids = [for (var i = 0; i < 1100; i++) 'u$i'];
+      cache.writeResponse('query', {'me': user('1', friends: ids)});
+      final stored = json(cache.snapshot);
+      final v = cache.version;
+      cache.compact(upTo: v);
+
+      cache.writeResponse('query', {'me': user('1', friends: const [])});
+      expect(cache.gc(), hasLength(1100));
+
+      final delta = cache.changesSince(v);
+      expect(delta.full, isFalse);
+      expect(delta.removed, hasLength(1100));
+      expect(delta.changed.keys, ['User:1']);
+      delta.applyTo(stored);
+      expect(stored, json(cache.snapshot));
+
+      cache.compact(upTo: delta.version);
+      expect(cache.changesSince(delta.version).isEmpty, isTrue);
+    });
+
+    test('removed root fields: no whole-root copy after a compact', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      final stored = json(cache.snapshot);
+      final v = cache.version;
+      cache.compact(upTo: v);
+      cache.batch(() {
+        for (var i = 0; i < 1100; i++) {
+          cache.write('query', ['f$i'], i);
+          cache.remove('query', ['f$i']);
+        }
+      });
+
+      final delta = cache.changesSince(v);
+      expect(delta.changed, isEmpty);
+      expect(delta.removedFields['ROOT_QUERY'], hasLength(1100));
+      delta.applyTo(stored);
+      expect(stored, json(cache.snapshot));
+    });
+
+    test('a version past the current one compacts what there is', () {
+      final cache = NormalizedCache();
+      cache.writeResponse('query', {'me': user('1', name: 'Ada')});
+      cache.compact(upTo: 99);
+      expect(cache.changesSince(cache.version).isEmpty, isTrue);
+      cache.write('query', ['me', 'name'], 'Grace');
+      expect(cache.changesSince(1).changed.keys, ['User:1']);
+    });
+  });
+
   // #68: a root holds one field per query; copying it whole on every change
   // made a save cost the size of the session.
   group('Cache.changesSince roots field by field', () {

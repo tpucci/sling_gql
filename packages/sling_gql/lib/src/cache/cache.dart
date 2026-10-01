@@ -102,8 +102,8 @@ final class CacheDelta {
 
   /// The delta replaces the whole store: drop every stored entity, then
   /// write [changed] (which is then every entity). Happens after
-  /// [Cache.clear], or when the requested version is older than the
-  /// removals the cache still remembers.
+  /// [Cache.clear], or when the requested version is older than what the
+  /// cache still remembers ([Cache.compact]ed away, or forgotten removals).
   final bool full;
 
   bool get isEmpty =>
@@ -271,6 +271,20 @@ abstract class Cache {
   /// of the fields that changed, see [CacheDelta.changedFields]). Store it,
   /// then ask again from [CacheDelta.version].
   CacheDelta changesSince(int version);
+
+  /// Forgets the change records up to [upTo], a [version] the persisted
+  /// copy holds (the [CacheDelta.version] just stored): the removals and
+  /// per-entity stamps at or before it are dropped, so they are not
+  /// scanned again by [changesSince]. A cache that was never compacted
+  /// forgets its removals once they pass a thousand (and the entity count,
+  /// e.g. after a large [gc]) and answers older versions with a
+  /// [CacheDelta.full] delta (a store rewrites every entity); once
+  /// compacted, only a far larger pile (a store that stopped saving) is.
+  ///
+  /// Afterwards [changesSince] a version older than [upTo] answers with a
+  /// full delta: call it with the oldest version any copy still needs (with
+  /// one store, the one it just saved).
+  void compact({required int upTo});
 
   /// JSON-able deep copy of the whole store (refs as `{"__ref": key}`).
   /// Entities are merged in place by later writes, so it is a copy, not a
@@ -1019,8 +1033,10 @@ class NormalizedCache implements Cache {
       _version++;
       // Tombstones outnumbering the entities: forget them, and answer older
       // versions with a full delta instead (bounded memory under churn).
-      if (_removedAt.length > _maxTombstones &&
-          _removedAt.length > _entities.length) {
+      // Once a store [compact]s, it prunes them at every save: only a much
+      // larger pile (a store that stopped saving) is forgotten (#69).
+      final limit = _compacted ? _maxTombstonesCompacted : _maxTombstones;
+      if (_removedAt.length > limit && _removedAt.length > _entities.length) {
         _removedAt.clear();
         _fullSince = _version;
       }
@@ -1028,8 +1044,7 @@ class NormalizedCache implements Cache {
       for (final e in _fieldChangedAt.entries) {
         final root = _entities[e.key];
         final stamps = e.value;
-        if (stamps.length > _maxTombstones &&
-            stamps.length > 2 * (root?.length ?? 0)) {
+        if (stamps.length > limit && stamps.length > 2 * (root?.length ?? 0)) {
           stamps.removeWhere(
             (field, _) => !(root?.containsKey(field) ?? false),
           );
@@ -1041,6 +1056,10 @@ class NormalizedCache implements Cache {
   }
 
   static const _maxTombstones = 1000;
+  static const _maxTombstonesCompacted = 100000;
+
+  /// [compact] was called: a store acknowledges what it saved.
+  bool _compacted = false;
 
   @override
   int get version => _version;
@@ -1098,6 +1117,22 @@ class NormalizedCache implements Cache {
       changedFields: changedFields ?? const {},
       removedFields: removedFields ?? const {},
     );
+  }
+
+  @override
+  void compact({required int upTo}) {
+    _compacted = true;
+    final v = upTo < _version ? upTo : _version;
+    if (v <= 0) return;
+    _changedAt.removeWhere((_, at) => at <= v);
+    _removedAt.removeWhere((_, at) => at <= v);
+    for (final stamps in _fieldChangedAt.values) {
+      stamps.removeWhere((_, at) => at <= v);
+    }
+    _fieldChangedAt.removeWhere((_, stamps) => stamps.isEmpty);
+    // Versions before [v] now get a full delta, which covers these.
+    _fieldsSince.removeWhere((_, since) => since <= v);
+    if (v > _fullSince) _fullSince = v;
   }
 
   @override

@@ -734,6 +734,8 @@ class _BypassCache implements Cache {
   @override
   CacheDelta changesSince(int version) => _inner.changesSince(version);
   @override
+  void compact({required int upTo}) => _inner.compact(upTo: upTo);
+  @override
   Map<String, Object?> get snapshot => _inner.snapshot;
   @override
   void clear() => _inner.clear();
