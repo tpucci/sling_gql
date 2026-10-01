@@ -1,3 +1,7 @@
+## 0.1.4
+
+ - **FEAT**(sling_gql_gen): emit slingSchema.hash. ([96b514dc](https://github.com/tpucci/sling_gql/commit/96b514dc9a86f89cb404b055de04f8c969578b49))
+
 ## 0.1.3
 
  - **FEAT**(sling_gql_gen): slingSchema carries --key-field, emitted without a Mutation type too ([#25](https://github.com/tpucci/sling_gql/issues/25)). ([27ce5a4d](https://github.com/tpucci/sling_gql/commit/27ce5a4d16adde9c017bbb7794bdebb09c74e135))

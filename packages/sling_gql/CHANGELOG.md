@@ -1,3 +1,7 @@
+## 0.2.2
+
+ - **FEAT**(sling_gql): SlingSchema.hash, the generated code's fingerprint. ([24fcca36](https://github.com/tpucci/sling_gql/commit/24fcca366a409026837c6f91ed84d2e10e5da67d))
+
 ## 0.2.1
 
  - **REFACTOR**(sling_gql): drop unused selection parameter from Cache.writeResponse ([#27](https://github.com/tpucci/sling_gql/issues/27)). ([a52046cb](https://github.com/tpucci/sling_gql/commit/a52046cb7de7d0e421e4b09d60eb8a4660f85620))

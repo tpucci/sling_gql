@@ -21,7 +21,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  sling_gql: ^0.2.1
+  sling_gql: ^0.2.2
   sqflite: ^2.4.2
   sqflite_common: ^2.5.6
 
@@ -29,5 +29,5 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  sling_gql_test: ^0.1.1+1
+  sling_gql_test: ^0.1.1+2
   sqflite_common_ffi: ^2.4.0
