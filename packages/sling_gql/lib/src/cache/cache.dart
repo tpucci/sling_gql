@@ -215,8 +215,9 @@ abstract class Cache {
   T batch<T>(T Function() body);
 
   /// Fires once per change — a write outside a [batch], or a whole batch —
-  /// with the dependency keys (`entity.field`, see `depKey`) it touched,
-  /// synchronously. Nothing fires when nothing changed (a refetch returning
+  /// with the dependency keys (`entity.field`, see `depKey`, plus
+  /// `entity.field[i]` / `entity.field[length]` for inline lists) it
+  /// touched, synchronously. Nothing fires when nothing changed (a refetch returning
   /// the same data).
   ///
   /// A persistence layer debounces on it and reads [changesSince] rather
