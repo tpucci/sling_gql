@@ -51,13 +51,14 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    them — see [Querying](/sling_gql/guides/querying/#unions-and-interfaces). Same-named
    fields across fragments are printed type-qualified and mapped back before caching.
 
-5. **Fine-grained rebuilds** — mostly done
+5. **Fine-grained rebuilds** — done
 
    Scopes rebuild on `entity.field` intersection instead of root aliases; inline objects
    and lists are compared structurally, so identical responses touch nothing; `SlingRow`
    gives a list row its own dependency set, so a write to one entity rebuilds that row, not
    the list (see [Caching](/sling_gql/guides/caching/#per-row-rebuilds-slingrow)).
-   Remaining: list-index granularity for inline lists.
+   Inline lists notify per element (`entity.field[i]`) and per length
+   (`entity.field[length]`), so a change at one index rebuilds only its readers.
 
 6. **Cache expiry and SWR** — done
 
@@ -82,14 +83,17 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    [Example app](/sling_gql/tooling/example-app/)); the in-app request overlay
    (`SlingRequestOverlay`) and one log line per operation (`logRequests`,
    `client.requests`), each request attributed to the widgets that recorded it (see
-   [Batching and waterfalls](/sling_gql/guides/batching-and-waterfalls/)). Next:
-   `flutter_hooks` adapter (`useSlingQuery`).
+   [Batching and waterfalls](/sling_gql/guides/batching-and-waterfalls/)); the
+   `flutter_hooks` adapter `sling_gql_hooks` (`useSlingQuery`, `useSlingMutation`,
+   `useSlingSubscription` — see [Hooks](/sling_gql/guides/hooks/)).
 
-8. **Transport options** — hook done
+8. **Transport options** — done
 
    `SlingClient(transport:)` is the single interception point (see
-   [Transport](/sling_gql/guides/transport/)). Left: a `gql_link` adapter for auth headers, retries and persisted queries, without changing
-   the runtime's `_post` contract.
+   [Transport](/sling_gql/guides/transport/)). `sling_gql_link` turns a `gql_link` chain
+   (auth headers, retries, persisted queries) into that transport and the subscription
+   transport, so the runtime stays `http`-only (see
+   [Transport](/sling_gql/guides/transport/#gql_link)).
 
 9. **Live docs** — in progress
 
