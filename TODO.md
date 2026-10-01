@@ -10,7 +10,7 @@ while building the normalized cache and mutations, and the roadmap (website
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
 ~~transport hook~~ · ~~fine-grained rebuilds~~ (#54) ·
 ~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · ~~dev experience~~ (#46, #47) ·
-~~`gql_link`~~ (#48) · persistence #49.
+~~`gql_link`~~ (#48) · ~~persistence~~ (#49, SQLite).
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
@@ -25,8 +25,8 @@ guides (#60). Demos share one Flutter engine (#67).
 Automatic `gc()` (#22) done. Request overlay + log line (#46) done. Tour of the
 guides and the example (2026-09-29): #61–#66 done. 2026-09-30: #21 (coalesced
 `onChange`, `changesSince` deltas), #47 (`sling_gql_hooks`), #48
-(`sling_gql_link`), #54 (per-element inline list deps) done; suggested next
-pick: #49 (persistence adapters, on #21).
+(`sling_gql_link`), #54 (per-element inline list deps) done. 2026-10-01: #49
+(`sling_gql_sqflite`) done; open follow-ups #68, #69.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -48,10 +48,15 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## Roadmap items not covered above
 
-49. **Runtime — Persistence adapters** (`sling_gql_hive`, `sling_gql_sqlite`,
-    file) on `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`, with
-    `Cache.batch` / `version` / `changesSince` from #21 (debounce on
-    `onChange`, save `CacheDelta`s). Separate packages, never in core.
+68. **Perf — `changesSince` copies the whole `ROOT_QUERY`** whenever one root
+    field changed (0.8 ms at 10k entities); `sling_gql_sqflite` encodes only
+    the dirty fields. A per-field root delta (or lazy copies) would make a
+    save cost only what changed. Also: hydrate copies decoded maps a second
+    time (an owning internal hydrate would save ~half of the 57 ms at 10k).
+69. **Perf — Full-delta spike**: after `clear()` or once the cache forgets
+    its tombstones (a `gc` of >1000 entities), the next save rewrites every
+    entity (180 ms at 10k). A `Cache.compact(upTo:)` acknowledging a saved
+    version would let the tombstone set shrink without forcing a full delta.
 50. **Runtime — Type policies**: custom merge per field and connection
     merging (Apollo `relayStylePagination`-style) so pages can live in one
     growing cache list instead of one entry per cursor (pairs with #5).
@@ -133,6 +138,8 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 47. DX — `packages/sling_gql_hooks`: `useSlingQuery` / `useSlingMutation` / `useSlingSubscription` on `createScope` / `mutateWith` / `subscribeWith`, returning the runtime's `QueryState` / `MutationState` / `SubscriptionState` (now publicly constructible); guides/hooks. Not on pub.dev yet (needs `sling_gql` 0.3.0 first).
 48. Runtime — `packages/sling_gql_link`: `linkTransport` / `linkSubscriptionTransport` turn a `gql_link` chain into the client's transports, `SlingLinkException` (HTTP status kept for unparsable error pages); gql_link section in guides/transport; runtime stays `http`-only. Not on pub.dev yet.
 54. Perf — Inline lists notify per element: reads through an inline element of an entity-field list record `entity.field[i]`, `Accessor.list` of inline objects `entity.field[length]` (`Cache.readListField`); writes touch changed elements + length on resize; keyed/scalar lists unchanged (`elementDepKey`/`lengthDepKey` in `internal.dart`; ~4–6% on the warm read bench).
+
+49. Runtime — `packages/sling_gql_sqflite`: `SqflitePersistence.open(path, schema:)` restores the cache before the client starts (optionally in an isolate), saves `changesSince` deltas in one transaction (debounced 1 s / max 5 s, flushed on app pause, serialized, retried after failure), one row per entity and per `ROOT_QUERY` field with `updated_at`; bounds `maxAge` 7 d + `maxEntities` 10k pruned on the stored JSON at open; wipes on format / key field / `slingSchema.hash` mismatch (new generated FNV fingerprint of the generated code). Example persists on iOS, web stays in memory. Guide: guides/persistence. Hive/file adapters dropped until needed.
 
 ## Explicitly not planned
 

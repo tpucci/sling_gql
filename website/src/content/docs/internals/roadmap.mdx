@@ -104,6 +104,14 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    mutations guides each run a small demo next to its code; the code shown is the demo's
    source. Next: demos for the other guides.
 
+10. **Persistence** — done (SQLite)
+
+    `sling_gql_sqflite` keeps a durable copy of the normalized cache: deltas saved in the
+    background (`changesSince`, debounced, flushed when the app pauses), restored before the
+    client starts, bounded by age and entity count, wiped when the generated schema's `hash`
+    changes — see [Persistence](/sling_gql/guides/persistence/). Hive and file adapters are
+    not planned until someone needs them.
+
 </Steps>
 
 ## Explicitly not planned
