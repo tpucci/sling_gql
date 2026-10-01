@@ -97,9 +97,9 @@ The packages are on pub.dev:
 [`sling_gql`](https://pub.dev/packages/sling_gql) (runtime),
 [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen) (generator),
 [`sling_gql_test`](https://pub.dev/packages/sling_gql_test) (test helpers),
-[`sling_gql_hooks`](https://pub.dev/packages/sling_gql_hooks) (flutter_hooks adapter) and
-[`sling_gql_link`](https://pub.dev/packages/sling_gql_link) (gql_link adapter);
-`sling_gql_sqflite` (SQLite persistence) is not published yet.
+[`sling_gql_hooks`](https://pub.dev/packages/sling_gql_hooks) (flutter_hooks adapter),
+[`sling_gql_link`](https://pub.dev/packages/sling_gql_link) (gql_link adapter) and
+[`sling_gql_sqflite`](https://pub.dev/packages/sling_gql_sqflite) (SQLite persistence).
 
 The example is a two-tab Cupertino app (dark space theme): a **Launches** tab
 with cursor pagination and a launch-status segment filter, and a **Me** tab

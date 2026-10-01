@@ -134,12 +134,11 @@ on the code.
   publishing on an existing package: publish its first version by hand
   (`dart pub publish` in the package), enable its tag pattern on the package's
   pub.dev admin page, then tag that commit `<pkg>-vX.Y.Z` as its melos
-  baseline (`sling_gql_hooks` and `sling_gql_link` went this way at 0.1.0;
-  `sling_gql_sqflite` 0.1.0 is next, and needs the `sling_gql` release that
-  has `SlingSchema.hash` first: its `sling_gql: ^0.2.1` constraint must name
-  that release before the manual publish — `melos version` raises
-  dependents' constraints when it bumps `sling_gql`; check the pubspec, the
-  in-workspace dry run resolves the local path and will not catch it). Code must be
+  baseline (`sling_gql_hooks`, `sling_gql_link` and `sling_gql_sqflite` went
+  this way at 0.1.0). A new package that needs an unreleased runtime API must
+  wait for that `sling_gql` release and name it in its constraint (`melos
+  version` raises it; the in-workspace dry run resolves the local path and
+  will not catch a stale one). Code must be
   `dart format`ed (pub.dev scores it; `melos run format` checks).
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
