@@ -1,3 +1,7 @@
+## 0.1.3
+
+ - **FEAT**(sling_gql_gen): slingSchema carries --key-field, emitted without a Mutation type too ([#25](https://github.com/tpucci/sling_gql/issues/25)). ([27ce5a4d](https://github.com/tpucci/sling_gql/commit/27ce5a4d16adde9c017bbb7794bdebb09c74e135))
+
 ## 0.1.2
 
  - **FEAT**(sling_gql_gen): emit unions and interfaces ([#31](https://github.com/tpucci/sling_gql/issues/31)). ([c0553a6d](https://github.com/tpucci/sling_gql/commit/c0553a6d6fd304d82489231c3390b8b4645c3ea2))

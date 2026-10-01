@@ -1,3 +1,7 @@
+## 0.1.1+1
+
+ - Update a dependency to the latest release.
+
 ## 0.1.1
 
  - **FEAT**(sling_gql_test): inline fragments in MockGraphQLServer. ([5009ade1](https://github.com/tpucci/sling_gql/commit/5009ade15e943755d0e427e547cd43242a900df5))
