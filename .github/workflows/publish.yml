@@ -4,10 +4,11 @@ name: Publish to pub.dev
 # a tag publishes that package. pub.dev "Automated publishing" is enabled for
 # tpucci/sling_gql with tag patterns `sling_gql-v{{version}}`,
 # `sling_gql_gen-v{{version}}` and `sling_gql_test-v{{version}}`; auth is the
-# GitHub OIDC token, no secrets. `sling_gql_hooks-v{{version}}` and
-# `sling_gql_link-v{{version}}` are listed below but work only once that
-# package's first version was published by hand and the pattern enabled on its
-# pub.dev admin page (see AGENTS.md "Publishing").
+# GitHub OIDC token, no secrets. `sling_gql_hooks-v{{version}}`,
+# `sling_gql_link-v{{version}}` and `sling_gql_sqflite-v{{version}}` are
+# listed below but work only once that package's first version was published
+# by hand and the pattern enabled on its pub.dev admin page (see AGENTS.md
+# "Publishing").
 #
 # Release flow (see AGENTS.md "Publishing"):
 #   melos version            # conventional commits → bump + CHANGELOG + commit + tags
@@ -21,6 +22,7 @@ on:
       - 'sling_gql_test-v[0-9]+.[0-9]+.[0-9]+*'
       - 'sling_gql_hooks-v[0-9]+.[0-9]+.[0-9]+*'
       - 'sling_gql_link-v[0-9]+.[0-9]+.[0-9]+*'
+      - 'sling_gql_sqflite-v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
   id-token: write # pub.dev OIDC
