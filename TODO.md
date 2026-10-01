@@ -8,9 +8,9 @@ while building the normalized cache and mutations, and the roadmap (website
 `internals/roadmap.mdx`, folded in as items 46+).
 
 Roadmap status: ~~normalized cache~~ · ~~mutations~~ · ~~pagination helper~~ ·
-~~transport hook~~ · fine-grained rebuilds done but #54 ·
-~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · dev experience ~~#46~~, #47 ·
-`gql_link` #48.
+~~transport hook~~ · ~~fine-grained rebuilds~~ (#54) ·
+~~expiry/SWR~~ · ~~subscriptions~~ · ~~unions~~ · ~~dev experience~~ (#46, #47) ·
+~~`gql_link`~~ (#48) · persistence #49.
 
 Status (2026-09-27): P0 and P1 done (#1–#16); fetch policies + SWR (#23,
 #52); example/docs sweep done (#34–#37, #41, #42); pub workspace + melos and
@@ -22,18 +22,19 @@ and key/alias collisions (#26, #33) done. Small-items sweep (2026-09-29):
 live on the website (#58), with a live demo in the batching, fetch-policies
 and mutations guides (#59, 2026-09-29). Demos in four more
 guides (#60). Demos share one Flutter engine (#67).
-Automatic `gc()` (#22) done. Request overlay + log line (#46) done; suggested next pick: #47
-(`flutter_hooks` adapter). Tour of the
-guides and the example (2026-09-29): #61–#66 done.
+Automatic `gc()` (#22) done. Request overlay + log line (#46) done. Tour of the
+guides and the example (2026-09-29): #61–#66 done. 2026-09-30: #21 (coalesced
+`onChange`, `changesSince` deltas), #47 (`sling_gql_hooks`), #48
+(`sling_gql_link`), #54 (per-element inline list deps) done; suggested next
+pick: #49 (persistence adapters, on #21).
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
 **Docs/Repo**.
 
-## P2 — performance follow-ups (measured: ~330 ns/read, ~25× raw maps)
+## P2 — performance follow-ups (measured: ~350 ns/read, ~25× raw maps)
 
-21. **Perf — `snapshot` is a full deep copy** and `onChange` fires per write;
-    persistence adapters will need debouncing and incremental snapshots.
+(empty)
 
 ## P4 — example app & tooling
 
@@ -47,13 +48,10 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## Roadmap items not covered above
 
-47. **DX — `flutter_hooks` adapter** (`useSlingQuery`, `useSlingMutation`) on
-    top of `QueryScope`/`mutateWith`, as a separate small package.
-48. **Runtime — `gql_link` adapter** for auth, retries and persisted queries,
-    implemented as one `transport` (#6) so the runtime stays `http`-only.
 49. **Runtime — Persistence adapters** (`sling_gql_hive`, `sling_gql_sqlite`,
     file) on `Cache.snapshot` / `Cache(initial:)` / `Cache.onChange`, with
-    the debouncing from #21. Separate packages, never in core.
+    `Cache.batch` / `version` / `changesSince` from #21 (debounce on
+    `onChange`, save `CacheDelta`s). Separate packages, never in core.
 50. **Runtime — Type policies**: custom merge per field and connection
     merging (Apollo `relayStylePagination`-style) so pages can live in one
     growing cache list instead of one entry per cursor (pairs with #5).
@@ -61,8 +59,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 51. **Runtime — Weakly held stale entries** (`WeakReference`/`Finalizer`) as
     an eviction mechanism for data past `maxAge` (#23 only revalidates, never
     drops).
-54. **Perf — List-index granularity for inline lists** (today: the whole
-    entity field). Remaining half of "fine-grained rebuilds".
 
 ## Done
 
@@ -132,6 +128,11 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 67. Docs — One Flutter engine for every demo: `LiveApp` demos are views of a shared engine started with `multiViewEnabled` (`web/flutter_bootstrap.js` template hands over to `window.slingDemoHost`; `DemoViews` runs one `View` per host, demo from the initial data). Loaded once per visit, survives `<ClientRouter />` navigations (views removed before a swap, a demo re-mounts in ~30 ms), iframe fallback on failure; the whole app on Try it stays an iframe. The in-page mock API is shared by the demos of a visit.
 
 22. Perf — Automatic GC: `SlingClient(gcAfterWrites: 100)` sweeps once idle after N responses (`null` = manual); `client.gc()` retains entities live scopes/rows read (`Cache.gc(retain:)`), skips while a mutation is in flight; collected entities lose their `fetchedAt` stamps. App pause: `AppLifecycleListener(onPause: client.gc)` recipe in guides/caching.
+
+21. Perf — Coalesced `Cache.onChange` (once per change: `Cache.batch`; the client batches every response, mutation, optimistic callback and subscription event; `gc` reports removals), `Cache.version` + `changesSince(v)` → `CacheDelta` (changed entities only, removed keys, `full` after `clear`/dropped removal record, `applyTo`); `snapshot` ~40% faster (still a deep copy: entities are merged in place). Example CacheStats shows the incremental save.
+47. DX — `packages/sling_gql_hooks`: `useSlingQuery` / `useSlingMutation` / `useSlingSubscription` on `createScope` / `mutateWith` / `subscribeWith`, returning the runtime's `QueryState` / `MutationState` / `SubscriptionState` (now publicly constructible); guides/hooks. Not on pub.dev yet (needs `sling_gql` 0.3.0 first).
+48. Runtime — `packages/sling_gql_link`: `linkTransport` / `linkSubscriptionTransport` turn a `gql_link` chain into the client's transports, `SlingLinkException` (HTTP status kept for unparsable error pages); gql_link section in guides/transport; runtime stays `http`-only. Not on pub.dev yet.
+54. Perf — Inline lists notify per element: reads through an inline element of an entity-field list record `entity.field[i]`, `Accessor.list` of inline objects `entity.field[length]` (`Cache.readListField`); writes touch changed elements + length on resize; keyed/scalar lists unchanged (`elementDepKey`/`lengthDepKey` in `internal.dart`; ~4–6% on the warm read bench).
 
 ## Explicitly not planned
 
