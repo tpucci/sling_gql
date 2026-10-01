@@ -62,11 +62,17 @@ size. That is why the *store* is bounded, not the reads.
 - **Failures.** A failed save rolls back and leaves `savedVersion` where it was; the next
   change (or `flush()`) saves everything since the last stored version. Background failures
   go to `onError` (default `FlutterError.reportError`); `flush()` throws them.
-- **Full deltas.** After `cache.clear()`, or once the cache has forgotten its removals (more
-  than a thousand, and more than live entities — a big `gc`), `changesSince` answers with
-  every entity: that save empties and rewrites `sling_entities` (the "first save" cost
-  below). Root-field rows are still reconciled field by field, so untouched ones keep their
-  age.
+- **Compaction.** After each stored save the persistence calls
+  `cache.compact(upTo: savedVersion)`: the cache drops the change records the database
+  already holds. Later deltas scan only what changed since, and a big `gc` stays a delta —
+  its removals become a few `DELETE … WHERE key IN (…)` statements. Pass `compact: false`
+  when something else reads `cache.changesSince` from older versions (the example's cache
+  screen does): it would get full deltas.
+- **Full deltas.** After `cache.clear()` `changesSince` answers with every entity (few, the
+  cache was just emptied): that save empties and rewrites `sling_entities`. Without
+  compaction a cache also forgets its removals once there are more than a thousand, and more
+  than live entities (a big `gc`), and the next save rewrites every live entity. Root-field
+  rows are still reconciled field by field, so untouched ones keep their age.
 
 ### Rows
 
@@ -154,14 +160,15 @@ entity, launches in pages of 50 per root field):
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
 | open: read the rows | 4 ms | 14 ms |
-| open: decode + prune + hydrate | 5–6 ms | 46–57 ms |
-| the same with `hydrateInIsolate` (off the UI thread) | 6–7 ms | 55–70 ms |
-| `changesSince`: a new root field with 20 changed entities, in a session that wrote every entity | 0.05 ms | 0.1 ms |
+| open: decode + prune + hydrate | 5–6 ms | 46–76 ms |
+| the same with `hydrateInIsolate` (off the UI thread) | 6–8 ms | 55–86 ms |
+| `changesSince`: a new root field with 20 changed entities, in a session that wrote every entity | 0.03 ms | 0.03 ms |
 | save of that delta | 2 ms | 2–3 ms |
-| first save, or a full delta (every entity) | 38 ms | 180–190 ms |
+| save after a `gc` of 60% of the entities | 4–5 ms (6 ms without `compact`) | 37–44 ms (70–92 ms without) |
+| first save, or a full delta (every entity) | 38–47 ms | 165–190 ms |
 
 A save costs what changed: the entities and root fields written, plus a scan of the
-entities the session changed. Opening is mostly `jsonDecode` of the rows (about 30 of the
+entities changed since the previous save. Opening is mostly `jsonDecode` of the rows (about 30 of the
 50 ms at 10 000 entities); the decoded maps become the cache as they are, without a second
 copy. The heap holds about twice the JSON size, which `maxEntities` caps for
 entities (see [Bounds](#bounds)).

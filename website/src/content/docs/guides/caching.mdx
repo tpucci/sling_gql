@@ -361,7 +361,8 @@ and deliberately small:
   `version` to ask from next time. The operation roots (`ROOT_QUERY`, …), which hold one
   field per query, come field by field instead (`changedFields`, `removedFields`), so a
   save does not grow with the session; `delta.applyTo(json)` applies all of it to a stored
-  snapshot. A hydrated cache starts at version 0: what it was
+  snapshot. `cache.compact(upTo: version)` tells the cache a store holds everything up to
+  `version`: it drops those change records (deltas from older versions are then `full`). A hydrated cache starts at version 0: what it was
   hydrated from is the persisted baseline.
 
 So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache
@@ -384,6 +385,7 @@ Future<void> save() async {
   // Roots: merge the changed fields into the stored root, drop the removed ones.
   await store.patchAll(delta.changedFields, delta.removedFields);
   persisted = delta.version; // not reached if a write threw: retried next time
+  cache.compact(upTo: persisted); // the only reader: forget what is stored
 }
 
 Timer? debounce;
@@ -398,8 +400,9 @@ cache.onChange.listen((_) {
 ```
 
 `delta.full` is set when the delta replaces everything: after `cache.clear()`, or when
-`persisted` is older than the removals the cache remembers (it forgets them once there are
-more than a thousand and more than live entities; the delta then carries every entity).
+`persisted` is older than what the cache remembers: compacted away, or — in a cache never
+compacted — removals forgotten once there are more than a thousand and more than live
+entities (the delta then carries every entity).
 A store kept as one JSON map can use `delta.applyTo(json)`.
 
 The copies are real copies: entities are merged in place by later writes (inline objects,
