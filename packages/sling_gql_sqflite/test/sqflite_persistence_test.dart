@@ -54,7 +54,7 @@ void main() {
     bool hydrateInIsolate = false,
     bool flushOnLifecycle = false,
     SlingSchema<Accessor, Accessor> schema = slingSchema,
-    void Function(Object error, StackTrace stack)? onSaveError,
+    void Function(Object error, StackTrace stack)? onError,
     DateTime Function()? now,
   }) async {
     final p = await openStore(
@@ -66,7 +66,7 @@ void main() {
       maxWait: maxWait,
       hydrateInIsolate: hydrateInIsolate,
       flushOnLifecycle: flushOnLifecycle,
-      onSaveError: onSaveError,
+      onError: onError,
       now: now,
     );
     addTearDown(p.close);
@@ -282,16 +282,20 @@ void main() {
       expect(again.cache.entityKeys, isEmpty);
     });
 
-    test('a full delta (forgotten tombstones) rewrites the store', () async {
-      final p = await open(tempDatabasePath());
+    test('a full delta (forgotten tombstones) rewrites the entities; '
+        'untouched root fields keep their age', () async {
+      var clock = DateTime.utc(2026, 1, 1);
+      final t0 = clock.millisecondsSinceEpoch;
+      final p = await open(tempDatabasePath(), now: () => clock);
       final users = [for (var i = 0; i < 1002; i++) user('u$i')];
       server.query['users'] = (Map<String, Object?> args) => users;
       final client = server.client(Query.root, cache: p.cache);
       await client.resolve(
-        (q) => q.users(first: 1)?.map((u) => u.name).toList(),
+        (q) => [q.me?.name, q.users(first: 1)?.map((u) => u.name).toList()],
       );
       await p.flush();
-      expect(await entityRows(p), hasLength(1002));
+      expect(await entityRows(p), hasLength(1003));
+      clock = clock.add(const Duration(days: 1));
 
       // More removals than the cache remembers, and than live entities:
       // `changesSince` answers with every entity, `full`.
@@ -303,8 +307,14 @@ void main() {
       p.cache.gc();
       expect(p.cache.changesSince(p.savedVersion).full, isTrue);
       await p.flush();
-      expect((await entityRows(p)).keys, {'User:u0'});
+      expect((await entityRows(p)).keys, {'User:1', 'User:u0'});
       expect(await storedSnapshot(p), p.cache.snapshot);
+      // `me` was not touched: its row (and its maxAge clock) stays.
+      final ages = {
+        for (final e in (await rootRows(p)).entries) e.key: e.value.$2,
+      };
+      expect(ages.remove('me'), t0);
+      expect(ages.values.single, clock.millisecondsSinceEpoch);
     });
   });
 
@@ -355,11 +365,60 @@ void main() {
       expect(p.savedVersion, 0, reason: 'inactive is not a reason to save');
       binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       await until(() => p.savedVersion == p.cache.version);
-      binding
-        ..handleAppLifecycleStateChanged(AppLifecycleState.paused)
-        ..handleAppLifecycleStateChanged(AppLifecycleState.hidden)
-        ..handleAppLifecycleStateChanged(AppLifecycleState.inactive)
-        ..handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+      final me = p.cache.entity('User:1')!;
+      expect(me['name'], 'User 1');
+      final scope = server.client(Query.root, cache: p.cache).cacheScope;
+      scope.entity('User', '1', User.new)!.name = 'Paused';
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await until(() => p.savedVersion == p.cache.version);
+      scope.entity('User', '1', User.new)!.name = 'Detached';
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.detached);
+      await until(() => p.savedVersion == p.cache.version);
+      expect(((await entityRows(p))['User:1']! as Map)['name'], 'Detached');
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    });
+
+    test('a save asked for while another runs waits for it, then writes only '
+        'what changed since', () async {
+      final p = await open(tempDatabasePath());
+      final client = server.client(Query.root, cache: p.cache);
+      await client.resolve(
+        (q) => q.users(first: 2)?.map((u) => u.name).toList(),
+      );
+      await p.flush();
+      final stored = p.savedVersion;
+      final db = p.database;
+      await db.execute('CREATE TABLE save_log (key TEXT)');
+      await db.execute(
+        'CREATE TRIGGER log_saves AFTER INSERT ON sling_entities '
+        'BEGIN INSERT INTO save_log VALUES (NEW.key); END',
+      );
+      final scope = client.cacheScope;
+      final versions = <int>[];
+
+      // Keeps the database busy, so the first save takes its delta and then
+      // waits for its transaction while the second change happens.
+      final busy = db.rawQuery(
+        'WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c '
+        'WHERE x < 2000000) SELECT count(*) FROM c',
+      );
+      scope.entity('User', '1', User.new)!.name = 'Ada';
+      final first = p.flush().then((_) => versions.add(p.savedVersion));
+      await Future<void>.delayed(Duration.zero);
+      expect(versions, isEmpty, reason: 'the first save is in flight');
+      scope.entity('User', '2', User.new)!.name = 'Bea';
+      final second = p.flush().then((_) => versions.add(p.savedVersion));
+      await Future.wait([busy, first, second]);
+
+      expect(versions, [stored + 1, stored + 2]);
+      // Had the second save started at once, from the stored version, it
+      // would have written User:1 again.
+      expect(
+        [for (final r in await db.query('save_log')) r['key']],
+        ['User:1', 'User:2'],
+      );
+      expect(await storedSnapshot(p), p.cache.snapshot);
     });
 
     test('concurrent saves run one after another; the last one wins', () async {
@@ -384,7 +443,7 @@ void main() {
         final p = await open(
           tempDatabasePath(),
           debounce: const Duration(milliseconds: 50),
-          onSaveError: (e, _) => errors.add(e),
+          onError: (e, _) => errors.add(e),
         );
         final client = server.client(Query.root, cache: p.cache);
         await fetchAll(client);
@@ -398,7 +457,7 @@ void main() {
         await client.resolve((q) => q.user(id: '4')?.name);
         await expectLater(p.flush(), throwsA(isA<DatabaseException>()));
         expect(p.savedVersion, stored);
-        // A background save fails the same way, reported to onSaveError.
+        // A background save fails the same way, reported to onError.
         client.cacheScope.entity('User', '4', User.new)!.name = 'Dora';
         await until(() => errors.isNotEmpty);
         expect(errors, [isA<DatabaseException>()]);
@@ -585,6 +644,28 @@ void main() {
           equals({'key': 'format_version', 'value': '$sqfliteFormatVersion'}),
         ),
       );
+    });
+
+    test('undecodable rows wipe the database, reported to onError', () async {
+      final path = await stored();
+      final db = await databaseFactoryFfi.openDatabase(path);
+      await db.update('sling_root_fields', {
+        'json': '{not json',
+      }, where: "field = 'me'");
+      await db.close();
+      final errors = <Object>[];
+      final again = await open(path, onError: (e, _) => errors.add(e));
+      expect(errors, [isA<FormatException>()]);
+      expect(again.loaded.wiped, isTrue);
+      expect(again.cache.entityKeys, isEmpty);
+      expect(await entityRows(again), isEmpty);
+      expect(await rootRows(again), isEmpty);
+      // And it persists again.
+      await server
+          .client(Query.root, cache: again.cache)
+          .resolve((q) => q.me?.name);
+      await again.flush();
+      expect(await storedSnapshot(again), again.cache.snapshot);
     });
 
     test('the same schema keeps it', () async {

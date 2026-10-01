@@ -159,7 +159,8 @@ bool _reach(
         final json = entityJson[key];
         if (json == null) continue; // dangling: the cache reads it as missing
         if (room != null && reached.length >= room) return false;
-        final entity = (jsonDecode(json) as Map).cast<String, Object?>();
+        // `jsonDecode` maps are `Map<String, dynamic>`: no cast view.
+        final entity = jsonDecode(json) as Map<String, Object?>;
         reached[key] = entity;
         stack.add(entity);
       } else {

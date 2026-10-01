@@ -52,7 +52,7 @@ await persistence.clear();
   after the first one, when the app is hidden, paused or detached
   (`AppLifecycleListener`), and on `flush()`. They run one after another, so
   an older delta never lands after a newer one; a failed save (reported to
-  `onSaveError`) leaves its changes pending for the next one.
+  `onError`) leaves its changes pending for the next one.
 - One row per entity (`sling_entities`: `key`, `json`, `updated_at`), one row
   per `ROOT_QUERY` field (`sling_root_fields`: `field`, `json`, `updated_at`):
   a response rewrites the root fields it touched, not the whole root.
@@ -69,7 +69,9 @@ Applied when the store is opened (`null` disables one):
 - entities no kept root field reaches are dropped (what `cache.gc()` does).
 
 Dropped rows are deleted before `open` returns; `persistence.loaded` reports
-the counts and timings.
+the counts and timings. `maxEntities` counts entities only: inline data under
+root fields is bounded by `maxAge` alone. A store whose rows cannot be decoded
+is wiped at open (reported to `onError`).
 
 ## Invalidation
 
@@ -87,7 +89,7 @@ generator changed — the store is wiped and the app starts cold.
 | `debounce` / `maxWait` | 1 s / 5 s | save timing |
 | `hydrateInIsolate` | `false` | decode and build the cache in a background isolate (`compute`) |
 | `flushOnLifecycle` | `true` | save when the app goes to the background |
-| `onSaveError` | `FlutterError.reportError` | background save failures |
+| `onError` | `FlutterError.reportError` | background save failures, undecodable stores (wiped) |
 
 ## Numbers
 
@@ -96,10 +98,14 @@ macOS, `sqflite_common_ffi`; ~600 B of JSON per entity):
 
 | | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
 | --- | --- | --- |
-| open: read rows | 4 ms | 15 ms |
-| open: decode + prune + hydrate | 8 ms | 63–86 ms |
-| same with `hydrateInIsolate` (off the UI thread) | 10 ms | 76 ms |
-| save of a 20-entity delta | 2 ms | 2.5 ms |
-| first save (every entity) | 39 ms | 210 ms |
+| open: read rows | 4 ms | 14 ms |
+| open: decode + prune + hydrate | 6 ms | 57–65 ms |
+| same with `hydrateInIsolate` (off the UI thread) | 7 ms | 63–80 ms |
+| `changesSince`: new root field + 20 changed entities | 0.1 ms | 0.8 ms |
+| save of that delta | 2 ms | 4 ms |
+| first save, or a full delta (every entity) | 38 ms | 180–190 ms |
 
-A delta's cost depends on what changed, not on the store's size.
+Rows written cost what changed; `changesSince` also copies the whole
+`ROOT_QUERY` when one of its fields changed (the 0.1 → 0.8 ms). A full delta —
+after `clear()`, or once the cache forgot its removals (a `gc` of more than a
+thousand entities) — rewrites every entity.

@@ -97,17 +97,27 @@ void main() {
       final isolate = p.loaded;
       expect(p.loaded.entities, n + 5); // + 5 rockets
 
-      // A response changing 20 launches, five times (median reported).
+      // A session that already wrote every entity (the cache remembers
+      // each one as changed, as after a long session), saved.
+      // ignore: invalid_use_of_internal_member
+      p.cache.writeResponse('query', _pages(n, name: 'Session'));
+      await p.flush();
+
+      // Then the common response: a new root field (a page alias) holding
+      // 20 launches that changed, five times (median reported). Each one
+      // changes ROOT_QUERY, so `changesSince` copies the whole root (every
+      // page's refs) besides the 21 changed entities.
       final changesSinceTimes = <Duration>[];
       final saveTimes = <Duration>[];
       var changed = 0;
       for (var round = 0; round < 5; round++) {
         // ignore: invalid_use_of_internal_member
         p.cache.writeResponse('query', {
-          'launches_0': {
+          'launches_new_$round': {
             '__typename': 'LaunchConnection',
             'nodes': [
-              for (var i = 0; i < 20; i++) _launch(i, name: 'Changed $round'),
+              for (var i = 0; i < 20; i++)
+                _launch(round * 20 + i, name: 'Changed $round'),
             ],
             'totalCount': n,
           },
@@ -129,8 +139,8 @@ void main() {
         'first save ${_ms(firstSave)} ms; open main isolate: read '
         '${_ms(main.readTime)} + hydrate ${_ms(main.hydrateTime)} ms; '
         'open hydrateInIsolate: read ${_ms(isolate.readTime)} + hydrate '
-        '${_ms(isolate.hydrateTime)} ms; delta of $changed '
-        'entities: changesSince ${_ms(changesSince)} ms, save '
+        '${_ms(isolate.hydrateTime)} ms; delta of $changed entities '
+        '(ROOT_QUERY included): changesSince ${_ms(changesSince)} ms, save '
         '${_ms(deltaSave)} ms',
       );
     }, timeout: const Timeout(Duration(minutes: 2)));

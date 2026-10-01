@@ -101,12 +101,12 @@ final class SqflitePersistence {
     this._db,
     this.cache,
     this.loaded,
-    this._now, {
+    this._now,
+    this._onError, {
     required this.debounce,
     required this.maxWait,
     required bool flushOnLifecycle,
-    required void Function(Object error, StackTrace stack)? onSaveError,
-  }) : _onSaveError = onSaveError ?? _reportSaveError {
+  }) : _storedRootFields = {...?cache.entity(queryRoot)?.keys} {
     if (flushOnLifecycle) {
       _lifecycle = AppLifecycleListener(onStateChange: _lifecycleChanged);
     }
@@ -122,7 +122,11 @@ final class SqflitePersistence {
   ///
   /// The database is wiped first when it was written under another
   /// [sqfliteFormatVersion], `schema.keyField` or `schema.hash` (the
-  /// generated code changed: aliases and keyed types may have too).
+  /// generated code changed: aliases and keyed types may have too), and
+  /// when its rows cannot be decoded (reported to [onError]): the store is a
+  /// cache, starting cold beats failing every launch. A file that is not a
+  /// database at all fails [open]; delete it (`deleteDatabase(path)`) and
+  /// open again.
   ///
   /// Bounds (`null` disables one): root fields last written more than
   /// [maxAge] ago are dropped; then, while the entities the remaining root
@@ -138,9 +142,9 @@ final class SqflitePersistence {
   /// With [flushOnLifecycle] (default) an [AppLifecycleListener] flushes when
   /// the app is hidden, paused or detached: the binding must be initialized
   /// (`WidgetsFlutterBinding.ensureInitialized()`, which sqflite needs
-  /// anyway). Save failures go to [onSaveError] (default:
-  /// `FlutterError.reportError`); [now] is the clock behind `updated_at` and
-  /// [maxAge], only worth overriding in tests.
+  /// anyway). Background save failures and undecodable stores go to
+  /// [onError] (default: `FlutterError.reportError`); [now] is the clock
+  /// behind `updated_at` and [maxAge], only worth overriding in tests.
   static Future<SqflitePersistence> open(
     String path, {
     required SlingSchema<Accessor, Accessor> schema,
@@ -151,29 +155,37 @@ final class SqflitePersistence {
     Duration maxWait = const Duration(seconds: 5),
     bool hydrateInIsolate = false,
     bool flushOnLifecycle = true,
-    void Function(Object error, StackTrace stack)? onSaveError,
+    void Function(Object error, StackTrace stack)? onError,
     DateTime Function() now = DateTime.now,
   }) async {
+    final reportError = onError ?? _reportError;
     assert(maxEntities == null || maxEntities >= 0);
     final factory = databaseFactory ?? sqflite.databaseFactory;
     final watch = Stopwatch()..start();
     final db = await factory.openDatabase(path);
     try {
-      final wiped = await _prepare(db, schema);
-      final rows = await _readRows(db);
+      var wiped = await _prepare(db, schema);
+      var rows = await _readRows(db);
       final readTime = watch.elapsed;
-      final input = (
-        rows,
-        LoadOptions(
-          keyField: schema.keyField,
-          nowMs: now().millisecondsSinceEpoch,
-          maxAgeMs: maxAge?.inMilliseconds,
-          maxEntities: maxEntities,
-        ),
+      final options = LoadOptions(
+        keyField: schema.keyField,
+        nowMs: now().millisecondsSinceEpoch,
+        maxAgeMs: maxAge?.inMilliseconds,
+        maxEntities: maxEntities,
       );
-      final loaded = hydrateInIsolate
-          ? await compute(loadCache, input)
-          : loadCache(input);
+      LoadedCache loaded;
+      try {
+        loaded = hydrateInIsolate
+            ? await compute(loadCache, (rows, options))
+            : loadCache((rows, options));
+      } catch (error, stack) {
+        // A row that is not the JSON this package wrote (a corrupted page,
+        // a hand edit): drop the store rather than fail every launch.
+        reportError(error, stack);
+        wiped = await _prepare(db, schema, force: true);
+        rows = await _readRows(db);
+        loaded = loadCache((rows, options));
+      }
       final hydrateTime = watch.elapsed - readTime;
       await _deleteDropped(db, loaded);
       return SqflitePersistence._(
@@ -193,10 +205,10 @@ final class SqflitePersistence {
           hydrateTime: hydrateTime,
         ),
         now,
+        reportError,
         debounce: debounce,
         maxWait: maxWait,
         flushOnLifecycle: flushOnLifecycle,
-        onSaveError: onSaveError,
       );
     } catch (_) {
       await db.close();
@@ -218,7 +230,7 @@ final class SqflitePersistence {
 
   final Database _db;
   final DateTime Function() _now;
-  final void Function(Object error, StackTrace stack) _onSaveError;
+  final void Function(Object error, StackTrace stack) _onError;
   late final StreamSubscription<Set<String>> _subscription;
   AppLifecycleListener? _lifecycle;
 
@@ -239,6 +251,11 @@ final class SqflitePersistence {
   /// `ROOT_QUERY` fields touched since the last stored save: which root
   /// rows a delta holding `ROOT_QUERY` rewrites.
   Set<String> _dirtyRootFields = {};
+
+  /// The `ROOT_QUERY` fields the database has a row for. A root field that
+  /// was not touched keeps its row, and so its `updated_at` (the `maxAge`
+  /// clock), even through a full delta.
+  Set<String> _storedRootFields;
 
   /// The underlying database, for inspection (`SELECT`s in tests, debug
   /// screens). Writing to the `sling_*` tables is undefined.
@@ -264,7 +281,7 @@ final class SqflitePersistence {
 
   void _timerFired() {
     _cancelTimers();
-    _enqueueSave().catchError(_onSaveError);
+    _enqueueSave().catchError(_onError);
   }
 
   void _lifecycleChanged(AppLifecycleState state) {
@@ -275,7 +292,7 @@ final class SqflitePersistence {
         // The app may be killed from here on: save now (a no-op when
         // nothing changed).
         _cancelTimers();
-        _enqueueSave().catchError(_onSaveError);
+        _enqueueSave().catchError(_onError);
       case AppLifecycleState.resumed:
       case AppLifecycleState.inactive:
         break;
@@ -312,79 +329,75 @@ final class SqflitePersistence {
     _dirtyRootFields = {};
     if (delta.isEmpty) return;
     final now = _now().millisecondsSinceEpoch;
+    final Set<String> storedRootFields;
     try {
-      await _db.transaction((txn) async {
+      storedRootFields = await _db.transaction((txn) async {
         final batch = txn.batch();
-        _writeDelta(batch, delta, rootFields, now);
+        final stored = _writeDelta(batch, delta, rootFields, now);
         await batch.commit(noResult: true);
+        return stored;
       });
     } catch (_) {
       // Not stored: the next save starts from the same version again.
       _dirtyRootFields.addAll(rootFields);
       rethrow;
     }
+    _storedRootFields = storedRootFields;
     _savedVersion = delta.version;
   }
 
-  static void _writeDelta(
+  /// Adds [delta] to [batch]; returns the root fields stored once it is
+  /// committed.
+  Set<String> _writeDelta(
     Batch batch,
     CacheDelta delta,
-    Set<String> rootFields,
+    Set<String> dirtyRootFields,
     int now,
   ) {
-    if (delta.full) {
-      batch
-        ..delete(_entities)
-        ..delete(_rootFields);
-    }
+    // A full delta carries every entity: the others are gone. Root rows are
+    // reconciled field by field below, so untouched ones keep their age.
+    if (delta.full) batch.delete(_entities);
     for (final key in delta.removed) {
-      if (key == queryRoot) {
-        batch.delete(_rootFields);
-      } else if (!_isRoot(key)) {
+      if (!_isRoot(key)) {
         batch.delete(_entities, where: 'key = ?', whereArgs: [key]);
       }
     }
     for (final MapEntry(:key, value: entity) in delta.changed.entries) {
-      if (key == queryRoot) {
-        _writeRoot(batch, entity, delta.full ? null : rootFields, now);
-      } else if (!_isRoot(key)) {
-        batch.insert(_entities, {
-          'key': key,
-          'json': jsonEncode(entity),
-          'updated_at': now,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      if (_isRoot(key)) continue;
+      batch.insert(_entities, {
+        'key': key,
+        'json': jsonEncode(entity),
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+
+    final root = delta.changed[queryRoot];
+    if (root == null) {
+      if (!delta.full && !delta.removed.contains(queryRoot)) {
+        return _storedRootFields; // the root did not change
       }
+      batch.delete(_rootFields);
+      return {};
     }
-  }
-
-  /// Writes the [fields] of `ROOT_QUERY` that changed (deleting those it no
-  /// longer has), or all of them when [fields] is `null` or unknown.
-  static void _writeRoot(
-    Batch batch,
-    Map<String, Object?> root,
-    Set<String>? fields,
-    int now,
-  ) {
-    void put(String field) => batch.insert(_rootFields, {
-      'field': field,
-      'json': jsonEncode(root[field]),
-      'updated_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-
-    if (fields == null || fields.isEmpty) {
-      // A full delta (the tables were just emptied), or a change to the
-      // root nobody reported: rewrite the root.
-      if (fields != null) batch.delete(_rootFields);
-      root.keys.forEach(put);
-      return;
+    // Rewrite the fields touched since the last save (and any field without
+    // a row); delete the rows of fields the root no longer has.
+    for (final MapEntry(key: field, :value) in root.entries) {
+      if (!dirtyRootFields.contains(field) &&
+          _storedRootFields.contains(field)) {
+        continue;
+      }
+      batch.insert(_rootFields, {
+        'field': field,
+        'json': jsonEncode(value),
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
-    for (final field in fields) {
-      if (root.containsKey(field)) {
-        put(field);
-      } else {
+    for (final field in _storedRootFields) {
+      if (!root.containsKey(field)) {
         batch.delete(_rootFields, where: 'field = ?', whereArgs: [field]);
       }
     }
+    return root.keys.toSet();
   }
 
   static bool _isRoot(String key) => key.startsWith('ROOT_');
@@ -409,23 +422,25 @@ final class SqflitePersistence {
     }
   }
 
-  static void _reportSaveError(Object error, StackTrace stack) {
+  static void _reportError(Object error, StackTrace stack) {
     FlutterError.reportError(
       FlutterErrorDetails(
         exception: error,
         stack: stack,
         library: 'sling_gql_sqflite',
-        context: ErrorDescription('while saving the cache'),
+        context: ErrorDescription('while persisting the cache'),
       ),
     );
   }
 
   /// Creates the tables, or recreates them when the stored format version,
-  /// key field or schema hash differ. True when the database was (re)made.
+  /// key field or schema hash differ (or when [force]d). True when the
+  /// database was (re)made.
   static Future<bool> _prepare(
     Database db,
-    SlingSchema<Accessor, Accessor> schema,
-  ) async {
+    SlingSchema<Accessor, Accessor> schema, {
+    bool force = false,
+  }) async {
     final expected = {
       'format_version': '$sqfliteFormatVersion',
       'key_field': schema.keyField,
@@ -439,7 +454,7 @@ final class SqflitePersistence {
       for (final row in await db.query(_meta))
         row['key']! as String: row['value']! as String,
     };
-    if (mapEquals(stored, expected)) return false;
+    if (!force && mapEquals(stored, expected)) return false;
     await db.transaction((txn) async {
       final batch = txn.batch()
         ..execute('DROP TABLE IF EXISTS $_entities')
