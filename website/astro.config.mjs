@@ -40,6 +40,7 @@ export default defineConfig({
             { label: 'Pagination', slug: 'guides/pagination' },
             { label: 'Caching', slug: 'guides/caching' },
             { label: 'Fetch policies & freshness', slug: 'guides/fetch-policies' },
+            { label: 'Persistence', slug: 'guides/persistence' },
             { label: 'Mutations', slug: 'guides/mutations' },
             { label: 'Subscriptions', slug: 'guides/subscriptions' },
             { label: 'Transport', slug: 'guides/transport' },

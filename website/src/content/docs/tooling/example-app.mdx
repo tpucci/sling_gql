@@ -19,6 +19,7 @@ not asserted.
     - app.dart             `SlingApp`: dark theme + three-tab scaffold
     - main.dart            client + `SlingScope` setup
     - in_browser_api.dart  where requests go: localhost on iOS, the page on web
+    - persisted_cache.dart the cache: SQLite on iOS, in memory on web
     - demos/               the small demos embedded in the guides
     - mock_latency.dart    latency picker, sent as a request header
     - network_log.dart     records every `PrintedOperation`
@@ -39,15 +40,19 @@ not asserted.
 ## Wiring
 
 ```dart title="example/lib/main.dart"
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // iOS: the previous run's cache from SQLite; the web: a new in-memory one.
+  final cache = await openCache();
+
   final log = NetworkLog();
   final latency = MockLatencyController();
   final httpClient = mockApiHttpClient(); // localhost on iOS, in the page on web
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
     schema: slingSchema,
-    // The default, spelled out: `__typename` + `id` → one `Launch:<id>` entity.
-    cache: Cache(normalization: const Normalization(keyField: 'id')),
+    cache: cache, // normalized on `id`: one `Launch:<id>` entity
+    maxAge: restoredCacheMaxAge, // iOS: revalidate restored data
     httpClient: httpClient,
     transport: log.transport(latency.transport(httpClient)), // x-mock-latency-ms
     logRequests: true, // one console line per operation
@@ -71,9 +76,16 @@ request — `client.requests` emits one `SlingRequest` per flushed operation,
 batched or not, with its timing, size and the widgets that asked for it.
 `SlingApp` also wraps the app in a `SlingRequestOverlay` (debug builds): the
 same requests, one line each, in a chip you can open from any screen.
-The `cache:` line is what `schema: slingSchema` builds anyway (the code was
-generated with `--key-field id`); it is there to show where
-[`Normalization`](/sling_gql/guides/caching/) is configured.
+`openCache()` (`persisted_cache.dart`, a conditional import like
+`in_browser_api.dart`) is the only platform switch for the cache. On iOS it
+opens `sling_cache.db` with
+[`sling_gql_sqflite`](/sling_gql/guides/persistence/) before the client
+exists, so a relaunch paints the last session's launches at once; restored
+data has no fetch time, so `maxAge: 5 min` revalidates it in the background.
+On the web it returns the in-memory `Cache(normalization: Normalization(keyField:
+'id'))` that `schema: slingSchema` would build anyway, and no sqflite code is
+compiled in. The widget tests build their own client and never call
+`openCache()`, so no state survives from one test run to the next.
 
 ### On the web
 

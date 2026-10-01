@@ -143,7 +143,7 @@ export const gqlSnippet = `query {
 <section class="landing-section">
   <h2>Proof-of-concept status</h2>
   <p class="lead">Queries, the normalized cache, mutations, subscriptions and unions are
-  solid. Persistence is the roadmap, not a promise.</p>
+  solid; the cache persists in SQLite through a separate adapter.</p>
 
   | Capability | Status |
   | --- | --- |
@@ -158,7 +158,7 @@ export const gqlSnippet = `query {
   | Subscriptions (`client.subscribe`, `SubscriptionBuilder`, SSE transport) | <span class="pill pill-ok">done</span> |
   | Unions / interfaces (`asLaunch`, `when(...)`, inline fragments) | <span class="pill pill-ok">done</span> |
   | Fetch policies, `maxAge` stale-while-revalidate | <span class="pill pill-ok">done</span> |
-  | Persistence adapters | <span class="pill pill-no">not started</span> |
+  | Persistence (`sling_gql_sqflite`: SQLite, deltas, bounded) | <span class="pill pill-ok">done</span> |
 
   <div class="poc-banner">
     <strong>This is a feasibility study</strong>, built in a day to answer one question: <em>can

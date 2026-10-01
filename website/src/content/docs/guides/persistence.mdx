@@ -1,0 +1,157 @@
+---
+title: Persistence
+description: Keep the normalized cache across launches with sling_gql_sqflite — a bounded write-behind SQLite copy saved as deltas and loaded before the client starts.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`sling_gql_sqflite` stores the cache in SQLite, so the second launch of an app paints the
+previous session's data on its first frame — no skeleton, no request until you ask for
+one. It is a separate package on top of the [persistence hooks](/sling_gql/guides/caching/#persistence-hooks)
+of the runtime (`Cache(initial:)`, `onChange`, `changesSince`); the runtime itself stays
+`http`-only.
+
+```sh
+flutter pub add sling_gql_sqflite
+```
+
+## Setup: open before the client
+
+```dart title="lib/main.dart"
+import 'package:sling_gql_sqflite/sling_gql_sqflite.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized(); // sqflite and the lifecycle flush need it
+  final persistence = await SqflitePersistence.open(
+    'sling_cache.db', // relative: in sqflite's getDatabasesPath()
+    schema: slingSchema,
+  );
+  final client = SlingClient<Query>(
+    endpoint: Uri.parse(endpoint),
+    schema: slingSchema,
+    cache: persistence.cache,
+    maxAge: const Duration(minutes: 5), // see "Restored data is stale" below
+  );
+  runApp(SlingScope<Query>(client: client, child: const App()));
+}
+```
+
+`open` reads every row, drops what is past the [bounds](#bounds), builds the `Cache`
+(normalized on `slingSchema.keyField`) and returns a persistence that is **already
+listening** to it — there is no `attach` step. Build the client with `persistence.cache`
+and the app starts warm.
+
+The example app does exactly this on iOS (`example/lib/persisted_cache.dart`); its web
+build keeps an in-memory cache through a conditional import, and compiles no sqflite code.
+
+## The design: a write-behind copy
+
+Reads happen inside `build()`, so they must be synchronous: the cache stays the in-memory
+store every getter reads from, and SQLite is a **durable copy** of it, written behind.
+There is no lazy read-through — what is persisted is loaded, so memory is the persisted
+size. That is why the *store* is bounded, not the reads.
+
+- **Saves are deltas.** Each save writes `cache.changesSince(savedVersion)`: the entities
+  changed or removed since the last stored save, never a `snapshot` of everything.
+- **When.** One second after the last `onChange` (`debounce`), at most five seconds after
+  the first one while changes keep coming (`maxWait`), when the app is hidden, paused or
+  detached (an `AppLifecycleListener`), and on `persistence.flush()`.
+- **How.** One transaction per save: upsert the changed rows, delete the removed ones,
+  `batch.commit(noResult: true)`. Saves are chained, never concurrent, so an older delta
+  cannot land after a newer one.
+- **Failures.** A failed save rolls back and leaves `savedVersion` where it was; the next
+  change (or `flush()`) saves everything since the last stored version. Background failures
+  go to `onSaveError` (default `FlutterError.reportError`); `flush()` throws them.
+
+### Rows
+
+| Table | Row | Columns |
+| --- | --- | --- |
+| `sling_entities` | one per entity (`Launch:launch-181`) | `key`, `json`, `updated_at` (ms) |
+| `sling_root_fields` | one per `ROOT_QUERY` field (`launches_c0y93u18lig6v`) | `field`, `json`, `updated_at` (ms) |
+| `sling_meta` | format version, key field, schema hash | `key`, `value` |
+
+The query root is split per field because every response touches it: a page of launches
+rewrites its own root field (and the entities that changed), not every other query the app
+ever made. Which fields changed comes from the `onChange` keys (`ROOT_QUERY.<alias>`,
+`[i]` / `[length]` suffixes included). Per-field rows are also what lets old queries age
+out one by one. `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
+
+## Bounds
+
+Applied once, when the store is opened (`null` disables either):
+
+1. **`maxAge`** (default 7 days): root fields whose row was last *written* longer ago are
+   dropped. A row is rewritten when its value changes, so a root field that a refetch
+   confirms unchanged keeps its old `updated_at`.
+2. **`maxEntities`** (default 10 000): while the entities the remaining root fields reach
+   are more than that, the oldest root fields are dropped (newest kept first; ties by
+   name).
+3. Entities no kept root field reaches are dropped — the set `cache.gc()` would collect —
+   without being decoded.
+
+Dropped rows are deleted from the database before `open` returns.
+`persistence.loaded` (a `SqfliteLoadReport`) tells what was kept, dropped and how long it
+took. The bounds hold at each launch: a long session can grow past `maxEntities`, and the
+next launch trims it.
+
+## Restored data is stale
+
+The runtime's freshness stamps (`fetchedAt`) live in memory and are not persisted: restored
+data has none, so it counts as **stale under `maxAge` and `cacheAndNetwork`**. That is what
+a persisted cache wants — with `maxAge`, the first frame shows the restored launches and a
+background request revalidates them ([Fetch policies & freshness](/sling_gql/guides/fetch-policies/)).
+
+<Aside type="caution">
+With plain `cacheFirst` and no `maxAge`, restored data is never revalidated: a field in the
+cache is never fetched again until something evicts it or calls `refetch()`. Give the client
+(or the screens that matter) a `maxAge` when you persist.
+</Aside>
+
+## Invalidation
+
+`sling_gql_gen` emits `slingSchema.hash`, a 64-bit FNV-1a of the generated file. It changes
+when the introspection, `--key-field`, a `--scalar` mapping or the generator's output
+changes — any of which can change cache aliases, keyed types and lookups — and is the same
+on every run and platform. The store records it with the key field and its own format
+version; a mismatch at open **wipes the database** and the app starts cold, instead of
+reading entities written by another version of the code.
+
+## Logout, encryption, other platforms
+
+- **Logout:** `await persistence.clear()` empties the cache (every mounted query refetches)
+  and the database.
+- **Encryption:** pass an SQLCipher-backed `DatabaseFactory` (`databaseFactory:`); the
+  adapter only uses the `sqflite_common` API.
+- **Other platforms / tests:** the same parameter takes `databaseFactoryFfi`
+  (`sqflite_common_ffi`, desktop and host tests) or `sqflite_common_ffi_web`.
+  `inMemoryDatabasePath` gives a store that lasts one run.
+- **Large stores:** `hydrateInIsolate: true` decodes the rows and builds the cache in a
+  background isolate (`compute`), keeping the decode off the UI thread.
+- **Shutdown:** `persistence.close()` saves what is pending and closes the database.
+
+## Numbers
+
+Host benchmark (`flutter test benchmark/persistence_bench_test.dart` in
+`packages/sling_gql_sqflite`; JIT on macOS through `sqflite_common_ffi`, ~600 B of JSON per
+entity, launches in pages of 50 per root field):
+
+| | 1 000 entities (0.6 MB) | 10 000 entities (5.6 MB) |
+| --- | --- | --- |
+| open: read the rows | 4 ms | 15 ms |
+| open: decode + prune + hydrate | 8 ms | 63–86 ms |
+| the same with `hydrateInIsolate` (off the UI thread) | 10 ms | 76 ms |
+| `changesSince` of 20 changed entities | 0.04 ms | 0.01 ms |
+| save of that delta | 2 ms | 2.5 ms |
+| first save (every entity) | 39 ms | 210 ms |
+
+A save costs what changed, not what is stored. The heap holds about twice the JSON size,
+which is what `maxEntities` caps.
+
+## Testing with a persisted cache
+
+Host tests run sqflite through `sqflite_common_ffi` (no simulator): pass
+`databaseFactory: databaseFactoryFfi` and a temporary path. In `testWidgets`, open, flush
+and close inside `tester.runAsync`, since the database answers on real time. An app's own
+widget tests rarely need persistence at all: build the client with a plain `Cache()` (the
+example's tests do), and nothing leaks from one run into the next.

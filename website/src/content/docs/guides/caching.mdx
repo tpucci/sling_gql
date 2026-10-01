@@ -343,8 +343,10 @@ Five launches, each row counting its builds, and a detail card for the first one
 ## Persistence hooks
 
 Reads are synchronous — they happen inside `build()` — so the store is in memory and stays
-in this package. What a persistence layer (`sqlite`, `hive`, a file — as separate packages)
-needs is exposed and deliberately small:
+in this package. To keep it across launches in SQLite, use
+[`sling_gql_sqflite`](/sling_gql/guides/persistence/): it is built on the hooks below.
+What a persistence layer (`sqlite`, `hive`, a file — as separate packages) needs is exposed
+and deliberately small:
 
 - `cache.snapshot` — a JSON-able deep copy of every entity (refs as `{"__ref": key}`), and
   `Cache(initial: json)` to hydrate it back;
@@ -359,7 +361,9 @@ needs is exposed and deliberately small:
   `version` to ask from next time. A hydrated cache starts at version 0: what it was
   hydrated from is the persisted baseline.
 
-So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache.
+So a write-behind adapter debounces on `onChange` and stores deltas, never the whole cache
+(the sketch below is the shape of what `sling_gql_sqflite` does, minus its per-root-field
+rows, bounds and invalidation).
 Saves run one after another: a slow save must not land after a newer one and put older
 copies back on disk.
 
@@ -397,7 +401,8 @@ The copies are real copies: entities are merged in place by later writes (inline
 lists), so neither `snapshot` nor a delta can share maps with the store. `snapshot` copies
 ~190 entities in about 50 µs in the example's benchmark, a one-entity delta in about 1.5 µs.
 `fetchedAt` stamps are not persisted: hydrated data counts as stale for `maxAge` (see
-[Fetch policies & freshness](/sling_gql/guides/fetch-policies/)).
+[Fetch policies & freshness](/sling_gql/guides/fetch-policies/) and
+[Persistence](/sling_gql/guides/persistence/#restored-data-is-stale)).
 
 ## Not in the PoC
 
