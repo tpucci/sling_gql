@@ -1,3 +1,16 @@
+## 1.0.0
+
+> Note: This release has breaking changes.
+
+ - First stable release. Upgrading from 0.x: see [Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/).
+
+ - **FEAT**(sling_gql_gen): debugLabel on the generated mutate and subscribe ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([c928a936](https://github.com/tpucci/sling_gql/commit/c928a93615585e282da671075c751ca77b70d7ca))
+ - **FEAT**(sling_gql_gen): forward offline and onQueued in client.mutate. ([40be6a8d](https://github.com/tpucci/sling_gql/commit/40be6a8dacf5f727e65b840eb0dc0f3d59265f23))
+ - **FEAT**(sling_gql_gen): forward errorPolicy, timeout and retry in client.mutate. ([aa3269a8](https://github.com/tpucci/sling_gql/commit/aa3269a895301d1176c05fca3181936e660d9af9))
+ - **FEAT**(sling_gql_gen): emit field signatures in slingSchema.fields ([#72](https://github.com/tpucci/sling_gql/issues/72)). ([944b4efd](https://github.com/tpucci/sling_gql/commit/944b4efd0b2eabc479d0fe9f0cf05924ba4ef0b6))
+ - **DOCS**(repo): Versioning sections in the adapter, test and generator READMEs ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([a3574704](https://github.com/tpucci/sling_gql/commit/a35747046d8fa901476b73825661861c9acf78ce))
+ - **BREAKING** **REFACTOR**(sling_gql_gen): narrow the library exports; --runtime-import ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([514ef10b](https://github.com/tpucci/sling_gql/commit/514ef10beef39661f37090c2e81e2c1aadf51fd8))
+
 ## 0.1.4
 
  - **FEAT**(sling_gql_gen): emit slingSchema.hash. ([96b514dc](https://github.com/tpucci/sling_gql/commit/96b514dc9a86f89cb404b055de04f8c969578b49))

@@ -2,7 +2,7 @@ name: sling_gql_link
 description: >-
   Run sling_gql's requests through a gql_link Link chain (auth, retries,
   persisted queries, websockets) as one Transport / SubscriptionTransport.
-version: 0.1.0+1
+version: 1.0.0
 repository: https://github.com/tpucci/sling_gql
 homepage: https://tpucci.github.io/sling_gql/guides/transport/
 issue_tracker: https://github.com/tpucci/sling_gql/issues
@@ -25,10 +25,10 @@ dependencies:
   gql_http_link: ^1.2.0
   gql_link: ^1.1.0
   http: ^1.2.0
-  sling_gql: ^0.2.2
+  sling_gql: ^1.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  sling_gql_test: ^0.1.1+2
+  sling_gql_test: ^1.0.0

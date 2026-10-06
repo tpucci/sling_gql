@@ -1,3 +1,21 @@
+## 1.0.0
+
+> Note: This release has breaking changes.
+
+ - First stable release. Upgrading from 0.x: see [Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/).
+
+ - **FIX**(sling_gql): whole-selection fetches carry the rows' fields. ([963f0033](https://github.com/tpucci/sling_gql/commit/963f0033e42486dc8ab2f470ee49f9ed1e9390ff))
+ - **FEAT**(sling_gql): PaginatedQueryBuilder takes QueryBuilder's options ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([a7926895](https://github.com/tpucci/sling_gql/commit/a79268955017be884e5eb977f3ff0b108d3fa0a1))
+ - **FEAT**(sling_gql): keep retryable replays queued; clearMutationQueue for sign-out. ([c4b0e99e](https://github.com/tpucci/sling_gql/commit/c4b0e99e594d0a10635a96f133e52beb48951dbf))
+ - **FEAT**(sling_gql): offline mutation queue ([#72](https://github.com/tpucci/sling_gql/issues/72)). ([60368daf](https://github.com/tpucci/sling_gql/commit/60368daf87758192502ede7f7676e2af4e79e8b9))
+ - **FEAT**(sling_gql): SlingSchema.fields, the schema shape for stores ([#72](https://github.com/tpucci/sling_gql/issues/72)). ([61f10b02](https://github.com/tpucci/sling_gql/commit/61f10b02d6164c92a98c719d48984df32d7a1c85))
+ - **DOCS**(sling_gql): drop the proof-of-concept wording; Versioning section ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([6368a9a8](https://github.com/tpucci/sling_gql/commit/6368a9a8d949c8760be3b241dbcef850e473e128))
+ - **BREAKING** **REFACTOR**(sling_gql): settle the 1.0 public surface ([#73](https://github.com/tpucci/sling_gql/issues/73)). ([0f1e6992](https://github.com/tpucci/sling_gql/commit/0f1e6992e8cb3caee34071000742b2e10ddae482))
+ - **BREAKING** **FEAT**(sling_gql): typed error model, errorPolicy, timeouts, retry and auth. ([24b1761d](https://github.com/tpucci/sling_gql/commit/24b1761dd4769ffd265bc83687bbead1d10d7762))
+ - **BREAKING** **FEAT**(sling_gql): type policies and relay connection merging ([#50](https://github.com/tpucci/sling_gql/issues/50)). ([5852ab63](https://github.com/tpucci/sling_gql/commit/5852ab631fc9f8748b39cebc9d1f50533c2ea069))
+ - **BREAKING** **FEAT**(sling_gql): Cache.compact(upTo:) drops the change records a store holds. ([88960781](https://github.com/tpucci/sling_gql/commit/8896078199e3e22e76df3ab1d7a30bdde900e59a))
+ - **BREAKING** **FEAT**(sling_gql): operation roots in CacheDelta field by field; NormalizedCache.adopt. ([011cf15d](https://github.com/tpucci/sling_gql/commit/011cf15dd16d4098e326b83560c0a3f384d94028))
+
 ## 0.2.2
 
  - **FEAT**(sling_gql): SlingSchema.hash, the generated code's fingerprint. ([24fcca36](https://github.com/tpucci/sling_gql/commit/24fcca366a409026837c6f91ed84d2e10e5da67d))
