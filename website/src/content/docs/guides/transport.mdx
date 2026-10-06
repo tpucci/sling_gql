@@ -1,115 +1,177 @@
 ---
 title: Transport
-description: One hook on SlingClient for auth headers, token refresh, retries, timeouts and logging — or your existing gql_link chain.
+description: Auth with token refresh, retries with backoff, timeouts and cancellation built in; one hook on SlingClient for everything else — or your existing gql_link chain.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Every request — batched queries and mutations alike — goes through a single
-function:
+Every request — batched queries, mutations and subscription connections — is built by
+the client, which takes care of credentials ([`auth`](#auth)), retries
+([`retry`](#retry)) and time limits ([`timeout`](#timeout-and-cancellation)), and sends
+each attempt through a single function:
 
 ```dart
 typedef Transport = Future<http.Response> Function(http.Request request);
 ```
 
 By default the client sends the request with its `http.Client`. Pass your own
-`transport` to intercept it. The request you receive is a finalized `POST` with
-`content-type: application/json` and the client's static `headers` already
-applied; you can mutate its headers before sending.
+`transport` to log, use another HTTP stack or a test double. The request you receive is a
+finalized `POST` (an `http.AbortableRequest`) with `content-type: application/json`, the
+client's static `headers` and the auth headers already applied.
 
 ```dart
 final client = SlingClient<Query>(
   endpoint: Uri.parse('https://api.example.com/graphql'),
   schema: slingSchema,
-  headers: const {'x-app-version': '1.2.0'}, // static, applied before transport
-  transport: (request) async {
-    request.headers['authorization'] = 'Bearer ${await auth.token()}';
-    return http.Response.fromStream(await http.Client().send(request));
-  },
+  headers: const {'x-app-version': '1.2.0'}, // static, on every request
+  auth: SlingAuth(
+    headers: () async => {'authorization': 'Bearer ${await tokens.access()}'},
+    refresh: tokens.refresh,
+  ),
+  timeout: const Duration(seconds: 15),
+  retry: const RetryPolicy(maxAttempts: 4),
 );
 ```
 
 <Aside type="note">
-There is deliberately no link chain. Most apps need one function; compose it
-yourself with ordinary Dart. If you already use `gql_link`, hand your chain
-over as that one function — see [gql_link](#gql_link) below.
+There is deliberately no link chain. Auth, retry and timeouts are the client's own — they
+know about scopes, batches and subscriptions — and anything else is one function; compose
+it with ordinary Dart. If you already use `gql_link`, hand your chain over as that one
+function — see [gql_link](#gql_link) below.
 </Aside>
+
+## Auth
+
+`SlingClient(auth:)` adds credentials to every request and refreshes them when the
+server rejects them:
+
+```dart
+auth: SlingAuth(
+  headers: () async => {'authorization': 'Bearer ${await tokens.access()}'},
+  refresh: () async {
+    await tokens.refresh(); // throw when the session is over for good
+  },
+  // default: HTTP 401, or a GraphQL error with extensions.code UNAUTHENTICATED
+  isUnauthenticated: SlingAuth.isUnauthenticatedError,
+),
+```
+
+- `headers` runs before **each attempt** (retries and replays included), so a request
+  always carries the current token.
+- On an unauthenticated response the client calls `refresh` and **replays the request
+  once** with fresh headers. Refreshing is **single-flight**: requests failing together
+  share one `refresh` call, and a request whose 401 arrives after another one already
+  refreshed just replays with the new token.
+- When `refresh` (or `headers`) throws, or the replay is rejected again, the request fails
+  with a **`SlingAuthException`** (`cause`: the refresh error or the last response's
+  error) — the moment to sign the user out:
+
+```dart
+if (state.error is SlingAuthException) return const SignInScreen();
+```
+
+- **Subscriptions** get the same headers on connect. A 401 (or an `UNAUTHENTICATED` event)
+  refreshes and reopens the connection once; if that fails, the `SlingAuthException` is a
+  stream error and the subscription follows its usual `retryAfter` path.
+
+## Retry
+
+Queries are retried with exponential backoff and jitter by default:
+`SlingClient(retry: RetryPolicy())` makes **3 attempts** in all, waiting 300 ms, then
+600 ms (each minus up to 50 % jitter, capped at `maxDelay`), for
+**network errors, timeouts and 5xx** (`RetryPolicy.isTransient`).
+
+```dart
+SlingClient<Query>(
+  ...,
+  retry: RetryPolicy(
+    maxAttempts: 5,
+    initialDelay: const Duration(milliseconds: 200),
+    maxDelay: const Duration(seconds: 5),
+    retryIf: (e) => RetryPolicy.isTransient(e) || e.statusCode == 429,
+  ),
+);
+// or: retry: RetryPolicy.none — report the first failure
+```
+
+- **Mutations are never retried by default**: one that timed out or lost its connection
+  may have been applied. Opt in per call for the ones that are safe to repeat:
+  `client.mutate(..., retry: const RetryPolicy())`.
+- A partial response (data *and* errors) is never retried; neither are 4xx and GraphQL
+  errors unless your `retryIf` says so.
+- **Subscriptions** do not use it: a dropped connection reopens after
+  `subscriptionRetryAfter` (see [Subscriptions](/sling_gql/guides/subscriptions/)).
+- `SlingRequest.attempts` (and the request overlay's log line) shows how many tries a
+  request took.
+
+<Aside type="tip" title="retry vs. retryFailedAfter">
+Retries happen **inside one fetch**: the widgets stay loading, and only the final failure
+becomes their [sticky error](/sling_gql/guides/loading-and-errors/#errors).
+`retryFailedAfter` is the other half: how long that sticky error blocks a refetch, and its
+cooldown starts after the last attempt failed.
+</Aside>
+
+## Timeout and cancellation
+
+`SlingClient(timeout:)` limits **each attempt**; the request is aborted and fails with a
+`SlingTimeoutException` (which `retry` treats as transient). It defaults to `null`, no
+limit. Per widget or call: `QueryBuilder(timeout:)`, `useSlingQuery(timeout:)`,
+`createScope`, `resolve`, `client.mutate`, `MutationBuilder`'s `mutate`. A batch shared by
+several widgets waits for the **longest** of their timeouts (none, if one has none).
+Subscriptions have no timeout — they stay open.
+
+Requests are **cancelled** when nobody waits for them any more: when every widget whose
+selections are in a query batch is disposed (a screen popped mid-request), the request is
+aborted and its response, if one still comes, is dropped; nothing is sent at all when they
+are gone before the batch is flushed. A disposed scope is never notified. Aborting needs a
+client that supports `http.Abortable` (`IOClient`, `BrowserClient`); others just have
+their response ignored.
 
 ## Recipes
 
-Keep one `http.Client` around instead of creating one per request:
+### Logging
+
+`onOperation` already reports every printed document, and `client.requests` /
+`logRequests` every request with its timing; use the transport when you want the raw
+response too:
 
 ```dart
 final _http = http.Client();
-Future<http.Response> send(http.Request r) async =>
-    http.Response.fromStream(await _http.send(r));
-```
 
-### Timeout
-
-```dart
-transport: (request) => send(request).timeout(const Duration(seconds: 10)),
-```
-
-A `TimeoutException` surfaces as `QueryState.error` for every scope in the
-batch (sticky until `refetch()`, see
-[Loading states & errors](/sling_gql/guides/loading-and-errors/)).
-
-### Retry
-
-An `http.Request` can be sent once, so copy it before each attempt:
-
-```dart
-http.Request copy(http.Request r) => http.Request(r.method, r.url)
-  ..headers.addAll(r.headers)
-  ..bodyBytes = r.bodyBytes;
-
-transport: (request) async {
-  for (var attempt = 0;; attempt++) {
-    final res = await send(copy(request));
-    if (res.statusCode < 500 || attempt == 2) return res;
-    await Future.delayed(Duration(milliseconds: 200 * (1 << attempt)));
-  }
-},
-```
-
-Retry inside the transport is invisible to widgets: the scope only sees the
-final response.
-
-### Token refresh on 401
-
-```dart
-transport: (request) async {
-  request.headers['authorization'] = 'Bearer ${auth.current}';
-  final res = await send(copy(request));
-  if (res.statusCode != 401) return res;
-  await auth.refresh();
-  request.headers['authorization'] = 'Bearer ${auth.current}';
-  return send(copy(request));
-},
-```
-
-### Logging
-
-`onOperation` already reports every printed document; use the transport when
-you want status codes and timing too:
-
-```dart
 transport: (request) async {
   final sw = Stopwatch()..start();
-  final res = await send(request);
+  final res = await http.Response.fromStream(await _http.send(request));
   log('${res.statusCode} ${sw.elapsedMilliseconds}ms ${request.body.length}B');
   return res;
 },
 ```
 
+Pass the request itself to `_http.send`: it carries the abort trigger.
+
+### Offline detection
+
+`SlingException.isNetworkUnreachable` (exactly `SlingNetworkException`) tells "the device
+could not reach the server" from every answer the server gave:
+
+```dart
+if (error?.isNetworkUnreachable ?? false) showOfflineBanner();
+```
+
 ## What the client does with the response
 
-- `statusCode >= 400` → `SlingException('HTTP <code>')` for the whole batch.
-- A JSON body without `data` → `SlingException` with the first GraphQL error.
-- `errors` alongside `data` → the errored paths are pruned before caching and
-  the error is attached to the scopes that asked for them (see
-  [Loading states & errors](/sling_gql/guides/loading-and-errors/)).
+Each attempt's outcome is classified (see
+[the error model](/sling_gql/guides/loading-and-errors/#the-error-model)):
+
+- The transport throws: `http.ClientException` → `SlingNetworkException`, a
+  `TimeoutException` → `SlingTimeoutException`, anything else → `SlingTransportException`
+  (`SlingException.from`).
+- `statusCode >= 400` → `SlingHttpException` (status, body, the body's GraphQL errors) for
+  the whole batch.
+- A body that is not JSON → `SlingTransportException`.
+- A JSON body without `data` → `SlingGraphQLException` with the errors.
+- `errors` alongside `data` → a partial `SlingGraphQLException`; what happens to the
+  errored paths is the scopes' `errorPolicy` (see
+  [Loading states & errors](/sling_gql/guides/loading-and-errors/#errorpolicy)).
 
 ## gql_link
 
@@ -158,20 +220,22 @@ terminating link.
 **Coming back**, the first `Response` of the link's stream is the result:
 `data`, `errors` (message, locations, path, extensions) and `extensions` are
 handled exactly as over HTTP — partial errors pruned before caching and
-reported on the scope, `data: null` a `SlingException`. A `LinkException`
-becomes a `SlingLinkException`, the `SlingException` the widgets already
-show:
+reported on the scope (or kept, per `errorPolicy`), `data: null` a
+`SlingGraphQLException`. A `LinkException` becomes the `SlingException` it stands for
+(`slingExceptionFromLink`), so the client's `retry` and `auth` treat a link like the default
+transport:
 
-| Link exception | `message` | `statusCode` |
-| --- | --- | --- |
-| `HttpLinkServerException` (status `>= 300`) | `HTTP <code>`, the body's errors in `graphqlErrors` | the status |
-| `HttpLinkParserException` with status `>= 300` (a proxy's 502 page, an empty 401) | `HTTP <code>` | the status |
-| `ServerException` of a failed connection | the cause's message | `null` |
-| any other `LinkException` | the cause's message | `null` |
+| Link exception | Becomes |
+| --- | --- |
+| `HttpLinkServerException` (status `>= 300`) | `SlingHttpException`: status, body, the body's errors |
+| `HttpLinkParserException` with status `>= 300` (a proxy's 502 page, an empty 401) | `SlingHttpException`: status, body |
+| `ServerException` of a failed connection | `SlingNetworkException` |
+| `ServerException` with errors and no data | `SlingGraphQLException` |
+| any other `LinkException` | `SlingTransportException` (`cause`: the link exception) |
 
-`linkException` keeps what the link threw (and its `originalException`).
-Anything else a link throws — a `TimeoutException` of your own — surfaces
-unchanged, like with the default transport.
+Anything else a link throws — a `TimeoutException` of your own — is classified like the
+default transport's. Prefer the client's own `auth`, `retry` and `timeout` to an auth or
+retry link: they cover subscriptions too, and the auth refresh is single-flight.
 
 <Aside type="caution">
 A retry link has to catch the error of `forward(request)`: in an `async*`

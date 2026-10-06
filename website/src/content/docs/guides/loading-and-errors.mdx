@@ -71,7 +71,7 @@ QueryBuilder<Query>(
     state.hasMissingData;  // the last build read at least one field not in cache
     state.isSkeleton;      // hasMissingData && isLoading: gate a whole-widget skeleton on this
     state.isStale;         // rendering data older than maxAge while it is refetched (see fetch policies)
-    state.error;           // last error from a request this widget took part in (sticky, see below)
+    state.error;           // SlingException? of the last request this widget took part in (sticky, see below)
     state.refetch();       // Future<void>: refetch everything selected in the last build
     state.revalidate();    // refetch only if something read is older than maxAge
   },
@@ -95,8 +95,9 @@ cause refetch loops — and an errored path never gets a real `null` cached eith
 
 ## Errors
 
-When a request fails — transport error, HTTP 4xx/5xx, or a GraphQL `errors[]` — every
-scope that took part in it gets `state.error` set and is rebuilt.
+When a request fails — no connection, a timeout, HTTP 4xx/5xx, or a GraphQL `errors[]` —
+every scope that took part in it gets `state.error` (a [`SlingException`](#the-error-model))
+set and is rebuilt.
 
 ```dart
 if (state.error != null) {
@@ -120,19 +121,95 @@ Two behaviours are worth knowing:
   it automatically instead of staying sticky forever — useful for a flaky connection or a
   cold server, at the cost of a possible extra request while the underlying problem is
   still there. The default (`null`) keeps errors sticky forever, as above.
-- **Partial errors are pruned.** GraphQL can return `data` *and* `errors`. sling_gql removes
-  the values at each error's `path` before merging, so a `null` the server put at a failed
-  field is not cached as a real `null`. The rest of the response is cached normally, and
-  the scope's error carries the `graphqlErrors` list.
+- **Partial errors are pruned** (by default). GraphQL can return `data` *and* `errors`.
+  sling_gql removes the values at each error's `path` before merging, so a `null` the server
+  put at a failed field is not cached as a real `null`. The rest of the response is cached
+  normally, and the scope's error carries the server's errors. `errorPolicy` changes that,
+  see [below](#errorpolicy).
+- **Retries come first.** Network errors, timeouts and 5xx are retried with backoff
+  *inside* the fetch (see [Transport § Retry](/sling_gql/guides/transport/#retry)): the
+  widget stays loading meanwhile, and only the final failure becomes the sticky error —
+  `retryFailedAfter`'s cooldown starts from there.
+
+### The error model
+
+`state.error` is a `SlingException`, a **sealed** class: a `switch` over it is exhaustive,
+and the compiler tells you when a case is missing.
+
+```dart
+final message = switch (state.error) {
+  null => null,
+  SlingNetworkException() => 'You are offline',            // no response at all
+  SlingTimeoutException() => 'The server is slow, try again',
+  SlingHttpException(:final statusCode) => 'Server error ($statusCode)',
+  SlingGraphQLException(:final errors) => errors.first.message,
+  SlingAuthException() => 'Please sign in again',          // refresh failed, see Transport
+  SlingCancelledException() || SlingTransportException() => 'Something went wrong',
+};
+```
+
+| Type | When | Carries |
+| --- | --- | --- |
+| `SlingNetworkException` | no response: offline, DNS, connection refused or reset | `cause` (the `http.ClientException`) |
+| `SlingTimeoutException` | no response within `timeout`; the request was aborted | `timeout` |
+| `SlingHttpException` | an HTTP status `>= 400` | `statusCode`, `body`, `errors` parsed from a GraphQL body |
+| `SlingGraphQLException` | GraphQL `errors`; `isPartial` when `data` came too | `errors` |
+| `SlingAuthException` | the credentials were rejected and refreshing them did not help | `cause` |
+| `SlingCancelledException` | the request was abandoned (every scope waiting for it was disposed) | — |
+| `SlingTransportException` | anything else: a custom transport threw, a body was not JSON | `cause` |
+
+Every one has a `message`; `statusCode` and `errors` are on the base class too (`null` /
+empty when they do not apply). Each GraphQL error is a `SlingGraphQLError` with the
+server's `message`, `path` (response keys: sling_gql's aliases), `locations`,
+`extensions` and `code` (`extensions.code`: `UNAUTHENTICATED`, `FORBIDDEN`, …):
 
 ```dart
 final e = state.error;
-if (e is SlingException) {
-  e.message;        // joined messages
-  e.graphqlErrors;  // List<Map> as returned by the server
-  e.statusCode;     // for HTTP failures
+if (e is SlingGraphQLException && e.errors.any((x) => x.code == 'FORBIDDEN')) {
+  return const Text('You cannot see this launch');
 }
 ```
+
+`e.isNetworkUnreachable` is true exactly for `SlingNetworkException`: the server never
+answered, so retrying later — when the device is back online — is the right move. Every
+other error means the server answered (or, for a timeout, may have).
+
+`resolve()` and `client.mutate()` throw the same types; `MutationBuilder`'s and
+`SubscriptionBuilder`'s `state.error` hold them too.
+
+### `errorPolicy`
+
+What a scope does with GraphQL errors that come **with** data — a partial response:
+
+| `ErrorPolicy` | Cache | `state.error` | `resolve` / `mutate` |
+| --- | --- | --- | --- |
+| `none` (default) | errored paths pruned: the fields stay missing | the `SlingGraphQLException`, sticky until `refetch()` | throw it |
+| `all` | written as sent, `null`s at errored paths included | the error too, sticky until `refetch()` though nothing is missing | throw it, with the value in `e.data` |
+| `ignore` | written as sent | `null` | return the value |
+
+```dart
+QueryBuilder<Query>(
+  errorPolicy: ErrorPolicy.all, // show what resolved, and say what did not
+  builder: (context, q, state) => Column(children: [
+    Text(q.me?.name ?? ''),
+    if (state.error case SlingGraphQLException(:final errors))
+      Text('Partly unavailable: ${errors.first.message}'),
+  ]),
+)
+```
+
+Set it per widget (`QueryBuilder(errorPolicy:)`, `useSlingQuery(errorPolicy:)`),
+per call (`createScope`, `resolve`, `client.mutate`, `MutationBuilder`'s `mutate`) or for
+the whole client (`SlingClient(errorPolicy:)`). A few rules keep it predictable:
+
+- It only decides about **partial** responses. Network, timeout, HTTP and `data: null`
+  failures are errors under every policy.
+- `all` and `ignore` write the server's `null` into the **shared** cache, where every widget
+  reading that field sees a `null` instead of a miss. In a batch, a root field also selected
+  by a `none` widget is still pruned (it keeps its "missing" state for that widget); an
+  `ignore` widget sharing it then shows a placeholder, and does not refetch in a loop.
+- With `MutationBuilder` and `all`, a partial response sets both `state.data` and
+  `state.error`; the call counts as landed (no rollback, `refetchQueries` run).
 
 ### Try it
 

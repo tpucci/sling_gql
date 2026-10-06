@@ -134,20 +134,24 @@ The server takes 1.5 s to answer, so each step stays on screen long enough to se
 
 ## Errors
 
-- **Transport / HTTP errors** and **GraphQL errors** both reject the `mutate` future with a
-  `SlingException` (transport errors with the underlying exception). With `MutationBuilder`,
-  they surface on `state.error` instead.
+- **Network, timeout, HTTP and GraphQL errors** all reject the `mutate` future with a
+  [`SlingException`](/sling_gql/guides/loading-and-errors/#the-error-model)
+  (`SlingNetworkException`, `SlingHttpException`, `SlingGraphQLException`, …). With
+  `MutationBuilder`, they surface on `state.error` instead.
+- **Mutations are sent once.** Unlike queries they are not retried: one that timed out may
+  have been applied. Pass `retry:` (and `timeout:`) per call for the ones safe to repeat —
+  see [Transport § Retry](/sling_gql/guides/transport/#retry).
 - **Partial GraphQL errors** (data *and* errors) are failures too, but the cache keeps what
   the server resolved — see below.
 - Mutations have no sticky-error behaviour — every call is a fresh request.
 
 ### Partial errors
 
-A response with both `data` and `errors` counts as a failed mutation. There is no policy
-knob; the semantics are:
+A response with both `data` and `errors` counts as a failed mutation under the default
+`errorPolicy` (`ErrorPolicy.none`); the semantics are:
 
-- **The call fails.** `client.mutate` rejects with a `SlingException` whose `graphqlErrors`
-  holds the server's errors; with `MutationBuilder`, `mutate` resolves `null`, the exception
+- **The call fails.** `client.mutate` rejects with a partial `SlingGraphQLException` whose
+  `errors` hold the server's errors; with `MutationBuilder`, `mutate` resolves `null`, the exception
   is on `state.error` and `state.data` is cleared. The body is not run a second time, and
   `refetchQueries` are not refetched.
 - **Optimistic writes are undone first.** Every write the `optimistic` callback made
@@ -164,6 +168,14 @@ knob; the semantics are:
 To read what did resolve, go through the entities: `client.cacheScope.launch(id)?.favorite`.
 A transport error, an HTTP error or a response without `data` writes nothing — only the
 rollback applies.
+
+With `errorPolicy: ErrorPolicy.all` or `ErrorPolicy.ignore` (per call, or
+`SlingClient(errorPolicy:)`) a partial response counts as **landed** instead: it is
+written as sent (`null`s at errored paths included), the optimistic writes stay,
+`refetchQueries` run and the body computes the value. `ignore` returns it; `all` throws
+the `SlingGraphQLException` with the value in `e.data` — and `MutationBuilder` then shows
+both `state.data` and `state.error`. See
+[`errorPolicy`](/sling_gql/guides/loading-and-errors/#errorpolicy).
 
 ## Updating lists after a mutation
 

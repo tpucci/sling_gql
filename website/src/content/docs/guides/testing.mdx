@@ -69,8 +69,25 @@ What the server checks for you, loudly (a `StateError`, not a silent `null`):
 
 Throw `GraphQLError('message')` from a resolver to produce an `errors[]`
 entry with the right `path` — the field resolves to `null`, siblings still
-resolve, and the client's partial-error handling kicks in. Any other exception
-propagates and fails the test.
+resolve, and the client's partial-error handling kicks in;
+`GraphQLError('who?', code: 'UNAUTHENTICATED')` sets `extensions.code`. Any
+other exception propagates and fails the test.
+
+To fail whole requests — error handling, retries, auth refresh — queue
+failures with `failNext`; they apply to the next requests (queries, mutations,
+subscription connections) in order, then the server answers normally again:
+
+```dart
+server.failNext(const MockFailure.status(503), times: 2); // retried, then OK
+server.failNext(const MockFailure.graphQL('expired', code: 'UNAUTHENTICATED'));
+server.failNext(const MockFailure.network()); // a SlingNetworkException
+```
+
+Failed requests stay in `server.requests` (`.failed`), each with its
+`.headers` (check the `authorization` a `SlingAuth` sent).
+`server.client(Query.root, retry:, timeout:, errorPolicy:, auth:)` passes
+those on to the client; pass `retry: RetryPolicy.none` when a test expects
+the first failure.
 
 `DateTime` values are sent as ISO-8601 strings; enums are the GraphQL names
 (`'SUCCESS'`). Resolvers may return a `Future`; `latency:` delays every
