@@ -81,6 +81,64 @@ void main() {
   }
 
   group('round trip', () {
+    test('a merged connection survives: the next page continues it', () async {
+      SlingClient<Query> merging(SqflitePersistence p) {
+        final client = SlingClient<Query>(
+          endpoint: Uri.parse('http://mock/graphql'),
+          schema: slingSchema,
+          cache: p.cache,
+          httpClient: server.httpClient,
+          typePolicies: const {
+            Query: TypePolicy(fields: {'friends': RelayStylePagination()}),
+          },
+        );
+        addTearDown(client.dispose);
+        return client;
+      }
+
+      Future<List<String?>> friends(SlingClient<Query> c, {String? after}) =>
+          c.resolve((q) {
+            final page = q.friends(first: 2, after: after);
+            page?.pageInfo
+              ?..hasNextPage
+              ..endCursor;
+            return [for (final u in page?.nodes ?? const <User>[]) u.name];
+          });
+
+      final path = tempDatabasePath();
+      final first = await open(path);
+      final client = merging(first);
+      await friends(client);
+      expect(await friends(client, after: '2'), hasLength(4));
+      await first.flush();
+      final stored = (await rootRows(first))['friends']!.$1! as Map;
+      expect(stored['nodes'], hasLength(4), reason: 'one row, every page');
+      expect(stored[RelayStylePagination.pagesKey], [
+        <Object?>[],
+        ['after', '2'],
+      ]);
+      await first.close();
+      final before = server.requests.length;
+
+      final again = await open(path);
+      final restored = merging(again);
+      expect(await friends(restored), ['User 1', 'User 2', 'User 3', 'User 4']);
+      expect(await friends(restored, after: '2'), hasLength(4));
+      expect(server.requests, hasLength(before), reason: 'both pages held');
+      expect(await friends(restored, after: '4'), [
+        'User 1',
+        'User 2',
+        'User 3',
+        'User 4',
+        'User 5',
+      ]);
+      expect(server.requests, hasLength(before + 1));
+      await again.flush();
+      final saved = (await rootRows(again))['friends']!.$1! as Map;
+      expect(saved['nodes'], hasLength(5));
+      expect(saved[RelayStylePagination.pagesKey], hasLength(3));
+    });
+
     test('save, reopen: the same cache, no ROOT_MUTATION', () async {
       final path = tempDatabasePath();
       final first = await open(path);

@@ -11,7 +11,10 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 // Hand-written "generated" code for the tiny schema of these tests:
 //
 // type Query    { me: User  user(id: ID!): User  users(first: Int!): [User!]!
-//                 greeting(name: String!): String  tags: [Tag!]! }
+//                 greeting(name: String!): String  tags: [Tag!]!
+//                 friends(first: Int, after: String): UserConnection! }
+// type UserConnection { nodes: [User!]!  pageInfo: PageInfo! }
+// type PageInfo { hasNextPage: Boolean!  endCursor: String }
 // type User     { id: ID!  name: String  age: Int  best: User }
 // type Tag      { label: String }  # no id: inline
 // type Mutation { rename(id: ID!, name: String!): User }
@@ -28,6 +31,25 @@ class Query extends Accessor {
   String? greeting({required String name}) =>
       scalar<String>('greeting', args: {'name': Arg('String!', name)});
   List<Tag>? get tags => list('tags', Tag.new);
+  UserConnection? friends({int? first, String? after}) => object(
+    'friends',
+    UserConnection.new,
+    args: {'first': Arg('Int', first), 'after': Arg('String', after)},
+  );
+}
+
+class UserConnection extends Accessor {
+  UserConnection(super.recorder, super.selection, super.path);
+
+  List<User>? get nodes => list('nodes', User.new, keyed: true);
+  PageInfo? get pageInfo => object('pageInfo', PageInfo.new);
+}
+
+class PageInfo extends Accessor {
+  PageInfo(super.recorder, super.selection, super.path);
+
+  bool? get hasNextPage => scalar<bool>('hasNextPage');
+  String? get endCursor => scalar<String>('endCursor');
 }
 
 class User extends Accessor {
@@ -101,6 +123,24 @@ MockGraphQLServer testServer() {
         {'__typename': 'Tag', 'label': 'a'},
         {'__typename': 'Tag', 'label': 'b'},
       ],
+      // Pages of two over the five users; the cursor is the last id.
+      'friends': (args) {
+        final after = int.parse((args['after'] as String?) ?? '0');
+        final first = (args['first'] as int?) ?? 2;
+        final page = [
+          for (var i = after + 1; i <= 5 && i <= after + first; i++)
+            users['$i'],
+        ];
+        return {
+          '__typename': 'UserConnection',
+          'nodes': page,
+          'pageInfo': {
+            '__typename': 'PageInfo',
+            'hasNextPage': after + page.length < 5,
+            'endCursor': page.isEmpty ? null : page.last!['id'],
+          },
+        };
+      },
     },
     mutation: {
       'rename': (args) {
