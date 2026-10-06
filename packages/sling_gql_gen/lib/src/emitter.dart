@@ -171,6 +171,17 @@ String generate(
     _emitInputClass(out, t, ctx.registry);
   }
 
+  out.writeln();
+  _emitFields(
+    out,
+    queryType: queryType,
+    objectTypes: [
+      for (final t in objectTypes)
+        if (!rootNames.contains(t.name) || _isFieldType(schema, t.name)) t,
+    ],
+    abstractTypes: abstractTypes,
+  );
+
   final code = out.toString();
   return code.replaceFirst(
     _hashArgument(_hashPlaceholder),
@@ -291,9 +302,70 @@ void _emitSlingSchema(
       '${mutation ? 'Mutation' : 'Accessor'}>(query: Query.root'
       '${mutation ? ', mutation: Mutation.root' : ''}'
       '${subscription ? ', subscription: Subscription.root' : ''}'
-      ', keyField: ${dartStringLiteral(keyField)}, '
+      ', keyField: ${dartStringLiteral(keyField)}, fields: $_fieldsName, '
       '${_hashArgument(_hashPlaceholder)});',
     );
+}
+
+/// The constant behind `slingSchema.fields`.
+const _fieldsName = '_slingFields';
+
+/// True when a field of the schema returns [typeName] (a root type used as
+/// an ordinary object, e.g. Relay's `query: Query!` on a payload).
+bool _isFieldType(IntrospectionSchema schema, String typeName) =>
+    schema.types.any((t) => t.fields.any((f) => f.type.named.name == typeName));
+
+/// `slingSchema.fields`: every field with its signature (see
+/// [_fieldSignature]), per object type, the query root as `ROOT_QUERY` (its
+/// cache key); a root type also used as a field type is listed under its
+/// name too. Interfaces and unions are listed without fields: cached
+/// objects always carry their concrete `__typename`, the entry only says
+/// the type is not a scalar. Persistence adapters use it to migrate a store
+/// across schema changes.
+void _emitFields(
+  StringBuffer out, {
+  required GqlType queryType,
+  required List<GqlType> objectTypes,
+  required List<GqlType> abstractTypes,
+}) {
+  void entry(String name, GqlType type) {
+    final fields = [
+      for (final f in type.fields)
+        '${dartStringLiteral(f.name)}: '
+            '${dartStringLiteral(_fieldSignature(f))}',
+    ];
+    out.writeln('  ${dartStringLiteral(name)}: {${fields.join(', ')}},');
+  }
+
+  out
+    ..writeln(
+      '/// `slingSchema.fields`: each type\'s fields with their arguments and',
+    )
+    ..writeln(
+      '/// type, for persisted caches to migrate across schema changes.',
+    )
+    ..writeln('const $_fieldsName = <String, Map<String, String>>{');
+  entry('ROOT_QUERY', queryType);
+  for (final t in objectTypes) {
+    entry(t.name, t);
+  }
+  for (final t in abstractTypes) {
+    out.writeln('  ${dartStringLiteral(t.name)}: {},');
+  }
+  out.writeln('};');
+}
+
+/// `'[Launch!]!'`, or `'(id: ID!, limit: Int = 10) Launch'` with arguments:
+/// a cached value stays readable as long as its field's signature does.
+String _fieldSignature(GqlField field) {
+  final type = field.type.toGraphQLLiteral();
+  if (field.args.isEmpty) return type;
+  final args = [
+    for (final a in field.args)
+      '${a.name}: ${a.type.toGraphQLLiteral()}'
+          '${a.defaultValue == null ? '' : ' = ${a.defaultValue}'}',
+  ];
+  return '(${args.join(', ')}) $type';
 }
 
 String _hashArgument(String hash) => "hash: '$hash'";

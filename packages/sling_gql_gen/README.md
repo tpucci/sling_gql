@@ -56,9 +56,13 @@ Flags:
   the same key field; no hand-kept `Normalization(keyField:)`), and
   `hash:` — a 64-bit FNV-1a of the generated file itself, so it changes
   whenever the schema, `--key-field`, a `--scalar` mapping or the generator
-  changes the output, and is the same on every run and platform.
-  Persistence adapters (`sling_gql_sqflite`) drop a store written under
-  another hash.
+  changes the output, and is the same on every run and platform; and
+  `fields:` — every field of every object type with its signature
+  (`'(id: ID!) Launch'`, `'[String!]!'`; the query root as `ROOT_QUERY`,
+  interfaces and unions without fields), a `const` map at the end of the
+  file. Persistence adapters (`sling_gql_sqflite`) migrate a store written
+  under another hash along `fields`, keeping what the new code can still
+  read.
 - One `class <Name> extends Accessor` per other `OBJECT` type (skipping the
   operation roots and introspection `__*` types), with a getter
   per argument-less field and a method (named optional / `required` params)

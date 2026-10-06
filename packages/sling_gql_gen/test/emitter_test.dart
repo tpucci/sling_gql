@@ -357,7 +357,7 @@ void main() {
         RegExp(
           r'const slingSchema = SlingSchema<Query, Mutation>\(query: Query\.root, '
           r'mutation: Mutation\.root, subscription: Subscription\.root, '
-          r"keyField: 'id', hash: '[0-9a-z]+'\);",
+          r"keyField: 'id', fields: _slingFields, hash: '[0-9a-z]+'\);",
         ),
       ),
     );
@@ -368,7 +368,91 @@ void main() {
       IntrospectionSchema.fromJson(_schemaJson),
       keyField: 'uuid',
     );
-    expect(code, contains("keyField: 'uuid', hash: '"));
+    expect(code, contains("keyField: 'uuid', fields: _slingFields, hash: '"));
+  });
+
+  group('slingSchema.fields', () {
+    test('lists every object type\'s field signatures, the query root as '
+        'ROOT_QUERY', () {
+      expect(
+        code,
+        contains('const _slingFields = <String, Map<String, String>>{'),
+      );
+      expect(
+        code,
+        contains(
+          "  'ROOT_QUERY': {'me': 'User!', 'user': '(id: ID!) User', "
+          "'users': '(where: UserFilter) [User!]', "
+          "'usersSince': '(since: Date!) [User!]'},",
+        ),
+      );
+      expect(
+        code,
+        contains(
+          "  'User': {'id': 'ID!', 'name': 'String!', 'age': 'Int', "
+          "'status': 'UserStatus', 'pastStatuses': '[UserStatus]', "
+          "'statusAt': '(date: Date!) UserStatus', "
+          "'friends': '(limit: Int) [User!]!', 'legacyName': 'String', "
+          "'createdAt': 'Date', 'externalId': 'ObjectID', "
+          "'reminders': '[Date]'},",
+        ),
+      );
+      expect(code, contains("  'Tally': {'totalCount': 'Int!'},"));
+      // Roots not used as a field type, enums and inputs are not listed.
+      for (final name in ['Query', 'Mutation', 'Subscription']) {
+        expect(code, isNot(contains("  '$name': {")));
+      }
+      expect(code, isNot(contains("  'UserStatus': {")));
+      expect(code, isNot(contains("  'UserFilter': {")));
+    });
+
+    test('argument defaults are part of the signature; abstract types and '
+        'roots used as field types are listed', () {
+      final json = Map<String, Object?>.from(_schemaJson);
+      final schema = Map<String, Object?>.from(
+        json['__schema'] as Map<String, Object?>,
+      );
+      schema['types'] = [
+        ...schema['types'] as List,
+        {
+          'kind': 'OBJECT',
+          'name': 'Payload',
+          'description': null,
+          'fields': [
+            _field('query', _nonNull(_type('OBJECT', 'Query'))),
+            _field(
+              'items',
+              _list(_type('UNION', 'Item')),
+              args: [_arg('first', _type('SCALAR', 'Int'), defaultValue: '10')],
+            ),
+          ],
+          'inputFields': null,
+          'enumValues': null,
+        },
+        {
+          'kind': 'UNION',
+          'name': 'Item',
+          'description': null,
+          'fields': null,
+          'inputFields': null,
+          'enumValues': null,
+          'possibleTypes': [
+            {'kind': 'OBJECT', 'name': 'User'},
+          ],
+        },
+      ];
+      final code = generate(IntrospectionSchema.fromJson({'__schema': schema}));
+      expect(
+        code,
+        contains(
+          "  'Payload': {'query': 'Query!', "
+          "'items': '(first: Int = 10) [Item]'},",
+        ),
+      );
+      expect(code, contains("  'Item': {},"));
+      expect(code, contains("  'Query': {'me': 'User!', "));
+      expect(code, isNot(contains("  'Mutation': {")));
+    });
   });
 
   group('slingSchema.hash', () {
@@ -439,7 +523,8 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Mutation>(query: Query.root, '
-        "mutation: Mutation.root, keyField: 'id', hash: '",
+        "mutation: Mutation.root, keyField: 'id', fields: _slingFields, "
+        "hash: '",
       ),
     );
   });
@@ -513,7 +598,8 @@ void main() {
       code,
       contains(
         'const slingSchema = SlingSchema<Query, Accessor>(query: Query.root, '
-        "subscription: Subscription.root, keyField: 'id', hash: '",
+        "subscription: Subscription.root, keyField: 'id', "
+        "fields: _slingFields, hash: '",
       ),
     );
   });
