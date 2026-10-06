@@ -167,6 +167,8 @@ extension SlingMutations on SlingClient<Query> {
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
+    bool offline = false,
+    void Function()? onQueued,
   }) => mutateWith(
     Mutation.root,
     body,
@@ -175,6 +177,8 @@ extension SlingMutations on SlingClient<Query> {
     errorPolicy: errorPolicy,
     timeout: timeout,
     retry: retry,
+    offline: offline,
+    onQueued: onQueued,
   );
 }
 
@@ -204,7 +208,7 @@ const slingSchema = SlingSchema<Query, Mutation>(
   subscription: Subscription.root,
   keyField: 'id',
   fields: _slingFields,
-  hash: '360nmo0fi6zs1',
+  hash: '1uke0n51gnpsxy',
 );
 
 /// Typed, non-fetching cache access for this schema's keyed types:
