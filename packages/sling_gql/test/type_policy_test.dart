@@ -512,6 +512,35 @@ void main() {
       },
     );
 
+    test('refetch with rows bound through a later page: first page only, '
+        "carrying the rows' fields", () async {
+      final c = client();
+      final scope = c.createScope(onChanged: () {});
+      addTearDown(scope.dispose);
+      final row = scope.row(onChanged: () {});
+      late List<User> second;
+      scope.run((q) {
+        namesOf(q.users(first: 2));
+        second = q.users(first: 2, after: 'c2')?.nodes ?? const [];
+      });
+      await scope.whenSettled;
+      scope.run((q) {
+        namesOf(q.users(first: 2));
+        second = q.users(first: 2, after: 'c2')?.nodes ?? const [];
+      });
+      // A row reads a field only it selects, through a node of page two.
+      row.run(second.first, User.new, (u) => u.age);
+      await scope.whenSettled;
+      expect(cached(c), ['U1', 'U2', 'U3', 'U4']);
+
+      await scope.refetch();
+      final doc = sent.last.document;
+      expect(RegExp(r'users\(').allMatches(doc), hasLength(1));
+      expect(doc, isNot(contains('after')));
+      expect(doc, contains('age'), reason: "the row's field");
+      expect(cached(c), ['U1', 'U2']);
+    });
+
     test('cacheAndNetwork revalidates from the first page too', () async {
       final c = client();
       await page(c);
