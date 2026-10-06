@@ -80,8 +80,10 @@ melos:
       run: melos run test:runtime && melos run test:gen
 
     test:example:
-      description: Example widget tests; starts the mock server for the run.
-      run: node $MELOS_ROOT_PATH/scripts/with-mock-api.mjs flutter test
+      description: >-
+        Example widget tests; starts the mock server for the run. Test files
+        run one at a time: they share the server's mutable state.
+      run: node $MELOS_ROOT_PATH/scripts/with-mock-api.mjs flutter test --concurrency=1
       exec:
         concurrency: 1
       packageFilters:
@@ -91,11 +93,13 @@ melos:
       description: >-
         The example's end-to-end tests (app flows + graphql_server_test)
         against the mock API's schema and resolvers behind graphql-http +
-        graphql-sse (port 4001) instead of yoga.
+        graphql-sse (port 4001) instead of yoga. Test files run one at a
+        time: they share the server's mutable state.
       run: >-
         node $MELOS_ROOT_PATH/scripts/with-mock-api.mjs
         --server graphql-http-server.mjs --port 4001
-        flutter test --dart-define=SLING_API=http://localhost:4001/graphql
+        flutter test --concurrency=1
+        --dart-define=SLING_API=http://localhost:4001/graphql
         test/app_test.dart test/graphql_server_test.dart
       exec:
         concurrency: 1
