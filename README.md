@@ -50,7 +50,8 @@ query {
 | Optimistic writes (`launch.favorite = true`) | ✅ setters on scalar fields; journaled + rolled back when a mutation fails |
 | Mutations (`client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)`, `MutationBuilder`) | ✅ response normalized into the same entities → every widget showing the launch rebuilds |
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
-| `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ |
+| `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ typed, sealed `SlingException`s; `errorPolicy` none / all / ignore |
+| Auth, retry, timeouts (`SlingClient(auth:, retry:, timeout:)`) | ✅ single-flight token refresh on 401 / `UNAUTHENTICATED` (SSE too), backoff + jitter for queries, aborted requests when the widget is gone |
 | Cursor pagination (`RelayStylePagination`: pages merged into one cached list) and type policies (`keyArgs`, custom `merge`) | ✅ `PaginatedQueryBuilder`, example |
 | Test helpers (`MockGraphQLServer`, `pumpUntilSettled`) | ✅ `packages/sling_gql_test` |
 | Subscriptions (`client.subscribe((s) => s.launchStatusChanged?..status)`, `SubscriptionBuilder`) | ✅ GraphQL over SSE by default, `subscriptionTransport:` to swap; events normalized into the same entities |

@@ -177,6 +177,8 @@ on the code.
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
+| `errors.dart` | Sealed `SlingException` (network / timeout / HTTP / GraphQL (`isPartial`) / auth / cancelled / transport), `SlingGraphQLError`, `ErrorPolicy`, `SlingException.from` (classifies what a transport threw). Only `http` imported. |
+| `retry.dart` / `auth.dart` | `RetryPolicy` (attempts, backoff, jitter, `retryIf`) and `SlingAuth` (headers per attempt, `refresh`, `isUnauthenticated`); the client runs them. |
 | `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch), `RowScope` (`QueryScope.row`: own deps, everything else forwarded to the parent). |
 | `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `SlingRow` (rebinds an accessor to a `RowScope`), `frameEndScheduler`. |
 | `request_overlay.dart` | `SlingRequestOverlay`: debug-only chip + panel over the app listing `client.requests` (`SlingRequest`, defined in `client.dart`: kind, root fields, duration, bytes, error, `scopes` = the `debugLabel`s of the scopes in the batch). Widgets default their label to the enclosing widget (`debugOwnerLabel`, debug builds only). |
@@ -270,7 +272,19 @@ Design decisions worth knowing before changing things:
   rows, even `onPressed` callbacks): accessors keep a reference to their scope
   and `onMiss` schedules the flush itself.
 - **Partial GraphQL errors** are pruned from `data` before caching (a `null`
-  at an errored path is not a real null) and surfaced as the scope's error.
+  at an errored path is not a real null) and surfaced as the scope's error —
+  under `ErrorPolicy.none`. `all`/`ignore` keep the server's `null`s; in a
+  batch a path is pruned if any live `none` scope selected its root alias
+  (`_keepsErroredPath`). `ignore` hides the error (`_errorHidden`) but still
+  uses it to block refetch loops; `all` keeps it with complete data
+  (`_errorKeptWithData`). Imperative `all` throws the error with `.data`.
+- **One pipeline per request**: `_execute` (RetryPolicy, backoff timers
+  cancellable) → `_authorized` (SlingAuth headers, one replay after a
+  single-flight `_refreshAuth`; `_authGeneration` lets late 401s replay
+  without refreshing) → `_sendOnce` (`http.AbortableRequest`, timeout and
+  `_CancelToken` race, `SlingException.from` classification). A query batch
+  is cancelled when every waiting scope is disposed (`_scopeDisposed` →
+  `_abandon`). Subscriptions use `_refreshAuth` too but keep `retryAfter`.
 - **Errors are sticky per scope** until `refetch()`; otherwise a failing query
   would loop build → miss → fetch → fail → rebuild. A run served entirely from
   fresh cache clears a *miss-driven* error; an error from a background fetch
