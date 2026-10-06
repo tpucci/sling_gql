@@ -177,6 +177,75 @@ the `SlingGraphQLException` with the value in `e.data` — and `MutationBuilder`
 both `state.data` and `state.error`. See
 [`errorPolicy`](/sling_gql/guides/loading-and-errors/#errorpolicy).
 
+## Offline mutations
+
+Pass `offline: true` and a mutation the server cannot be reached for is **queued** instead
+of failing — the user's action is kept and sent when the network comes back:
+
+```dart
+mutate(
+  (m) => m.toggleFavorite(launchId: id)?.favorite,
+  optimistic: () => launch.favorite = !favorite,
+  offline: true,
+);
+// MutationBuilder / useSlingMutation: state.isQueued while it waits
+```
+
+- **What queues it:** only a failure that means *no response* —
+  `SlingException.isNetworkUnreachable` (`SlingNetworkException`: offline, DNS, connection
+  refused). A timeout, an HTTP error or a GraphQL error fails the call as usual (rolled
+  back, rejected): the server answered, or may have applied it.
+- **While queued** the optimistic writes **stay applied**, `state.isQueued` is true
+  (`isLoading` false), and the call's future **stays pending**. Imperative callers can pass
+  `onQueued:` to `client.mutate` to learn it was queued.
+- **The future's outcome** is the replay's: the body's value once the response landed, or
+  the error the server answered with (optimistic writes rolled back). If the client is
+  disposed (or the app killed) first, it never completes — the queue outlives it, see below.
+- **Replay** sends the queue **in order, one at a time**: after the next request of any kind
+  that reaches the server (a query, another mutation, a subscription event), on
+  `client.replayQueue()` (call it when the app knows it is back online), and on timers that
+  back off along `SlingClient(mutationQueueBackoff:)` (1 s doubling up to 5 min by default).
+  An offline call made while others wait is queued behind them; calls without `offline` are
+  sent at once as usual.
+- **A replay the server rejects** drops the entry, rolls back its optimistic writes and is
+  reported on `client.onQueuedMutationFailed` (a `QueuedMutationFailure`: the
+  `QueuedMutation` and the `SlingException`) — the only report a call queued by an
+  earlier run of the app gets. `client.queuedMutations` lists what waits.
+
+### Across app restarts
+
+The queue lives in `SlingClient(mutationQueue:)`, a `MutationQueueStore`: in memory by
+default, in SQLite with
+[`persistence.mutationQueue`](/sling_gql/guides/persistence/#the-mutation-queue). An offline
+call is stored **from the moment it is sent** until it lands or fails for good, as a
+`QueuedMutation`: the printed document, its variables *as they were at the call*, and the
+undo log of its optimistic writes. A client created on a store that holds entries replays
+them first.
+
+What a restart does with optimistic writes is defined by that undo log:
+
+- the persisted cache may hold the optimistic values (it is saved behind, the queue entry
+  is written before it); they stay on screen while the call waits;
+- if the replay lands, its response is written over them as usual;
+- if the server rejects it, the stored log rolls them back — even though the closure that
+  made them is gone.
+
+The body is not run again for a restored call (there is no caller to return to); its
+response is cached like any other, except when the document renames fields
+(`QueuedMutation.renamesFields`: fragments selecting one field twice, merging field
+policies), whose mapping back lives in the lost selection — the optimistic values then
+stand until a query refetches them.
+
+<Aside type="caution" title="At least once">
+A call the server applied just before the app was killed (the response never came back)
+is sent again on the next run. Queue mutations that are safe to repeat, or make them
+idempotent on the server (a client-generated id in the input).
+</Aside>
+
+A mutation **without** `offline` that is in flight when the app is killed is not stored:
+its optimistic values may be in the persisted cache and stay until a response for those
+fields overwrites them (with `maxAge`, restored data is revalidated on first read).
+
 ## Updating lists after a mutation
 
 Because the cache is normalized, a mutation returning an existing entity updates every list

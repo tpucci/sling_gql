@@ -182,6 +182,39 @@ A database file has one `SqflitePersistence` writing to it at a time:
   `onError` once, and `persistence.superseded` turns true; its cache stays usable,
   unpersisted. Reopen it (after `close()`) to read what the new writer stored.
 
+## The mutation queue
+
+`persistence.mutationQueue` keeps the client's
+[offline mutations](/sling_gql/guides/mutations/#offline-mutations) in the same database,
+so a call queued while offline survives the app being killed:
+
+```dart
+final client = SlingClient<Query>(
+  endpoint: Uri.parse(endpoint),
+  schema: slingSchema,
+  cache: persistence.cache,
+  mutationQueue: persistence.mutationQueue,
+);
+```
+
+- **A table of its own** (`sling_mutation_queue`, one row per `QueuedMutation`, in
+  insertion order): wiping the cache does not wipe it, and it is not part of
+  `sqfliteFormatVersion`. Rows go through the `codec` like every other row.
+- **Read at `open`**, replayed by the client as soon as it is created. Entries are written
+  at once (no debounce), on the same chain as the cache saves: an entry is stored before
+  the save holding its optimistic values.
+- **One writer per file** applies: a superseded instance stores no entries.
+- **A wiped cache** (another format, key field, or schema without fields to migrate along)
+  keeps the entries but drops their rollback logs — the optimistic values they would undo
+  are gone with it. **Another codec id** drops them (they cannot be decoded); a row that
+  does not decode is reported to `onError` and deleted; a recovered (deleted) file loses
+  them.
+- `persistence.clear()` (logout) empties the cache, not the queue.
+
+Any `MutationQueueStore` works (`load`, `add`, `remove`; JSON via
+`QueuedMutation.toJson`/`fromJson`) — `InMemoryMutationQueueStore` is the default, and
+sharing one between two clients simulates a restart in a test.
+
 ## Encryption
 
 Pass a `codec:` to transform every row value: an `SqfliteCodec` has an `id` and synchronous
