@@ -16,23 +16,82 @@ typedef Resolver = FutureOr<Object?> Function(Map<String, Object?> args);
 /// Thrown from a [Resolver] to produce a GraphQL `errors[]` entry at that
 /// field (the field resolves to `null`, siblings still resolve). Any other
 /// exception propagates and fails the test.
+///
+/// [code] becomes `extensions.code` (`GraphQLError('who?', code:
+/// 'UNAUTHENTICATED')`), merged over [extensions].
 class GraphQLError implements Exception {
-  GraphQLError(this.message, {this.extensions});
+  GraphQLError(this.message, {String? code, Map<String, Object?>? extensions})
+    : extensions = code == null ? extensions : {...?extensions, 'code': code};
 
   final String message;
   final Map<String, Object?>? extensions;
+
+  /// `extensions.code`, when set.
+  String? get code => extensions?['code'] as String?;
 
   @override
   String toString() => 'GraphQLError: $message';
 }
 
+/// How [MockGraphQLServer.failNext] fails a request instead of answering
+/// it.
+sealed class MockFailure {
+  const MockFailure();
+
+  /// An HTTP [statusCode] with [body] (the client sees a
+  /// `SlingHttpException`; 5xx are retried by its default `RetryPolicy`).
+  const factory MockFailure.status(int statusCode, {String body}) =
+      _StatusFailure;
+
+  /// A `200` with `data: null` and one GraphQL error carrying [code] as
+  /// `extensions.code` (the client sees a `SlingGraphQLException`, or with
+  /// `UNAUTHENTICATED` and a `SlingAuth`, a refresh).
+  const factory MockFailure.graphQL(String message, {String? code}) =
+      _GraphQLFailure;
+
+  /// No response: the request throws an `http.ClientException` (the client
+  /// sees a `SlingNetworkException`, `isNetworkUnreachable`).
+  const factory MockFailure.network([String message]) = _NetworkFailure;
+}
+
+final class _StatusFailure extends MockFailure {
+  const _StatusFailure(this.statusCode, {this.body = ''});
+  final int statusCode;
+  final String body;
+}
+
+final class _GraphQLFailure extends MockFailure {
+  const _GraphQLFailure(this.message, {this.code});
+  final String message;
+  final String? code;
+}
+
+final class _NetworkFailure extends MockFailure {
+  const _NetworkFailure([this.message = 'MockGraphQLServer: network down']);
+  final String message;
+}
+
 /// One request the server answered.
 class MockRequest {
-  MockRequest(this.document, this.variables, this.operation);
+  MockRequest(
+    this.document,
+    this.variables,
+    this.operation, {
+    this.headers = const {},
+  });
 
   final String document;
   final Map<String, Object?> variables;
   final ParsedOperation operation;
+
+  /// The HTTP headers it came with (`authorization`, …); empty for
+  /// [MockGraphQLServer.execute] / `subscribe` called directly.
+  final Map<String, String> headers;
+
+  /// True when it was failed by [MockGraphQLServer.failNext] rather than
+  /// answered.
+  bool get failed => _failed;
+  bool _failed = false;
 
   /// `query`, `mutation` or `subscription`.
   String get type => operation.type;
@@ -93,7 +152,9 @@ class MockRequest {
 ///
 /// [latency] delays every response (a `Future.delayed`; in `testWidgets` it
 /// runs on the fake clock, so `pump(latency)` — or `pumpUntilSettled` —
-/// lands it). Every request is appended to [requests].
+/// lands it). Every request is appended to [requests]. [failNext] makes the
+/// next requests fail with an HTTP status, a GraphQL error code or a
+/// network error, for error-handling, retry and auth tests.
 class MockGraphQLServer {
   MockGraphQLServer({
     Map<String, Object?> query = const {},
@@ -131,6 +192,30 @@ class MockGraphQLServer {
   /// The last request handled.
   MockRequest get lastRequest => requests.last;
 
+  final List<MockFailure> _failures = [];
+
+  /// Fails the next [times] requests (queries, mutations and subscription
+  /// connections, in arrival order) with [failure] — after [latency], and
+  /// still recorded in [requests] (`MockRequest.failed`) — then answers
+  /// normally again:
+  ///
+  /// ```dart
+  /// server.failNext(const MockFailure.status(503), times: 2); // then OK
+  /// server.failNext(const MockFailure.graphQL('expired', code: 'UNAUTHENTICATED'));
+  /// server.failNext(const MockFailure.network());
+  /// ```
+  void failNext(MockFailure failure, {int times = 1}) {
+    for (var i = 0; i < times; i++) {
+      _failures.add(failure);
+    }
+  }
+
+  /// Failures queued by [failNext] and not used yet.
+  int get pendingFailures => _failures.length;
+
+  MockFailure? _takeFailure() =>
+      _failures.isEmpty ? null : _failures.removeAt(0);
+
   /// An `http.Client` that routes every POST to this server; pass it as
   /// `SlingClient(httpClient:)`.
   http.Client get httpClient => MockClient(handle);
@@ -145,6 +230,7 @@ class MockGraphQLServer {
     return subscribe(
       json['query'] as String,
       (json['variables'] as Map?)?.cast<String, Object?>() ?? const {},
+      request.headers,
     );
   };
 
@@ -160,6 +246,10 @@ class MockGraphQLServer {
     bool? warnOnWaterfall,
     void Function(WaterfallWarning warning)? onWaterfall,
     Duration? retryFailedAfter,
+    ErrorPolicy errorPolicy = ErrorPolicy.none,
+    Duration? timeout,
+    RetryPolicy retry = const RetryPolicy(),
+    SlingAuth? auth,
   }) {
     final c = SlingClient<Q>(
       endpoint: endpoint ?? Uri.parse('http://mock/graphql'),
@@ -172,6 +262,10 @@ class MockGraphQLServer {
       warnOnWaterfall: warnOnWaterfall,
       onWaterfall: onWaterfall,
       retryFailedAfter: retryFailedAfter,
+      errorPolicy: errorPolicy,
+      timeout: timeout,
+      retry: retry,
+      auth: auth,
     );
     addTearDown(c.dispose);
     return c;
@@ -184,10 +278,30 @@ class MockGraphQLServer {
       _ => throw UnsupportedError('MockGraphQLServer: ${request.runtimeType}'),
     };
     final json = jsonDecode(body) as Map<String, Object?>;
-    final result = await execute(
-      json['query'] as String,
-      (json['variables'] as Map?)?.cast<String, Object?>() ?? const {},
-    );
+    final document = json['query'] as String;
+    final variables =
+        (json['variables'] as Map?)?.cast<String, Object?>() ?? const {};
+    final failure = _takeFailure();
+    if (failure != null) {
+      _record(document, variables, request.headers)._failed = true;
+      if (latency > Duration.zero) await Future<void>.delayed(latency);
+      return switch (failure) {
+        _StatusFailure(:final statusCode, :final body) => http.Response(
+          body,
+          statusCode,
+        ),
+        _GraphQLFailure() => http.Response(
+          jsonEncode(_failureResult(failure)),
+          200,
+          headers: const {'content-type': 'application/json'},
+        ),
+        _NetworkFailure(:final message) => throw http.ClientException(
+          message,
+          request.url,
+        ),
+      };
+    }
+    final result = await execute(document, variables, request.headers);
     return http.Response(
       jsonEncode(result),
       200,
@@ -200,9 +314,9 @@ class MockGraphQLServer {
   Future<Map<String, Object?>> execute(
     String document, [
     Map<String, Object?> variables = const {},
+    Map<String, String> headers = const {},
   ]) async {
-    final op = parseOperation(document, variables);
-    requests.add(MockRequest(document, variables, op));
+    final op = _record(document, variables, headers).operation;
     if (latency > Duration.zero) await Future<void>.delayed(latency);
     final roots = switch (op.type) {
       'query' => query,
@@ -234,9 +348,26 @@ class MockGraphQLServer {
   Stream<Map<String, Object?>> subscribe(
     String document, [
     Map<String, Object?> variables = const {},
+    Map<String, String> headers = const {},
   ]) {
-    final op = parseOperation(document, variables);
-    requests.add(MockRequest(document, variables, op));
+    final failure = _takeFailure();
+    final request = _record(document, variables, headers);
+    final op = request.operation;
+    if (failure != null) {
+      request._failed = true;
+      return Stream.fromFuture(
+        Future<void>.delayed(latency).then(
+          (_) => switch (failure) {
+            _StatusFailure(:final statusCode, :final body) =>
+              throw SlingHttpException.fromBody(statusCode, body),
+            _GraphQLFailure() => _failureResult(failure),
+            _NetworkFailure(:final message) => throw SlingNetworkException(
+              http.ClientException(message),
+            ),
+          },
+        ),
+      );
+    }
     if (op.type != 'subscription') {
       throw UnsupportedError(
         'MockGraphQLServer.subscribe: a ${op.type} document; use execute()',
@@ -318,6 +449,31 @@ class MockGraphQLServer {
     );
     return out.stream;
   }
+
+  MockRequest _record(
+    String document,
+    Map<String, Object?> variables,
+    Map<String, String> headers,
+  ) {
+    final request = MockRequest(
+      document,
+      variables,
+      parseOperation(document, variables),
+      headers: Map.unmodifiable(headers),
+    );
+    requests.add(request);
+    return request;
+  }
+
+  static Map<String, Object?> _failureResult(_GraphQLFailure failure) => {
+    'data': null,
+    'errors': [
+      {
+        'message': failure.message,
+        if (failure.code != null) 'extensions': {'code': failure.code},
+      },
+    ],
+  };
 
   Future<Object?> _resolve(
     Object? source,

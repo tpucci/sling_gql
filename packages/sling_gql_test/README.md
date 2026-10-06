@@ -37,8 +37,19 @@ expect(server.lastRequest.selects('launch.rocket.name'), isTrue);
 
 Only the selected fields are returned, under the document's aliases. Unknown
 fields and objects without `__typename` fail the test loudly. Throw
-`GraphQLError('…')` from a resolver for an `errors[]` entry with a path.
-`latency:` delays responses on the fake clock.
+`GraphQLError('…')` (optionally `code: 'FORBIDDEN'`) from a resolver for an
+`errors[]` entry with a path. `latency:` delays responses on the fake clock.
+
+`failNext` fails the next requests, for error-handling, retry and auth tests
+(each recorded with `.failed` and its `.headers`):
+
+```dart
+server.failNext(const MockFailure.status(503), times: 2);
+server.failNext(const MockFailure.graphQL('expired', code: 'UNAUTHENTICATED'));
+server.failNext(const MockFailure.network());
+```
+
+`server.client(...)` takes `retry:`, `timeout:`, `errorPolicy:` and `auth:`.
 
 ### Subscriptions
 

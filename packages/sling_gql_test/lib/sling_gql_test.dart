@@ -14,6 +14,6 @@ library;
 export 'src/document.dart'
     show ParsedOperation, ParsedField, GraphQLSyntaxError, parseOperation;
 export 'src/mock_server.dart'
-    show MockGraphQLServer, MockRequest, Resolver, GraphQLError;
+    show MockGraphQLServer, MockRequest, MockFailure, Resolver, GraphQLError;
 export 'src/pump.dart'
     show pumpUntilSettled, SlingWidgetTester, useRealNetwork, disposeAfterTest;

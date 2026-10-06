@@ -92,7 +92,13 @@ void main() {
             .subscribeWith(Subscription.root, (s) => s.userChanged?.name)
             .stream
             .toList(),
-        throwsA(isA<StateError>()),
+        throwsA(
+          isA<SlingTransportException>().having(
+            (e) => e.cause,
+            'cause',
+            isA<StateError>(),
+          ),
+        ),
       );
       final empty = MockGraphQLServer();
       final c2 = empty.client(Query.root);
@@ -102,7 +108,7 @@ void main() {
             .stream
             .toList(),
         throwsA(
-          isA<StateError>().having(
+          isA<SlingTransportException>().having(
             (e) => e.message,
             'message',
             contains('no subscription field "userChanged"'),
