@@ -433,6 +433,8 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('    ErrorPolicy? errorPolicy,')
     ..writeln('    Duration? timeout,')
     ..writeln('    RetryPolicy? retry,')
+    ..writeln('    bool offline = false,')
+    ..writeln('    void Function()? onQueued,')
     ..writeln('  }) =>')
     ..writeln('      mutateWith(')
     ..writeln('        Mutation.root,')
@@ -442,6 +444,8 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('        errorPolicy: errorPolicy,')
     ..writeln('        timeout: timeout,')
     ..writeln('        retry: retry,')
+    ..writeln('        offline: offline,')
+    ..writeln('        onQueued: onQueued,')
     ..writeln('      );')
     ..writeln('}');
 }

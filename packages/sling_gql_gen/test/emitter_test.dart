@@ -311,6 +311,8 @@ void main() {
     expect(code, contains('errorPolicy: errorPolicy,'));
     expect(code, contains('timeout: timeout,'));
     expect(code, contains('retry: retry,'));
+    expect(code, contains('offline: offline,'));
+    expect(code, contains('onQueued: onQueued,'));
     expect(code, contains('mutateWith('));
     // Mutation is not emitted twice (once as root, once as plain object).
     expect(
