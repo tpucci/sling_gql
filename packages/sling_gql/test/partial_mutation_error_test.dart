@@ -89,7 +89,7 @@ void main() {
       throwsA(
         isA<SlingException>()
             .having((e) => e.message, 'message', 'age is unavailable')
-            .having((e) => e.graphqlErrors, 'graphqlErrors', hasLength(1)),
+            .having((e) => e.errors, 'errors', hasLength(1)),
       ),
     );
 

@@ -5,6 +5,8 @@ import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
 import 'client.dart';
+import 'errors.dart';
+import 'retry.dart';
 import 'pagination.dart';
 import 'request_overlay.dart';
 import 'selection.dart';
@@ -214,7 +216,11 @@ class QueryState {
   /// pull-to-refresh, a retry button, `state.error != null` in an
   /// `ErrorView`). `SlingClient(retryFailedAfter:)` adds an automatic retry
   /// after a cooldown instead, for transient failures.
-  Object? get error => _scope.error;
+  ///
+  /// A [SlingException]: switch over it to tell an offline device
+  /// ([SlingNetworkException]) from a server error. Under
+  /// [ErrorPolicy.all] it can be set while every field has its data.
+  SlingException? get error => _scope.error;
 
   /// Re-fetch everything this widget selected in its last build. Clears
   /// [error] immediately and resolves once the new attempt has landed (or
@@ -245,10 +251,22 @@ class QueryBuilder<Q extends Accessor> extends StatefulWidget {
     this.debugLabel,
     this.fetchPolicy,
     this.maxAge,
+    this.errorPolicy,
+    this.timeout,
     this.scheduler = frameEndScheduler,
   });
 
   final QueryWidgetBuilder<Q> builder;
+
+  /// What this widget does with GraphQL errors that come with data (see
+  /// [ErrorPolicy]); defaults to `SlingClient.errorPolicy`. Read when the
+  /// scope is created.
+  final ErrorPolicy? errorPolicy;
+
+  /// Time limit of a request carrying this widget's selections (see
+  /// `QueryScope.timeout`); defaults to `SlingClient.timeout`. Read when
+  /// the scope is created.
+  final Duration? timeout;
 
   /// When this widget's misses are flushed into a request (see
   /// [FlushScheduler]). The default, [frameEndScheduler], waits for the end
@@ -313,6 +331,8 @@ class _QueryBuilderState<Q extends Accessor> extends State<QueryBuilder<Q>> {
             debugOwnerLabel(context),
         fetchPolicy: widget.fetchPolicy,
         maxAge: widget.maxAge,
+        errorPolicy: widget.errorPolicy,
+        timeout: widget.timeout,
       );
     }
   }
@@ -424,11 +444,15 @@ class _SlingRowState<T extends Accessor> extends State<SlingRow<T>> {
 
 /// Runs a mutation: records the fields read in [body], sends it, returns the
 /// value [body] computes from the response. Resolves to `null` on failure
-/// (the error is on [MutationState.error]).
+/// (the error is on [MutationState.error]). The named arguments are
+/// `SlingClient.mutateWith`'s.
 typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
   T Function(M mutation) body, {
   void Function()? optimistic,
   Iterable<String>? refetchQueries,
+  ErrorPolicy? errorPolicy,
+  Duration? timeout,
+  RetryPolicy? retry,
 });
 
 /// Status of the last mutation run by a [MutationBuilder].
@@ -443,12 +467,14 @@ class MutationState {
   /// A `mutate` call is in flight.
   final bool isLoading;
 
-  /// Why the last call failed (transport error, GraphQL errors, …), or
-  /// `null`. Cleared when the next call starts. `mutate` itself never throws:
-  /// it resolves to `null` and puts the exception here.
-  final Object? error;
+  /// Why the last call failed (network, HTTP, GraphQL errors, …), or
+  /// `null`. Cleared when the next call starts. `mutate` itself never throws
+  /// a [SlingException]: it resolves to `null` and puts it here. Under
+  /// [ErrorPolicy.all] a partial response sets both [error] and [data].
+  final SlingException? error;
 
-  /// What the body returned for the last call that succeeded, computed from
+  /// What the body returned for the last call that succeeded (or landed
+  /// partially under [ErrorPolicy.all]), computed from
   /// the cache after the response landed — the same value that call's
   /// `mutate` future resolved to. Kept while a new call is loading (no
   /// flicker), cleared when a call fails; `null` before the first call.
@@ -519,7 +545,7 @@ class MutationBuilder<M extends Accessor> extends StatefulWidget {
 class _MutationBuilderState<M extends Accessor>
     extends State<MutationBuilder<M>> {
   bool _loading = false;
-  Object? _error;
+  SlingException? _error;
   Object? _data;
   // Incremented per `mutate` call; only the latest call updates the state.
   int _call = 0;
@@ -543,6 +569,9 @@ class _MutationBuilderState<M extends Accessor>
     T Function(M mutation) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
+    RetryPolicy? retry,
   }) async {
     final client = SlingScope.clientOf(context);
     final call = ++_call;
@@ -565,15 +594,24 @@ class _MutationBuilderState<M extends Accessor>
         optimistic: optimistic,
         refetchQueries: refetchQueries,
         debugLabel: widget.debugLabel ?? debugOwnerLabel(context),
+        errorPolicy: errorPolicy,
+        timeout: timeout,
+        retry: retry,
       );
       settle(() => _data = result);
       return result;
-    } catch (e) {
+    } on SlingException catch (e) {
+      // `ErrorPolicy.all`: the call landed, with errors.
+      final landed =
+          e is SlingGraphQLException &&
+          e.isPartial &&
+          (errorPolicy ?? client.errorPolicy) == ErrorPolicy.all;
+      final data = landed ? e.data as T : null;
       settle(() {
         _error = e;
-        _data = null;
+        _data = data;
       });
-      return null;
+      return data;
     }
   }
 
@@ -614,7 +652,7 @@ class SubscriptionState {
 
   /// The last error — a partial GraphQL error on an event, or the transport
   /// failure that dropped the connection; cleared by the next event.
-  final Object? error;
+  final SlingException? error;
 
   /// Reopens a dropped connection now (a retry button). A no-op while
   /// connected.
@@ -710,7 +748,7 @@ class _SubscriptionBuilderState<S extends Accessor>
   StreamSubscription<S>? _listener;
   S? _latest;
   bool _active = false;
-  Object? _error;
+  SlingException? _error;
 
   @override
   void didChangeDependencies() {
@@ -745,8 +783,8 @@ class _SubscriptionBuilderState<S extends Accessor>
               _error = null;
             });
           },
-          onError: (Object e) {
-            if (mounted) setState(() => _error = e);
+          onError: (Object e, StackTrace st) {
+            if (mounted) setState(() => _error = SlingException.from(e, st));
           },
           onDone: () {
             if (mounted) setState(() => _active = false);

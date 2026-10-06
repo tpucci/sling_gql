@@ -8,6 +8,7 @@
 library;
 
 export 'src/accessor.dart' show Accessor, Recorder;
+export 'src/auth.dart' show SlingAuth;
 export 'src/cache/cache.dart'
     show
         Cache,
@@ -21,7 +22,6 @@ export 'src/cache/cache.dart'
 export 'src/client.dart'
     show
         SlingClient,
-        SlingException,
         FetchPolicy,
         CacheScope,
         CacheList,
@@ -38,6 +38,18 @@ export 'src/client.dart'
         SlingSubscription,
         FlushScheduler,
         microtaskScheduler;
+export 'src/errors.dart'
+    show
+        SlingException,
+        SlingNetworkException,
+        SlingTimeoutException,
+        SlingHttpException,
+        SlingGraphQLException,
+        SlingAuthException,
+        SlingCancelledException,
+        SlingTransportException,
+        SlingGraphQLError,
+        ErrorPolicy;
 export 'src/pagination.dart'
     show
         PaginationController,
@@ -64,3 +76,4 @@ export 'src/widgets.dart'
         SubscriptionWidgetBuilder,
         frameEndScheduler;
 export 'src/request_overlay.dart' show SlingRequestOverlay;
+export 'src/retry.dart' show RetryPolicy;

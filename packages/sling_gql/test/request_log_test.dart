@@ -37,6 +37,7 @@ SlingClient<Query> _client(_Server server, {bool logRequests = false}) =>
       schema: slingSchema,
       httpClient: server.http_,
       logRequests: logRequests,
+      retry: RetryPolicy.none,
     );
 
 void main() {

@@ -199,7 +199,14 @@ void main() {
     expect(last!.isActive, isTrue);
     expect(last!.isConnected, isFalse);
     expect(last!.isReconnecting, isTrue);
-    expect(last!.error, isA<StateError>());
+    expect(
+      last!.error,
+      isA<SlingTransportException>().having(
+        (e) => e.cause,
+        'cause',
+        isA<StateError>(),
+      ),
+    );
     expect(opened, 1);
 
     await tester.pump(const Duration(seconds: 5));

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
 import 'cache/cache.dart';
+import 'errors.dart';
 import 'widgets.dart';
 
 /// The next page a [PaginatedQueryBuilder] is loading, if any.
@@ -127,7 +128,7 @@ class PaginatedState<Node> {
   bool get hasMissingData => _query.hasMissingData;
 
   /// Sticky until [refetch], like [QueryState.error].
-  Object? get error => _query.error;
+  SlingException? get error => _query.error;
 
   /// Appends the next page. No-op when [hasMore] is `false`; only the new page
   /// is fetched and merged into the list, the loaded ones stay on screen.

@@ -267,7 +267,7 @@ class _SlingRequestOverlayState extends State<SlingRequestOverlay> {
               Text('   ← ${r.scopeSummary}', style: _scopes),
             if (error != null)
               Text(
-                '   ✗ ${error is SlingException ? error.message : error}',
+                '   ✗ ${error.message}',
                 style: _text.copyWith(color: _error),
               ),
             if (expanded) ...[

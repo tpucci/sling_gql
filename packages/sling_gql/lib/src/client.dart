@@ -1,27 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
 import 'accessor.dart';
+import 'auth.dart';
 import 'cache/cache.dart';
+import 'errors.dart';
+import 'retry.dart';
 import 'selection.dart';
-
-/// Error returned by the GraphQL endpoint (transport or `errors[]`).
-class SlingException implements Exception {
-  SlingException(
-    this.message, {
-    this.graphqlErrors = const [],
-    this.statusCode,
-  });
-
-  final String message;
-  final List<Map<String, Object?>> graphqlErrors;
-  final int? statusCode;
-
-  @override
-  String toString() => 'SlingException: $message';
-}
 
 /// Builds the root accessor of an operation for a given recorder.
 typedef RootFactory<Q extends Accessor> = Q Function(Recorder recorder);
@@ -188,9 +176,15 @@ class SlingRequest {
   int _events = 0;
 
   /// Why it failed: an HTTP or transport error, or the GraphQL `errors` (a
-  /// [SlingException]), partial ones included.
-  Object? get error => _error;
-  Object? _error;
+  /// [SlingGraphQLException]), partial ones included — whatever the
+  /// `ErrorPolicy` of the scopes did with them.
+  SlingException? get error => _error;
+  SlingException? _error;
+
+  /// Times it was sent: retries (`RetryPolicy`) and the replay after an
+  /// auth refresh count; `1` for a request that went out once.
+  int get attempts => _attempts;
+  int _attempts = 0;
 
   bool get isDone => _done.isCompleted;
 
@@ -225,17 +219,18 @@ class SlingRequest {
         ms,
       if (bytes != null) _formatBytes(bytes),
       fieldCount == 1 ? '1 field' : '$fieldCount fields',
+      if (_attempts > 1) '$_attempts attempts',
     ];
     final error = _error;
-    final problem = error == null
-        ? ''
-        : ' ✗ ${error is SlingException ? error.message : error}';
+    final problem = error == null ? '' : ' ✗ ${error.message}';
     final by = scopes.isEmpty ? '' : ' ← $scopeSummary';
     return '${parts.join(' · ')}$by$problem';
   }
 
   static String _formatBytes(int bytes) =>
       bytes < 1024 ? '$bytes B' : '${(bytes / 1024).toStringAsFixed(1)} KB';
+
+  void _sent() => _attempts++;
 
   void _response(int statusCode, int bytes) {
     _statusCode = statusCode;
@@ -247,7 +242,7 @@ class SlingRequest {
     _onChange?.call(this);
   }
 
-  void _finish([Object? error]) {
+  void _finish([SlingException? error]) {
     if (isDone) return;
     _stopwatch.stop();
     _error = error;
@@ -305,15 +300,30 @@ class QueryScope<Q extends Accessor> implements Recorder {
     String? debugLabel,
     FetchPolicy? fetchPolicy,
     Duration? maxAge,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
   }) : debugLabel = debugLabel ?? 'QueryScope#${++_lastId}',
        fetchPolicy = fetchPolicy ?? client.fetchPolicy,
        maxAge = maxAge ?? client.maxAge,
+       errorPolicy = errorPolicy ?? client.errorPolicy,
+       timeout = timeout ?? client.timeout,
        _bypassCache =
            (fetchPolicy ?? client.fetchPolicy) == FetchPolicy.networkOnly;
 
   static int _lastId = 0;
 
   final SlingClient<Q> client;
+
+  /// What this scope does with GraphQL errors that come with data (see
+  /// [ErrorPolicy]). Defaults to [SlingClient.errorPolicy].
+  final ErrorPolicy errorPolicy;
+
+  /// How long a request carrying this scope's selections may take before
+  /// it is aborted with a [SlingTimeoutException] (per attempt, see
+  /// [RetryPolicy]). Defaults to [SlingClient.timeout]; `null` waits
+  /// forever. A batch shared with other scopes waits for the longest of
+  /// their timeouts (none, if one of them has none).
+  final Duration? timeout;
 
   /// How this scope combines cache and network (see [FetchPolicy]).
   /// Defaults to [SlingClient.fetchPolicy].
@@ -370,13 +380,22 @@ class QueryScope<Q extends Accessor> implements Recorder {
   bool _awaiting = false;
   bool _stale = false;
   int _runCount = 0;
-  Object? _error;
+  SlingException? _error;
 
   /// The pending fetch was not caused by misses (revalidation, cache-and-
   /// network, [refetch]): the scope renders cached data meanwhile, and an
   /// error from it must stay visible even though nothing is missing.
   bool _backgroundFetch = false;
   bool _errorIsBackground = false;
+
+  /// The error is a partial response's, kept under [ErrorPolicy.all]: the
+  /// data is complete, the error stays until [refetch].
+  bool _errorKeptWithData = false;
+
+  /// The error is a partial response's, dropped under [ErrorPolicy.ignore]:
+  /// [error] does not report it, but it still blocks re-fetching fields
+  /// that stayed missing (pruned for another scope of the batch).
+  bool _errorHidden = false;
 
   /// When [_error] was set; used to expire it once `retryFailedAfter` elapses.
   DateTime? _errorAt;
@@ -422,7 +441,10 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// Call [refetch] to clear it and try again (a pull-to-refresh gesture is
   /// the natural trigger). See also `SlingClient.retryFailedAfter` for
   /// automatic retries after a cooldown instead of forever-sticky errors.
-  Object? get error => _error;
+  ///
+  /// With [ErrorPolicy.ignore], the GraphQL errors of a partial response
+  /// are not reported here.
+  SlingException? get error => _errorHidden ? null : _error;
 
   /// Runs [body] with a fresh selection tree, returning its result.
   ///
@@ -442,11 +464,11 @@ class QueryScope<Q extends Accessor> implements Recorder {
     final firstRun = _runCount++ == 0;
     final maxAge = this.maxAge;
     _stale = maxAge != null && client._isStale(_allDeps, maxAge);
-    if (!_hadMiss && !_stale && !_errorIsBackground) {
+    if (!_hadMiss && !_stale && !_errorIsBackground && !_errorKeptWithData) {
       // Fully served from fresh cache: an error from a miss-driven fetch is
-      // moot (a background one stays until `refetch`, see `error`).
-      _error = null;
-      _errorAt = null;
+      // moot (a background one stays until `refetch`, see `error`, and so
+      // does a partial response's under `ErrorPolicy.all`).
+      _clearError();
     }
     final wantsNetwork =
         _stale || (firstRun && fetchPolicy == FetchPolicy.cacheAndNetwork);
@@ -496,17 +518,21 @@ class QueryScope<Q extends Accessor> implements Recorder {
         at != null &&
         client._now().difference(at) >= retryAfter;
     if (!expired) return true;
+    _clearError();
+    return false;
+  }
+
+  void _clearError() {
     _error = null;
     _errorAt = null;
     _errorIsBackground = false;
-    return false;
+    _errorKeptWithData = false;
+    _errorHidden = false;
   }
 
   /// Re-fetches everything this scope selected during its last run.
   Future<void> refetch() {
-    _error = null;
-    _errorAt = null;
-    _errorIsBackground = false;
+    _clearError();
     _awaiting = true;
     _backgroundFetch = !_hadMiss;
     client._enqueue(_root, force: true);
@@ -560,22 +586,33 @@ class QueryScope<Q extends Accessor> implements Recorder {
 
   bool _disposed = false;
 
+  /// Detaches the scope: it is never notified again, and a request only it
+  /// (or other disposed scopes) waited for is aborted and its response
+  /// dropped.
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     client._scopes.remove(this);
     for (final r in _rows.toList()) {
       r.dispose();
     }
+    client._scopeDisposed();
   }
 
-  void _settle(Object? error) {
+  void _settle(SlingException? error) {
     _awaiting = false;
     _error = error;
     _errorAt = error != null ? client._now() : null;
     _errorIsBackground = error != null && _backgroundFetch;
+    final partial =
+        error is SlingGraphQLException &&
+        error.isPartial &&
+        errorPolicy != ErrorPolicy.none;
+    _errorKeptWithData = partial && errorPolicy == ErrorPolicy.all;
+    _errorHidden = partial && errorPolicy == ErrorPolicy.ignore;
     _backgroundFetch = false;
     // network-only: the scope's own data has landed, read the cache from now on.
-    if (error == null) _bypassCache = false;
+    if (error == null || partial) _bypassCache = false;
     _settled?.complete();
     _settled = null;
   }
@@ -1112,24 +1149,29 @@ class ListRule<E extends Accessor> {
       belongs(args, entity as E);
 }
 
-/// Sends one HTTP request and returns its response. The single extension
-/// point for auth headers / token refresh, retries, timeouts and logging:
+/// Sends one HTTP request and returns its response: the extension point for
+/// logging, custom HTTP stacks and test doubles.
 ///
 /// ```dart
 /// SlingClient<Query>(
 ///   endpoint: uri,
 ///   rootFactory: Query.root,
 ///   transport: (request) async {
-///     request.headers['authorization'] = 'Bearer ${await token()}';
-///     return http.Response.fromStream(await http.Client().send(request))
-///         .timeout(const Duration(seconds: 10));
+///     final response = await http.Response.fromStream(await _http.send(request));
+///     log('${response.statusCode} ${request.body.length} B');
+///     return response;
 ///   },
 /// );
 /// ```
 ///
-/// The request is a finalized POST with `content-type` and
-/// [SlingClient.headers] already applied; queries and mutations alike go
-/// through it. An `http.Request` can be sent once: copy it before retrying.
+/// Auth ([SlingClient.auth]), retries ([SlingClient.retry]) and timeouts
+/// ([SlingClient.timeout]) are the client's: it calls the transport once per
+/// attempt, with a fresh request each time. The request is a finalized
+/// POST (an `http.AbortableRequest`: pass it on to an `http.Client` and a
+/// timeout or a disposed scope aborts it) with `content-type`,
+/// [SlingClient.headers] and the auth headers applied; queries and mutations
+/// alike go through it. What it throws is classified by
+/// [SlingException.from] (`http.ClientException` is a network error).
 typedef Transport = Future<http.Response> Function(http.Request request);
 
 /// Opens one subscription and returns its results as they arrive: each
@@ -1139,23 +1181,25 @@ typedef Transport = Future<http.Response> Function(http.Request request);
 /// subscription to the stream.
 ///
 /// The request is a finalized POST like a query's, with
-/// `accept: text/event-stream` and [SlingClient.headers] applied. The default
-/// ([sseSubscriptionTransport]) speaks GraphQL over Server-Sent Events in
-/// "distinct connections" mode (one HTTP request per subscription, what
-/// graphql-yoga, Apollo Server and Hot Chocolate serve on the regular
-/// endpoint). Wrap it to add auth, or replace it to use another protocol
-/// (`graphql-ws`) — the client only ever sees decoded results:
+/// `accept: text/event-stream`, [SlingClient.headers] and the
+/// [SlingClient.auth] headers applied (an `http.AbortableRequest`, aborted
+/// when the subscription closes). The default ([sseSubscriptionTransport])
+/// speaks GraphQL over Server-Sent Events in "distinct connections" mode
+/// (one HTTP request per subscription, what graphql-yoga, Apollo Server and
+/// Hot Chocolate serve on the regular endpoint). Replace it to use another
+/// protocol (`graphql-ws`) — the client only ever sees decoded results:
 ///
 /// ```dart
 /// SlingClient<Query>(
 ///   endpoint: uri,
 ///   rootFactory: Query.root,
-///   subscriptionTransport: (request) {
-///     request.headers['authorization'] = 'Bearer $token';
-///     return sseSubscriptionTransport(request);
-///   },
+///   subscriptionTransport: (request) => myWebSocketTransport(request),
 /// );
 /// ```
+///
+/// Stream errors are classified by [SlingException.from]; an
+/// unauthenticated one ([SlingAuth.isUnauthenticated]) refreshes the
+/// credentials and reopens the connection once.
 typedef SubscriptionTransport = Stream<Map<String, Object?>> Function(
   http.Request request,
 );
@@ -1186,7 +1230,7 @@ Stream<Map<String, Object?>> sseSubscriptionTransport(
         response = await c.send(request);
       } catch (e, st) {
         if (!controller.isClosed) {
-          controller.addError(e, st);
+          controller.addError(SlingException.from(e, st), st);
           await controller.close();
         }
         await close();
@@ -1198,11 +1242,18 @@ Stream<Map<String, Object?>> sseSubscriptionTransport(
         return;
       }
       if (response.statusCode >= 400) {
+        var body = '';
+        try {
+          body = await response.stream.bytesToString();
+        } catch (_) {
+          // The status says enough.
+        }
+        if (controller.isClosed) {
+          await close();
+          return;
+        }
         controller.addError(
-          SlingException(
-            'HTTP ${response.statusCode}',
-            statusCode: response.statusCode,
-          ),
+          SlingHttpException.fromBody(response.statusCode, body),
         );
         await controller.close();
         await close();
@@ -1251,7 +1302,9 @@ Stream<Map<String, Object?>> sseSubscriptionTransport(
               }
             },
             onError: (Object e, StackTrace st) {
-              if (!controller.isClosed) controller.addError(e, st);
+              if (!controller.isClosed) {
+                controller.addError(SlingException.from(e, st), st);
+              }
             },
             onDone: () {
               dispatch();
@@ -1382,21 +1435,69 @@ class SlingSubscription<T> {
   /// Reopens the connection now if it dropped (a retry button); a no-op
   /// while connected or after [cancel].
   void reconnect() {
-    if (_closed || !_listened || _upstream != null) return;
+    if (_closed || !_listened || _upstream != null || _connecting) return;
     _retry?.cancel();
     _retry = null;
     _open();
   }
 
+  /// Waiting for `SlingAuth.headers` or an auth refresh before connecting.
+  bool _connecting = false;
+
+  /// Aborts the current connection's request.
+  Completer<void>? _abort;
+
+  /// The auth generation the current connection's headers came from.
+  int _authGeneration = 0;
+
+  /// The connection was reopened after an auth refresh and has not had an
+  /// event yet: another unauthenticated failure is final.
+  bool _authReplayed = false;
+
   void _open() {
     if (_closed) return;
     _listened = true;
     _client._subscriptions.add(this);
+    final auth = _client.auth;
+    if (auth == null) {
+      _connect(const {});
+      return;
+    }
+    final generation = _client._authGeneration;
+    final FutureOr<Map<String, String>> headers;
+    try {
+      headers = auth.headers();
+    } catch (e, st) {
+      _fail(SlingAuthException(e), st);
+      return;
+    }
+    if (headers is Map<String, String>) {
+      _connect(headers, generation);
+      return;
+    }
+    _connecting = true;
+    headers.then(
+      (headers) {
+        _connecting = false;
+        if (!_closed) _connect(headers, generation);
+      },
+      onError: (Object e, StackTrace st) {
+        _connecting = false;
+        _fail(SlingAuthException(e), st);
+      },
+    );
+  }
+
+  void _connect(Map<String, String> authHeaders, [int generation = 0]) {
+    _authGeneration = generation;
     _client.onOperation?.call(operation);
     _record = _client._track('subscription', operation, _scope.root, [
       ?debugLabel,
     ]);
-    final request = _client._request(operation)
+    _record?._sent();
+    final abort = _abort = Completer<void>();
+    final request = _client._request(operation, abortTrigger: abort.future)
+      ..headers.addAll(authHeaders)
       ..headers['accept'] = 'text/event-stream';
     Stream<Map<String, Object?>> results;
     try {
@@ -1409,9 +1510,9 @@ class SlingSubscription<T> {
     _upstream = results.listen(
       _onResult,
       onError: (Object e, StackTrace st) {
-        if (!_controller.isClosed) _controller.addError(e, st);
-        _record?._finish(e);
-        _dropped();
+        final error = SlingException.from(e, st);
+        if (_unauthenticated(error)) return;
+        _fail(error, st);
       },
       onDone: _close,
       cancelOnError: true,
@@ -1419,12 +1520,61 @@ class SlingSubscription<T> {
     onStatusChanged?.call();
   }
 
-  /// The connection failed: schedule a reopen, or end the stream.
-  void _dropped() {
+  /// Reports [error] on the stream and treats the connection as dropped.
+  void _fail(SlingException error, [StackTrace? st]) {
     if (_closed) return;
+    if (!_controller.isClosed) _controller.addError(error, st);
+    _record?._finish(error);
+    _dropped();
+  }
+
+  /// Drops the connection without scheduling anything.
+  void _disconnect() {
     final upstream = _upstream;
     _upstream = null;
     upstream?.cancel();
+    final abort = _abort;
+    _abort = null;
+    if (abort != null && !abort.isCompleted) abort.complete();
+  }
+
+  /// When [error] means the credentials were rejected: refreshes them
+  /// (single-flight with every other request) and reopens the connection
+  /// once; a second rejection is a [SlingAuthException]. Returns `false`
+  /// for any other error.
+  bool _unauthenticated(SlingException error) {
+    final auth = _client.auth;
+    if (_closed || auth == null || !auth.isUnauthenticated(error)) {
+      return false;
+    }
+    _disconnect();
+    _record?._finish(error);
+    if (_authReplayed) {
+      _fail(SlingAuthException(error));
+      return true;
+    }
+    _authReplayed = true;
+    _connecting = true;
+    onStatusChanged?.call();
+    _client
+        ._refreshAuth(auth, _authGeneration)
+        .then(
+          (_) {
+            _connecting = false;
+            _open();
+          },
+          onError: (Object e, StackTrace st) {
+            _connecting = false;
+            _fail(SlingException.from(e, st), st);
+          },
+        );
+    return true;
+  }
+
+  /// The connection failed: schedule a reopen, or end the stream.
+  void _dropped() {
+    if (_closed) return;
+    _disconnect();
     final after = retryAfter;
     if (after == null) {
       _close();
@@ -1439,24 +1589,24 @@ class SlingSubscription<T> {
 
   void _onResult(Map<String, Object?> json) {
     if (_closed) return;
-    _eventCount++;
-    _record?._event();
-    final errors =
-        (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
-    final data = json['data'] as Map<String, Object?>?;
-    if (data == null) {
-      _controller.addError(
-        SlingException(
-          errors.isEmpty
-              ? 'Empty event'
-              : errors.map((e) => e['message']).join('\n'),
-          graphqlErrors: errors,
-        ),
+    final errors = SlingGraphQLError.listFromJson(json['errors']);
+    final data = json['data'];
+    if (data is! Map<String, Object?>) {
+      final error = SlingGraphQLException(
+        errors,
+        message: errors.isEmpty ? 'Empty event' : null,
       );
+      if (_unauthenticated(error)) return;
+      _eventCount++;
+      _record?._event();
+      _controller.addError(error);
       return;
     }
+    _eventCount++;
+    _record?._event();
+    _authReplayed = false;
     for (final e in errors) {
-      SlingClient._prune(data, e['path']);
+      SlingClient._prune(data, e.path);
     }
     final cache = _client.cache;
     cache.batch(() {
@@ -1469,12 +1619,7 @@ class SlingSubscription<T> {
       _client._countWrite();
     });
     if (errors.isNotEmpty) {
-      _controller.addError(
-        SlingException(
-          errors.map((e) => e['message']).join('\n'),
-          graphqlErrors: errors,
-        ),
-      );
+      _controller.addError(SlingGraphQLException(errors, isPartial: true));
     }
     _controller.add(_compute());
   }
@@ -1486,6 +1631,9 @@ class SlingSubscription<T> {
     _retry = null;
     final up = _upstream;
     _upstream = null;
+    final abort = _abort;
+    _abort = null;
+    if (abort != null && !abort.isCompleted) abort.complete();
     _client._subscriptions.remove(this);
     _record?._finish();
     // The payloads live on in the entities they referenced; the root fields
@@ -1526,9 +1674,15 @@ class SlingClient<Q extends Accessor> {
     this.subscriptionRetryAfter,
     this.gcAfterWrites = 100,
     this.logRequests = false,
+    this.errorPolicy = ErrorPolicy.none,
+    this.timeout,
+    this.retry = const RetryPolicy(),
+    this.auth,
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
+    // Source of `RetryPolicy.jitter`; only worth overriding in tests.
+    Random? random,
   }) : assert(
          rootFactory != null || schema != null,
          'SlingClient: pass schema: (the generated slingSchema) or '
@@ -1557,7 +1711,8 @@ class SlingClient<Q extends Accessor> {
        warnOnWaterfall = warnOnWaterfall ?? _assertsEnabled,
        onWaterfall = onWaterfall ?? _printWaterfall,
        // ignore: prefer_initializing_formals
-       _now = now;
+       _now = now,
+       _random = random ?? Random();
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
@@ -1572,6 +1727,41 @@ class SlingClient<Q extends Accessor> {
 
   /// Static headers added to every request (before [transport] sees it).
   final Map<String, String> headers;
+
+  /// Default [ErrorPolicy] for scopes, [resolve] and [mutateWith] calls that
+  /// do not set their own: what to do with GraphQL errors that come with
+  /// data. [ErrorPolicy.none] (prune and fail) by default.
+  final ErrorPolicy errorPolicy;
+
+  /// Default time limit of one attempt of a query batch or a mutation,
+  /// after which it is aborted with a [SlingTimeoutException] (retried like
+  /// a network error by [retry]). `null` (the default) waits as long as the
+  /// transport does. Per call: `QueryBuilder(timeout:)`, [createScope],
+  /// [resolve], [mutateWith]. Subscriptions have none: they stay open.
+  final Duration? timeout;
+
+  /// How query batches are retried (see [RetryPolicy]): by default three
+  /// attempts for network errors, timeouts and 5xx, with exponential
+  /// backoff and jitter. [RetryPolicy.none] reports the first failure.
+  /// Mutations are never retried unless the call passes `retry:`;
+  /// subscriptions use [subscriptionRetryAfter].
+  ///
+  /// Retries happen inside one fetch, before any scope sees an error: the
+  /// scopes stay [QueryScope.isLoading] meanwhile, and the sticky error —
+  /// and [retryFailedAfter]'s cooldown — start from the final failure.
+  final RetryPolicy retry;
+
+  /// Adds credentials to every request and refreshes them once on an
+  /// unauthenticated response (see [SlingAuth]). `null`: no auth handling
+  /// (static tokens can go in [headers]).
+  final SlingAuth? auth;
+
+  final Random _random;
+
+  /// Bumped by each successful [SlingAuth.refresh]: a request sent with
+  /// headers from an older generation replays without refreshing again.
+  int _authGeneration = 0;
+  Future<void>? _authRefresh;
   final http.Client _http;
   final Transport? _transport;
 
@@ -1715,6 +1905,7 @@ class SlingClient<Q extends Accessor> {
   /// give transient failures (a flaky connection, a cold server) a chance to
   /// heal themselves without the user pulling to refresh; the clock is
   /// checked lazily, on the next miss for that document, not on a timer.
+  /// It starts from the final failure, once [retry] gave up.
   final Duration? retryFailedAfter;
 
   /// Default [FetchPolicy] for scopes that do not set their own
@@ -1937,6 +2128,8 @@ class SlingClient<Q extends Accessor> {
     String? debugLabel,
     FetchPolicy? fetchPolicy,
     Duration? maxAge,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
   }) {
     final scope = QueryScope<Q>(
       this,
@@ -1945,6 +2138,8 @@ class SlingClient<Q extends Accessor> {
       debugLabel: debugLabel,
       fetchPolicy: fetchPolicy,
       maxAge: maxAge,
+      errorPolicy: errorPolicy,
+      timeout: timeout,
     );
     _scopes.add(scope);
     return scope;
@@ -1989,22 +2184,41 @@ class SlingClient<Q extends Accessor> {
   /// `prepare`-style prefetching or tests. [fetchPolicy] / [maxAge] default
   /// to the client's: `resolve(body, fetchPolicy: FetchPolicy.networkOnly)`
   /// is "fetch this now, whatever the cache has".
+  ///
+  /// Throws the [SlingException] the fetch failed with. [errorPolicy]
+  /// (default [SlingClient.errorPolicy]) decides about a partial response:
+  /// [ErrorPolicy.none] throws its [SlingGraphQLException],
+  /// [ErrorPolicy.all] throws it with [SlingGraphQLException.data] set to
+  /// [body]'s value, [ErrorPolicy.ignore] returns that value. [timeout]
+  /// defaults to [SlingClient.timeout].
   Future<T> resolve<T>(
     T Function(Q root) body, {
     FetchPolicy? fetchPolicy,
     Duration? maxAge,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
   }) async {
     final scope = createScope(
       onChanged: () {},
       fetchPolicy: fetchPolicy,
       maxAge: maxAge,
+      errorPolicy: errorPolicy,
+      timeout: timeout,
     );
     try {
       scope.run(body);
       await scope.whenSettled;
-      if (scope.error != null) throw scope.error!;
-      final result = scope.run(body);
-      return result;
+      final error = scope.error;
+      if (error == null) {
+        final result = scope.run(body);
+        return result;
+      }
+      if (error is SlingGraphQLException &&
+          error.isPartial &&
+          scope.errorPolicy == ErrorPolicy.all) {
+        throw error.withData(scope.run(body));
+      }
+      throw error;
     } finally {
       scope.dispose();
     }
@@ -2030,14 +2244,26 @@ class SlingClient<Q extends Accessor> {
   /// as `client.mutate(...)` with the schema's `Mutation` type bound.
   ///
   /// Any GraphQL error fails the call, partial ones included (`data` *and*
-  /// `errors`): the future rejects with a [SlingException] carrying
-  /// [SlingException.graphqlErrors], [body] is not run again and
+  /// `errors`): the future rejects with a [SlingGraphQLException] carrying
+  /// [SlingException.errors], [body] is not run again and
   /// [refetchQueries] are not refetched. The cache still takes what the
   /// server resolved: the optimistic writes are undone first, then the
   /// resolved fields are written over them (the server's values win), while
   /// errored paths are pruned and keep their pre-mutation value. Widgets
   /// showing the resolved entities rebuild as on success. An HTTP or
   /// transport error, or a response without `data`, writes nothing.
+  ///
+  /// [errorPolicy] (default [SlingClient.errorPolicy]) changes the partial
+  /// case: with [ErrorPolicy.all] or [ErrorPolicy.ignore] the call counts as
+  /// landed — the response is written as sent (`null`s at errored paths
+  /// included), optimistic writes are not undone, [refetchQueries] run and
+  /// [body] computes the value; `ignore` returns it, `all` throws the
+  /// [SlingGraphQLException] with the value in [SlingGraphQLException.data].
+  ///
+  /// [timeout] (default [SlingClient.timeout]) limits each attempt.
+  /// Mutations are sent once: a timed-out or dropped mutation may still have
+  /// been applied by the server. Pass [retry] to opt in for mutations that
+  /// are safe to repeat.
   ///
   /// [refetchQueries] names root **query** field names (`'me'`, `'launches'`
   /// — not aliases, so arguments and aliasing do not matter) to refetch once
@@ -2054,7 +2280,11 @@ class SlingClient<Q extends Accessor> {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
     String? debugLabel,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
+    RetryPolicy? retry,
   }) async {
+    final policy = errorPolicy ?? this.errorPolicy;
     final journal = <CacheWrite>[];
     if (optimistic != null) {
       // One cache change for the whole callback (see `Cache.batch`).
@@ -2079,32 +2309,58 @@ class SlingClient<Q extends Accessor> {
     onOperation?.call(op);
     final record = _track('mutation', op, scope.root, [?debugLabel]);
 
-    (Map<String, Object?>, SlingException?)? received;
-    (Object, StackTrace)? failure;
+    _Received? received;
+    SlingException? failure;
     _mutationsInFlight++;
     try {
-      received = await _receive(op, record);
-    } catch (e, stack) {
-      failure = (e, stack);
+      received = await _execute(
+        op,
+        record: record,
+        timeout: timeout ?? this.timeout,
+        retry: retry ?? RetryPolicy.none,
+      );
+    } on SlingException catch (e) {
+      failure = e;
     }
     // From here on everything is synchronous: one cache change for the
     // response, the rollback, list rules and the root removal.
     return cache.batch(() {
       Set<String> touched;
-      SlingException? error;
+      SlingGraphQLException? partial;
       try {
-        final Map<String, Object?> data;
         // The request failed: rethrown below, after the rollback.
-        (data, error) =
-            received ?? Error.throwWithStackTrace(failure!.$1, failure.$2);
-        record?._finish(error);
+        if (failure != null) throw failure;
+        final data = received!.data;
+        if (received.errors.isNotEmpty) {
+          partial = SlingGraphQLException(received.errors, isPartial: true);
+          if (policy == ErrorPolicy.none) {
+            for (final e in received.errors) {
+              _prune(data, e.path);
+            }
+          }
+        }
+        record?._finish(partial);
         // Partial failure: undo the optimistic writes *before* writing the
         // fields that resolved, so the server's values win over the rollback.
-        final undone = error == null ? const <String>{} : _rollback(journal);
-        touched = cache.writeResponse('mutation', data, at: _now());
+        final undone = partial != null && policy == ErrorPolicy.none
+            ? _rollback(journal)
+            : const <String>{};
+        try {
+          touched = cache.writeResponse(
+            'mutation',
+            op.toCacheKeys(data),
+            at: _now(),
+          );
+        } catch (e, st) {
+          throw SlingTransportException(
+            e,
+            st,
+            'Could not cache the response: $e',
+          );
+        }
         touched = touched.union(undone);
         _writesSinceGc++;
-      } catch (e) {
+      } on SlingException catch (e) {
         record?._finish(e);
         _notify(_rollback(journal));
         rethrow;
@@ -2112,10 +2368,10 @@ class SlingClient<Q extends Accessor> {
         _mutationsInFlight--;
         _checkIdle();
       }
-      if (error != null) {
+      if (partial != null && policy == ErrorPolicy.none) {
         _removeMutationRoot(scope.root);
         _notify(touched);
-        throw error;
+        throw partial;
       }
       _notify(touched);
 
@@ -2130,6 +2386,9 @@ class SlingClient<Q extends Accessor> {
 
       final result = body(root(scope));
       _removeMutationRoot(scope.root);
+      if (partial != null && policy == ErrorPolicy.all) {
+        throw partial.withData(result);
+      }
       return result;
     });
   }
@@ -2260,6 +2519,7 @@ class SlingClient<Q extends Accessor> {
     if (op.document == _failedDocument && !expired) {
       // Same document already failed: surface the error without a round trip.
       for (final s in scopes) {
+        if (s._disposed) continue;
         s._waterfallLeaves.clear();
         s._settle(_lastError);
         s._changedByClient();
@@ -2272,7 +2532,14 @@ class SlingClient<Q extends Accessor> {
       _failedDocument = null;
       _failedAt = null;
     }
+    if (scopes.every((s) => s._disposed)) {
+      // Everyone who asked is gone (a screen popped before its first frame
+      // ended): nothing to send.
+      _checkIdle();
+      return;
+    }
 
+    final cancel = _inflightCancel = _CancelToken();
     _inflight = tree;
     _rememberLists(tree);
     _inflightScopes.addAll(scopes);
@@ -2285,30 +2552,93 @@ class SlingClient<Q extends Accessor> {
       for (final s in scopes) s.debugLabel,
     ]);
 
-    Object? error;
-    Map<String, Object?>? data;
+    _Received? received;
+    SlingException? error;
     try {
-      (data, error) = await _receive(op, record);
-    } catch (e) {
+      received = await _execute(
+        op,
+        record: record,
+        timeout: _batchTimeout(scopes),
+        retry: retry,
+        cancel: cancel,
+      );
+    } on SlingException catch (e) {
       error = e;
+    }
+    if (identical(_inflightCancel, cancel)) _inflightCancel = null;
+    if (cancel.isCancelled) {
+      _abandon(record);
+      return;
     }
     // Synchronous from here: one cache change for the response, list-rule
     // edits and an automatic gc (see `Cache.batch`).
-    cache.batch(() => _land(op, record, data, error));
+    cache.batch(() => _land(op, record, received, error));
   }
 
-  /// Writes a flush's response [data] (when it came) and settles the scopes
-  /// that waited for it.
+  /// The longest timeout of [scopes]; `null` (no limit) if one has none.
+  Duration? _batchTimeout(Set<QueryScope<Q>> scopes) {
+    Duration? longest;
+    for (final s in scopes) {
+      final t = s.timeout;
+      if (t == null) return null;
+      if (longest == null || t > longest) longest = t;
+    }
+    return longest ?? timeout;
+  }
+
+  /// Cancels the in-flight query batch when every scope waiting for it has
+  /// been disposed: the request is aborted and its response dropped.
+  void _scopeDisposed() {
+    final cancel = _inflightCancel;
+    if (cancel == null || cancel.isCancelled) return;
+    if (_inflightScopes.every((s) => s._disposed)) cancel.cancel();
+  }
+
+  /// Ends a cancelled batch without writing anything. A scope that joined
+  /// it after the cancellation re-runs and fetches again.
+  void _abandon(SlingRequest? record) {
+    record?._finish(const SlingCancelledException());
+    _inflight = null;
+    final waiters = _inflightScopes;
+    _inflightScopes = {};
+    for (final s in waiters) {
+      if (s._disposed) continue;
+      s._settle(null);
+      s._changedByClient();
+    }
+    _checkIdle();
+  }
+
+  /// Writes a flush's response (when it came) and settles the scopes that
+  /// waited for it. Errored paths are pruned unless every live scope that
+  /// selected their root field keeps them ([ErrorPolicy.all] / `ignore`).
   void _land(
     PrintedOperation op,
     SlingRequest? record,
-    Map<String, Object?>? data,
-    Object? error,
+    _Received? received,
+    SlingException? error,
   ) {
+    _inflight = null;
+    final waiters = {
+      for (final s in _inflightScopes)
+        if (!s._disposed) s,
+    };
+    _inflightScopes = {};
     Set<String> touched = {};
     try {
-      if (data != null) {
-        touched = cache.writeResponse('query', data, at: _now());
+      if (received != null) {
+        final data = received.data;
+        if (received.errors.isNotEmpty) {
+          error = SlingGraphQLException(received.errors, isPartial: true);
+          for (final e in received.errors) {
+            if (!_keepsErroredPath(e.path, waiters)) _prune(data, e.path);
+          }
+        }
+        touched = cache.writeResponse(
+          'query',
+          op.toCacheKeys(data),
+          at: _now(),
+        );
         _writesSinceGc++; // swept once the flush settles (`_checkIdle`)
       }
       if (error != null) {
@@ -2319,17 +2649,18 @@ class SlingClient<Q extends Accessor> {
         _failedDocument = null;
         _failedAt = null;
       }
-    } catch (e) {
-      error = e;
+    } catch (e, st) {
+      error = SlingTransportException(
+        e,
+        st,
+        'Could not cache the response: $e',
+      );
       _failedDocument = op.document;
       _failedAt = _now();
-      _lastError = e;
+      _lastError = error;
     }
     record?._finish(error);
 
-    _inflight = null;
-    final waiters = _inflightScopes;
-    _inflightScopes = {};
     for (final s in waiters) {
       s._settle(error);
     }
@@ -2343,8 +2674,27 @@ class SlingClient<Q extends Accessor> {
     _checkIdle();
   }
 
+  /// Whether the `null` the server put at [path] is cached as sent rather
+  /// than pruned: some scope of the batch selected its root field, and none
+  /// that did uses [ErrorPolicy.none].
+  static bool _keepsErroredPath(
+    List<Object>? path,
+    Set<QueryScope<Accessor>> scopes,
+  ) {
+    if (path == null || path.isEmpty) return false;
+    final alias = path.first;
+    var selected = false;
+    for (final s in scopes) {
+      if (!s.root.childAliases.contains(alias)) continue;
+      if (s.errorPolicy == ErrorPolicy.none) return false;
+      selected = true;
+    }
+    return selected;
+  }
+
   Set<QueryScope<Q>> _inflightScopes = {};
-  Object? _lastError;
+  _CancelToken? _inflightCancel;
+  SlingException? _lastError;
 
   /// Rebuilds every scope that read one of the [touched] dependency keys
   /// (`ROOT_QUERY.launches_x`, `Launch:launch-181.name`, …), plus [always].
@@ -2372,32 +2722,10 @@ class SlingClient<Q extends Accessor> {
     }
   }
 
-  /// POSTs [op] and returns `data` keyed by cache aliases. On partial failure
-  /// the fields that resolved are kept, the `null`s the server put at errored
-  /// paths are pruned (they are not real nulls), and the error is returned
-  /// alongside.
-  Future<(Map<String, Object?>, SlingException?)> _receive(
-    PrintedOperation op, [
-    SlingRequest? record,
-  ]) async {
-    final (data, errors) = await _post(op, record);
-    SlingException? error;
-    if (errors.isNotEmpty) {
-      for (final e in errors) {
-        _prune(data, e['path']);
-      }
-      error = SlingException(
-        errors.map((e) => e['message']).join('\n'),
-        graphqlErrors: errors,
-      );
-    }
-    return (op.toCacheKeys(data), error);
-  }
-
   /// Removes the value at a GraphQL error `path` (aliases and list indices)
   /// from a response so it is not written to the cache.
-  static void _prune(Map<String, Object?> data, Object? path) {
-    if (path is! List || path.isEmpty) return;
+  static void _prune(Map<String, Object?> data, List<Object>? path) {
+    if (path == null || path.isEmpty) return;
     Object? node = data;
     for (var i = 0; i < path.length - 1; i++) {
       final key = path[i];
@@ -2413,41 +2741,212 @@ class SlingClient<Q extends Accessor> {
     if (node is List && last is int && last < node.length) node[last] = null;
   }
 
-  http.Request _request(PrintedOperation op) => http.Request('POST', endpoint)
-    ..headers.addAll({'content-type': 'application/json', ...headers})
-    ..body = jsonEncode({'query': op.document, 'variables': op.variables});
+  http.Request _request(PrintedOperation op, {Future<void>? abortTrigger}) =>
+      http.AbortableRequest('POST', endpoint, abortTrigger: abortTrigger)
+        ..headers.addAll({'content-type': 'application/json', ...headers})
+        ..body = jsonEncode({'query': op.document, 'variables': op.variables});
 
-  Future<(Map<String, Object?>, List<Map<String, Object?>>)> _post(
-    PrintedOperation op, [
-    SlingRequest? record,
-  ]) async {
-    final response = await transport(_request(op));
-    record?._response(response.statusCode, response.bodyBytes.length);
-    if (response.statusCode >= 400) {
-      throw SlingException(
-        'HTTP ${response.statusCode}',
-        statusCode: response.statusCode,
-      );
+  /// Sends [op] until it succeeds or [retry] gives up: each attempt goes
+  /// through [_authorized]. Returns the response's `data` (response keys,
+  /// errored paths not yet pruned) and `errors`; throws the final
+  /// [SlingException] (a [SlingCancelledException] once [cancel] fired).
+  Future<_Received> _execute(
+    PrintedOperation op, {
+    required SlingRequest? record,
+    required Duration? timeout,
+    required RetryPolicy retry,
+    _CancelToken? cancel,
+  }) async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await _authorized(op, record, timeout, cancel);
+      } on SlingCancelledException {
+        rethrow;
+      } on SlingException catch (e) {
+        if (attempt >= retry.maxAttempts || !retry.retryIf(e)) rethrow;
+        await _backoff(retry.delayFor(attempt, _random), cancel);
+      }
     }
-    final json = jsonDecode(response.body) as Map<String, Object?>;
-    final errors =
-        (json['errors'] as List?)?.cast<Map<String, Object?>>() ?? const [];
-    final data = json['data'] as Map<String, Object?>?;
-    if (data == null) {
-      throw SlingException(
-        errors.isEmpty ? 'Empty response' : errors.first['message'].toString(),
-        graphqlErrors: errors,
-      );
-    }
-    return (data, errors);
   }
 
-  /// Closes every open subscription and the HTTP client.
+  /// Waits [delay], or throws [SlingCancelledException] when [cancel] fires
+  /// first.
+  static Future<void> _backoff(Duration delay, _CancelToken? cancel) {
+    final done = Completer<void>();
+    final timer = Timer(delay, done.complete);
+    cancel?.whenCancelled.then((_) {
+      timer.cancel();
+      if (!done.isCompleted) {
+        done.completeError(const SlingCancelledException());
+      }
+    });
+    return done.future;
+  }
+
+  /// One attempt with [auth]'s headers; on an unauthenticated answer,
+  /// refreshes (single-flight) and replays once.
+  Future<_Received> _authorized(
+    PrintedOperation op,
+    SlingRequest? record,
+    Duration? timeout,
+    _CancelToken? cancel,
+  ) async {
+    final auth = this.auth;
+    if (auth == null) return _sendOnce(op, record, timeout, cancel, const {});
+    for (var replay = false; ; replay = true) {
+      final generation = _authGeneration;
+      final Map<String, String> authHeaders;
+      try {
+        authHeaders = await auth.headers();
+      } catch (e) {
+        throw SlingAuthException(e);
+      }
+      SlingException rejected;
+      try {
+        final received = await _sendOnce(
+          op,
+          record,
+          timeout,
+          cancel,
+          authHeaders,
+        );
+        if (received.errors.isEmpty) return received;
+        rejected = SlingGraphQLException(received.errors, isPartial: true);
+        if (!auth.isUnauthenticated(rejected)) return received;
+      } on SlingCancelledException {
+        rethrow;
+      } on SlingException catch (e) {
+        if (!auth.isUnauthenticated(e)) rethrow;
+        rejected = e;
+      }
+      if (replay) throw SlingAuthException(rejected);
+      await _refreshAuth(auth, generation);
+      if (cancel?.isCancelled ?? false) throw const SlingCancelledException();
+    }
+  }
+
+  /// Refreshes [auth] unless a refresh finished since [generation] (the
+  /// caller's headers are already outdated: it just replays). Concurrent
+  /// callers share one [SlingAuth.refresh]. Throws [SlingAuthException]
+  /// when it fails.
+  Future<void> _refreshAuth(SlingAuth auth, int generation) {
+    if (generation != _authGeneration) return Future.value();
+    return _authRefresh ??= () async {
+      try {
+        await auth.refresh();
+        _authGeneration++;
+      } catch (e) {
+        throw SlingAuthException(e);
+      } finally {
+        _authRefresh = null;
+      }
+    }();
+  }
+
+  /// One HTTP round trip through [transport], aborted after [timeout] or
+  /// when [cancel] fires.
+  Future<_Received> _sendOnce(
+    PrintedOperation op,
+    SlingRequest? record,
+    Duration? timeout,
+    _CancelToken? cancel,
+    Map<String, String> authHeaders,
+  ) async {
+    if (cancel?.isCancelled ?? false) throw const SlingCancelledException();
+    final abort = Completer<void>();
+    final request = _request(op, abortTrigger: abort.future)
+      ..headers.addAll(authHeaders);
+    final outcome = Completer<http.Response>();
+    void fail(SlingException error) {
+      if (!outcome.isCompleted) outcome.completeError(error);
+      if (!abort.isCompleted) abort.complete();
+    }
+
+    final timer = timeout == null
+        ? null
+        : Timer(timeout, () => fail(SlingTimeoutException(timeout)));
+    cancel?.whenCancelled.then((_) => fail(const SlingCancelledException()));
+    record?._sent();
+    Future<http.Response> sent;
+    try {
+      sent = transport(request);
+    } catch (e, st) {
+      sent = Future.error(e, st);
+    }
+    sent.then(
+      (response) {
+        if (!outcome.isCompleted) outcome.complete(response);
+      },
+      onError: (Object e, StackTrace st) {
+        if (!outcome.isCompleted) {
+          outcome.completeError(SlingException.from(e, st), st);
+        }
+      },
+    );
+    final http.Response response;
+    try {
+      response = await outcome.future;
+    } finally {
+      timer?.cancel();
+    }
+    record?._response(response.statusCode, response.bodyBytes.length);
+    if (response.statusCode >= 400) {
+      throw SlingHttpException.fromBody(response.statusCode, response.body);
+    }
+    final Object? json;
+    try {
+      json = jsonDecode(response.body);
+    } on FormatException catch (e, st) {
+      throw SlingTransportException(
+        e,
+        st,
+        'Invalid JSON response (HTTP ${response.statusCode})',
+      );
+    }
+    if (json is! Map<String, Object?>) {
+      throw SlingTransportException(
+        json ?? 'null',
+        null,
+        'Not a GraphQL response (HTTP ${response.statusCode})',
+      );
+    }
+    final errors = SlingGraphQLError.listFromJson(json['errors']);
+    final data = json['data'];
+    if (data is! Map<String, Object?>) throw SlingGraphQLException(errors);
+    return _Received(data, errors);
+  }
+
+  /// Closes every open subscription, aborts the query batch in flight and
+  /// closes the HTTP client.
   void dispose() {
     for (final s in _subscriptions.toList()) {
       s.cancel();
     }
+    _inflightCancel?.cancel();
     _requests.close();
     _http.close();
+  }
+}
+
+/// A response that came with `data`: the data under response keys (errored
+/// paths not pruned yet) and the GraphQL errors next to it.
+class _Received {
+  _Received(this.data, this.errors);
+
+  final Map<String, Object?> data;
+  final List<SlingGraphQLError> errors;
+}
+
+/// Fired once to abandon a query batch (every waiting scope was disposed,
+/// or the client was).
+class _CancelToken {
+  final Completer<void> _cancelled = Completer<void>();
+
+  bool get isCancelled => _cancelled.isCompleted;
+
+  Future<void> get whenCancelled => _cancelled.future;
+
+  void cancel() {
+    if (!_cancelled.isCompleted) _cancelled.complete();
   }
 }

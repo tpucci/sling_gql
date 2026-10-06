@@ -95,7 +95,12 @@ query {
   error, the widgets that asked for it), `logRequests: true` for one console
   line per operation, `SlingRequestOverlay` for the same list in the app.
 - Mutations with optimistic writes (journaled, rolled back on failure).
-- Partial `errors[]` handling, sticky errors, retry cooldown.
+- A sealed error model (`SlingNetworkException`, `SlingHttpException`,
+  `SlingGraphQLException` with error codes, …), `errorPolicy` (none / all /
+  ignore), sticky errors, retry cooldown.
+- Auth with single-flight token refresh (`SlingClient(auth: SlingAuth(...))`),
+  query retry with backoff (`RetryPolicy`), timeouts, cancellation of requests
+  nobody waits for.
 - Fetch policies per widget (`cacheFirst`, `cacheAndNetwork`, `networkOnly`)
   and `maxAge` stale-while-revalidate with `state.isStale` / `revalidate()`.
 - Type policies (`SlingClient(typePolicies:)`): key arguments and custom
@@ -104,7 +109,7 @@ query {
   for list membership.
 - Subscriptions over Server-Sent Events (`client.subscribe`,
   `SubscriptionBuilder`), each event normalized into the cache;
-  `subscriptionTransport:` for auth or another protocol.
+  `subscriptionTransport:` for another protocol.
 
 - Unions and interfaces: generated `asLaunch` getters (inline fragments)
   and `when(launch: …, rocket: …)`, all branches recorded on the skeleton.

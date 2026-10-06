@@ -217,7 +217,14 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     h.events.addError(StateError('connection lost'));
     await Future<void>.delayed(Duration.zero);
-    expect(error, isA<StateError>());
+    expect(
+      error,
+      isA<SlingTransportException>().having(
+        (e) => e.cause,
+        'cause',
+        isA<StateError>(),
+      ),
+    );
     expect(done, isTrue);
     expect(h.client.activeSubscriptions, 0);
   });

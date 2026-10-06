@@ -108,11 +108,17 @@ extension on SlingClient<Query> {
     T Function(Mutation m) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
+    RetryPolicy? retry,
   }) => mutateWith(
     Mutation.root,
     body,
     optimistic: optimistic,
     refetchQueries: refetchQueries,
+    errorPolicy: errorPolicy,
+    timeout: timeout,
+    retry: retry,
   );
 }
 
@@ -479,7 +485,7 @@ query (\$limit: Int) {
       await scope.whenSettled;
 
       expect(scope.error, isA<SlingException>());
-      expect((scope.error as SlingException).graphqlErrors, hasLength(1));
+      expect((scope.error as SlingException).errors, hasLength(1));
       expect(client.cache.read('query', ['me', 'name']), 'Ada');
       expect(client.cache.read('query', ['me', 'age']), missing);
     },
@@ -709,7 +715,13 @@ void _mutationTests() {
                 30; // was never fetched: must go back to missing, not null
           },
         ),
-        throwsStateError,
+        throwsA(
+          isA<SlingTransportException>().having(
+            (e) => e.cause,
+            'cause',
+            isA<StateError>(),
+          ),
+        ),
       );
 
       expect(scope.run((q) => q.me.friends()[0].name), 'Bob');

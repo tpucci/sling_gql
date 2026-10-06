@@ -135,6 +135,13 @@ void main() {
     scope.run((q) => q.me.name);
     await scope.whenSettled;
 
-    expect(scope.error, isA<StateError>());
+    expect(
+      scope.error,
+      isA<SlingTransportException>().having(
+        (e) => e.cause,
+        'cause',
+        isA<StateError>(),
+      ),
+    );
   });
 }
