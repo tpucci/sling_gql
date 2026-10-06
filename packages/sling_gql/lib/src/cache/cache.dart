@@ -3,9 +3,11 @@ import 'dart:collection';
 
 import 'package:meta/meta.dart';
 
+import 'field_policy.dart';
 import 'normalization.dart';
 import 'ref.dart';
 
+export 'field_policy.dart';
 export 'normalization.dart';
 export 'ref.dart';
 
@@ -747,8 +749,11 @@ class NormalizedCache implements Cache {
     for (final e in fields.entries) {
       final had = entity.containsKey(e.key);
       final previous = entity[e.key];
-      final incoming = e.value;
       final outer = _changed;
+      final incoming = switch (e.value) {
+        final PolicyWrite write => _applyPolicy(previous, write, touched),
+        final value => value,
+      };
       _changed = false;
       final Object? value;
       if (previous is List<Object?> && incoming is List<Object?>) {
@@ -783,6 +788,13 @@ class NormalizedCache implements Cache {
   /// Normalizes [incoming] against [existing]: keyed objects become entity
   /// refs, inline objects deep-merge, lists merge element-wise by index.
   Object? _normalize(Object? existing, Object? incoming, Set<String> touched) {
+    if (incoming is PolicyWrite) {
+      return _normalize(
+        existing,
+        _applyPolicy(existing, incoming, touched),
+        touched,
+      );
+    }
     if (incoming is Map<String, Object?>) {
       final key = normalization.identify(incoming);
       if (key != null) {
@@ -815,6 +827,52 @@ class NormalizedCache implements Cache {
     if (incoming != existing) _changed = true;
     return incoming;
   }
+
+  /// The value [write]'s pages merge [existing] (the cached field) into,
+  /// normalized: each page is normalized on its own (its entities merged,
+  /// inline parts fresh), then combined by the policy. The result is merged
+  /// into the field like a plain response, so only real changes touch keys.
+  Object? _applyPolicy(
+    Object? existing,
+    PolicyWrite write,
+    Set<String> touched,
+  ) {
+    final outer = _changed;
+    // A copy: the result is merged into [existing] in place, and a policy
+    // reusing its inline elements at other indices would alias them.
+    var value = _copyInline(existing);
+    // Fills first, against the entry they were fetched for, then the pages
+    // to merge, in document order.
+    final fills = <({Map<String, Object?> args, Object? value})>[];
+    for (final page in write.pages) {
+      if (!page.fill) continue;
+      fills.add((
+        args: page.args,
+        value: _normalize(null, page.value, touched),
+      ));
+    }
+    if (fills.isNotEmpty) value = write.policy.fill(value, fills);
+    for (final page in write.pages) {
+      if (page.fill) continue;
+      value = write.policy.merge(
+        value,
+        _normalize(null, page.value, touched),
+        FieldMergeContext(field: write.field, args: page.args),
+      );
+    }
+    _changed = outer;
+    return value;
+  }
+
+  /// Deep copy of the inline containers of a cached value (refs and
+  /// scalars shared).
+  static Object? _copyInline(Object? node) => switch (node) {
+    Map() => <String, Object?>{
+      for (final e in node.entries) e.key as String: _copyInline(e.value),
+    },
+    List() => <Object?>[for (final e in node) _copyInline(e)],
+    _ => node,
+  };
 
   /// [_normalize] of the list [incoming] into [old], the list the entity
   /// field [field] of [entity] holds, element by element: also touches the

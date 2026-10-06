@@ -5,7 +5,8 @@
 /// - [NormalizedCache], [Ref], [missing], [depKey] (and [elementDepKey],
 ///   [lengthDepKey]): the store's building
 ///   blocks. Apps use the [Cache] interface (`client.cache.snapshot`,
-///   `evict`, `onChange`…) and never these.
+///   `evict`, `onChange`…) and never these. [PolicyWrite]: how a response
+///   for a merging `FieldPolicy` field reaches `Cache.writeResponse`.
 /// - [CacheWrite], [MutationScope], [SubscriptionScope], [RowScope],
 ///   [ListLocator]: the recorder machinery behind optimistic writes,
 ///   mutations, subscriptions, `SlingRow` and `CacheScope.list`.
@@ -19,7 +20,13 @@ import 'src/cache/cache.dart' show Cache;
 
 export 'src/accessor.dart' show ListLocator;
 export 'src/cache/cache.dart'
-    show NormalizedCache, CacheWrite, depKey, elementDepKey, lengthDepKey;
+    show
+        NormalizedCache,
+        CacheWrite,
+        PolicyWrite,
+        depKey,
+        elementDepKey,
+        lengthDepKey;
 export 'src/cache/ref.dart' show Ref, missing;
 export 'src/client.dart' show MutationScope, SubscriptionScope, RowScope;
 export 'src/widgets.dart' show debugOwnerLabel;

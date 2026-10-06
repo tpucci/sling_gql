@@ -352,6 +352,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
   @override
   Cache get cache => _bypassCache ? _bypass : client.cache;
 
+  @override
+  Map<Type, TypePolicy> get typePolicies => client.typePolicies;
+
   Selection _root = Selection.root('query');
   @override
   Selection get root => _root;
@@ -645,6 +648,9 @@ class RowScope implements Recorder {
   @override
   Cache get cache => parent.cache;
 
+  @override
+  Map<Type, TypePolicy> get typePolicies => parent.typePolicies;
+
   Set<String> _deps = {};
 
   /// Dependency keys read during the last [run] (and by accessors bound in
@@ -771,6 +777,9 @@ class MutationScope implements Recorder {
   Cache get cache => client.cache;
 
   @override
+  Map<Type, TypePolicy> get typePolicies => client.typePolicies;
+
+  @override
   final Set<String> deps = {};
 
   @override
@@ -809,6 +818,9 @@ class CacheScope<Q extends Accessor> implements Recorder, ListLocator {
 
   @override
   Cache get cache => client.cache;
+
+  @override
+  Map<Type, TypePolicy> get typePolicies => client.typePolicies;
 
   /// Always a fresh empty set: a cache scope never rebuilds.
   @override
@@ -860,7 +872,8 @@ class CacheScope<Q extends Accessor> implements Recorder, ListLocator {
   /// [select] must return a generated list getter/method as-is (not a
   /// `.where(...)`/`.toList()` copy); arguments address the cache entry
   /// exactly as in a widget (`q.launches(first: 20).nodes` is the first
-  /// page only). The path to it may go through lookups and entities
+  /// page only — or, with `RelayStylePagination` on the field, the merged
+  /// list of every page). The path to it may go through lookups and entities
   /// (`(q) => q.launch(id: x)?.crew`).
   CacheList<R> list<R extends Accessor>(List<R>? Function(Q query) select) {
     final located = _located = [];
@@ -927,9 +940,9 @@ class CacheScope<Q extends Accessor> implements Recorder, ListLocator {
 /// cached (never fetched, or a server `null`) is left alone — adding to it
 /// would make a partial list look complete — and every edit returns `false`.
 ///
-/// Each cached argument set is its own list: a paginated connection's pages
-/// (`launches(first:, after:)`) and every filter are separate entries, and an
-/// edit applies to the one entry you named. A filtered or paginated list is
+/// Each cached argument set is its own list — every filter, and every page
+/// of a connection unless a [FieldPolicy] such as [RelayStylePagination]
+/// merges them into one — and an edit applies to the one entry you named. A filtered or paginated list is
 /// usually better served by `refetchQueries`; `totalCount`-style siblings are
 /// not adjusted either.
 class CacheList<R extends Accessor> {
@@ -1056,7 +1069,7 @@ enum ListPosition { prepend, append }
 /// — only decide on fields every reader of the list selects.
 ///
 /// **Query responses only remove.** A response's lists are the server's
-/// word, and with pagination each page is one list: the 20 launches of page
+/// word, and without a merging policy each page is one list: the 20 launches of page
 /// two "belong" to `launches(first: 20)` as much as page one's do, yet must
 /// not be added to it. So entities written by a query response can leave
 /// lists they no longer belong to, but never join one. Insertions happen for
@@ -1269,6 +1282,9 @@ class SubscriptionScope implements Recorder {
 
   @override
   Cache get cache => client.cache;
+
+  @override
+  Map<Type, TypePolicy> get typePolicies => client.typePolicies;
 
   @override
   final Set<String> deps = {};
@@ -1506,6 +1522,7 @@ class SlingClient<Q extends Accessor> {
     this.fetchPolicy = FetchPolicy.cacheFirst,
     this.maxAge,
     Iterable<ListRule<Accessor>> listRules = const [],
+    this.typePolicies = const {},
     this.subscriptionRetryAfter,
     this.gcAfterWrites = 100,
     this.logRequests = false,
@@ -1768,6 +1785,25 @@ class SlingClient<Q extends Accessor> {
     return cache.gc(retain: retain);
   }
 
+  /// How the cache stores particular fields, by the generated accessor
+  /// class they are read through and field name: which arguments make an
+  /// entry and how responses merge into it (see [FieldPolicy]).
+  /// [RelayStylePagination] keeps every page of a connection in one
+  /// growing list:
+  ///
+  /// ```dart
+  /// SlingClient<Query>(
+  ///   typePolicies: {
+  ///     Query: TypePolicy(fields: {'launches': RelayStylePagination()}),
+  ///   },
+  /// )
+  /// ```
+  ///
+  /// The key is the accessor's exact class: a policy on `Launch` does not
+  /// apply to the same field read through an interface accessor (`Node`),
+  /// register it under each class the field is read through.
+  final Map<Type, TypePolicy> typePolicies;
+
   final List<ListRule<Accessor>> _listRules;
 
   /// Rules keeping cached lists in sync with their entities (see
@@ -1789,7 +1825,7 @@ class SlingClient<Q extends Accessor> {
       for (final c in node.children) {
         for (final rule in _listRules) {
           if (c.isFragment || rule.field != c.field) continue;
-          final path = c.aliasPath;
+          final path = c.cachePath;
           if (rule.items != null) path.add(rule.items!);
           _knownLists.putIfAbsent(rule.field, () => {})[path.join('/')] = (
             path,
@@ -2126,16 +2162,49 @@ class SlingClient<Q extends Accessor> {
   /// request already covers it (no new request will be caused).
   bool _enqueueLeaf(Selection leaf) {
     if (_inflight?.covers(_singleton(leaf)) ?? false) return false;
-    _pending.ensurePath(leaf);
+    if (_insideMergedField(leaf)) {
+      _pending.ensureFillPath(leaf, _cachedPages);
+    } else {
+      _pending.ensurePath(leaf);
+    }
+    // A merged entry (or one of its pages) is fetched: with whatever its
+    // readers selected by the time the request leaves (see `_doFlush`).
+    if (leaf.policy?.merges ?? false) _entryFetches.add(leaf);
     return true;
   }
 
+  /// Policy fields missed since the last flush (see [_enqueueLeaf]).
+  final List<Selection> _entryFetches = [];
+
+  static bool _insideMergedField(Selection leaf) {
+    for (var n = leaf.parent; n != null; n = n.parent) {
+      if (n.policy?.merges ?? false) return true;
+    }
+    return false;
+  }
+
+  /// For [Selection.ensureFillPath]: the pages the cached entry of the
+  /// policy field [ancestor] holds — `null` when the entry does not cover
+  /// [ancestor]'s own arguments (that page is being fetched, not filled),
+  /// an empty list (fill with its own arguments) when no entry can be
+  /// read at its cache path (not fetched yet, or reached through a lookup).
+  List<Map<String, Object?>>? _cachedPages(Selection ancestor) {
+    final policy = ancestor.policy!;
+    final value = cache.read('query', ancestor.cachePath);
+    if (value is! Map) return const [];
+    if (!policy.covers(value, ancestor.argValues)) return null;
+    return policy.pages(value) ?? const [];
+  }
+
+  /// Fetches of a whole selection (refetch, cache-and-network, a stale
+  /// `maxAge`) send paged policy entries as their first page (see
+  /// [FieldPolicy.pageArgs]): a refresh starts a merged list over.
   void _enqueue(Selection tree, {bool force = false}) {
     if (force) {
       _failedDocument = null;
       _failedAt = null;
     }
-    _pending.mergeFrom(tree);
+    _pending.mergeFrom(tree, firstPages: true);
   }
 
   static Selection _singleton(Selection leaf) {
@@ -2152,6 +2221,15 @@ class SlingClient<Q extends Accessor> {
   }
 
   Future<void> _doFlush() async {
+    // A merged entry's fetch selects what every argument set of it read
+    // (the rows read through the first page, not through the next one).
+    for (final leaf in _entryFetches) {
+      final target = _pending.ensurePath(leaf);
+      for (final sibling in leaf.sameEntry) {
+        target.mergeFrom(sibling);
+      }
+    }
+    _entryFetches.clear();
     final tree = _pending;
     final scopes = _pendingScopes;
     _pending = Selection.root('query');

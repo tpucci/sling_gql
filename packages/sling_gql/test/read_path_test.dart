@@ -16,6 +16,8 @@ class _Recorder implements Recorder {
   final Selection root = Selection.root('query');
   @override
   final Set<String> deps = {};
+  @override
+  Map<Type, TypePolicy> get typePolicies => const {};
   final List<Selection> misses = [];
   @override
   void onMiss(Selection leaf) => misses.add(leaf);

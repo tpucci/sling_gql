@@ -98,7 +98,10 @@ query {
 - Partial `errors[]` handling, sticky errors, retry cooldown.
 - Fetch policies per widget (`cacheFirst`, `cacheAndNetwork`, `networkOnly`)
   and `maxAge` stale-while-revalidate with `state.isStale` / `revalidate()`.
-- Cursor pagination helpers, `CacheScope.list` for list membership.
+- Type policies (`SlingClient(typePolicies:)`): key arguments and custom
+  merges per field; `RelayStylePagination` keeps a cursor connection in one
+  growing cached list, read by `PaginatedQueryBuilder`. `CacheScope.list`
+  for list membership.
 - Subscriptions over Server-Sent Events (`client.subscribe`,
   `SubscriptionBuilder`), each event normalized into the cache;
   `subscriptionTransport:` for auth or another protocol.

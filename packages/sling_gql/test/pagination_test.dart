@@ -1,10 +1,10 @@
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:sling_gql/sling_gql.dart';
+
+import 'support/printed_document.dart';
 
 // --- Hand-written "generated" code for a connection schema -------------------
 //
@@ -48,7 +48,7 @@ class User extends Accessor {
 
 // --- Mock server: two pages of two users ---------------------------------------
 
-Map<String, Object?> _page(String? after) {
+Map<String, Object?> _page(Object? after) {
   final (names, endCursor, hasNext) = switch (after) {
     null => (['Ada', 'Bob'], 'c2', true),
     'c2' => (['Cy', 'Dee'], 'c4', false),
@@ -69,39 +69,34 @@ Map<String, Object?> _page(String? after) {
   };
 }
 
-/// Answers each `users` selection of the document under its alias.
-Map<String, Object?> _handler(String document, Map vars) {
-  final data = <String, Object?>{};
-  if (RegExp(r'^  users \{', multiLine: true).hasMatch(document)) {
-    data['users'] = _page(null);
-  }
-  for (final m in RegExp(
-    r'(users_\w+): users\(after: \$(\w+)\)',
-  ).allMatches(document)) {
-    data[m.group(1)!] = _page(vars[m.group(2)!] as String);
-  }
-  return data;
-}
-
 class Harness {
-  Harness() {
+  Harness({bool merged = true, this.renderSkeletons = true}) {
     client = SlingClient<Query>(
       endpoint: Uri.parse('http://test/graphql'),
       rootFactory: Query.root,
       onOperation: sent.add,
-      httpClient: MockClient((req) async {
-        final body = jsonDecode(req.body) as Map;
-        final data = _handler(
-          body['query'] as String,
-          body['variables'] as Map,
-        );
-        return http.Response(jsonEncode({'data': data}), 200);
-      }),
+      typePolicies: merged
+          ? const {
+              Query: TypePolicy(fields: {'users': RelayStylePagination()}),
+            }
+          : const {},
+      // Answers what the document selects, nothing more.
+      httpClient: printedDocumentServer(
+        () => {'users': (Map<String, Object?> args) => _page(args['after'])},
+        gate: () async => gate?.future,
+      ),
     );
   }
 
   late final SlingClient<Query> client;
   final sent = <PrintedOperation>[];
+
+  /// When set, responses wait for it.
+  Completer<void>? gate;
+
+  /// Rows for the skeleton of a page being loaded are built (and read their
+  /// fields) too.
+  final bool renderSkeletons;
 
   /// The last state handed to the builder.
   late PaginatedState<User> state;
@@ -124,7 +119,10 @@ class Harness {
         builder: (context, state) {
           this.state = state;
           return Column(
-            children: [for (final u in state.items) Text(u.name ?? '…')],
+            children: [
+              for (final u in state.items)
+                if (renderSkeletons || !u.isSkeleton) Text(u.name ?? '…'),
+            ],
           );
         },
       ),
@@ -132,6 +130,12 @@ class Harness {
   );
 
   List<String?> get names => [for (final u in state.items) u.name];
+
+  /// The `users` entries in the cache, by key.
+  Map<String, Object?> get entries => {
+    for (final e in client.cache.entity('ROOT_QUERY')!.entries)
+      if (e.key.startsWith('users')) e.key: e.value,
+  };
 }
 
 void main() {
@@ -160,12 +164,16 @@ void main() {
     expect(h.state.hasMissingData, isFalse);
   });
 
-  testWidgets('loadMore fetches only the new page', (tester) async {
+  testWidgets('loadMore fetches only the next page, merged into one list', (
+    tester,
+  ) async {
     final h = Harness();
-    await tester.pumpWidget(h.app());
+    final controller = PaginationController();
+    await tester.pumpWidget(h.app(controller: controller));
     await tester.pump();
 
     h.state.loadMore();
+    expect(controller.pendingCursor, 'c2');
     await tester.pump();
     await tester.pump();
 
@@ -180,34 +188,66 @@ void main() {
     );
     expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
     expect(h.state.hasMore, isFalse);
+    expect(controller.pendingCursor, isNull, reason: 'merged');
+    expect(h.entries.keys, [
+      'users',
+    ], reason: 'one cache entry, not one per page');
+    expect((h.entries['users']! as Map)['nodes'], hasLength(4));
 
     h.state.loadMore();
     await tester.pump();
     expect(h.sent, hasLength(2), reason: 'no next page: loadMore is a no-op');
   });
 
-  testWidgets('reset goes back to the first page without a request', (
-    tester,
-  ) async {
+  testWidgets('while the next page loads, the loaded items stay and its '
+      'skeleton follows them', (tester) async {
     final h = Harness();
-    final controller = PaginationController();
-    await tester.pumpWidget(h.app(controller: controller));
+    await tester.pumpWidget(h.app());
     await tester.pump();
+
+    h.gate = Completer<void>();
     h.state.loadMore();
     await tester.pump();
     await tester.pump();
-    expect(controller.pageCount, 2);
+    expect(h.sent, hasLength(2));
+    expect(h.state.items, hasLength(3));
+    expect(h.names.take(2), ['Ada', 'Bob']);
+    expect(h.state.items.last.isSkeleton, isTrue);
+    expect(h.state.hasMore, isFalse);
+    expect(h.state.isLoading, isTrue);
 
-    controller.reset();
+    h.gate!.complete();
     await tester.pump();
-
-    expect(controller.pageCount, 1);
-    expect(h.names, ['Ada', 'Bob']);
-    expect(h.sent, hasLength(2), reason: 'page one is cached');
-    expect(h.state.hasMore, isTrue);
+    await tester.pump();
+    expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
+    expect(h.state.isLoading, isFalse);
   });
 
-  testWidgets('refetch replays every loaded page in one request', (
+  testWidgets('the next page selects what the rows read, even when its '
+      'skeleton row is not built', (tester) async {
+    final h = Harness(renderSkeletons: false);
+    await tester.pumpWidget(h.app());
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    // No skeleton row in the first frame, so `name` was not read before
+    // the first page landed: one more (fill) request for it.
+    expect(h.sent, hasLength(2));
+    expect(h.sent.last.document, contains('name'));
+
+    h.state.loadMore();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(h.sent, hasLength(3), reason: 'no extra round trip for `name`');
+    final next = h.sent.last.document;
+    expect(next, contains(r'users(after: $after)'));
+    expect(next, contains('name'), reason: 'read through the first page');
+    expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
+  });
+
+  testWidgets('refetch starts the list over from the first page', (
     tester,
   ) async {
     final h = Harness();
@@ -216,17 +256,39 @@ void main() {
     h.state.loadMore();
     await tester.pump();
     await tester.pump();
+    expect(h.names, hasLength(4));
 
     final refetched = h.state.refetch();
     await tester.pump();
     await tester.pump();
     await refetched;
+    await tester.pump();
 
     expect(h.sent, hasLength(3));
     final doc = h.sent.last.document;
     expect(doc, contains('  users {'));
-    expect(doc, contains('users(after: \$after)'));
-    expect(h.names, ['Ada', 'Bob', 'Cy', 'Dee']);
+    expect(doc, isNot(contains('after')), reason: 'the first page only');
+    expect(h.names, ['Ada', 'Bob']);
+    expect(h.state.hasMore, isTrue);
+  });
+
+  testWidgets('without RelayStylePagination the builder says so', (
+    tester,
+  ) async {
+    final h = Harness(merged: false);
+    await tester.pumpWidget(h.app());
+    await tester.pump();
+    h.state.loadMore();
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.takeException(),
+      isA<AssertionError>().having(
+        (e) => e.message,
+        'message',
+        contains('RelayStylePagination'),
+      ),
+    );
   });
 
   test('PaginationController ignores null and duplicate cursors', () {
@@ -235,15 +297,15 @@ void main() {
     controller.addListener(() => notifications++);
 
     controller.loadMore(null);
-    expect(controller.cursors, [null]);
+    expect(controller.pendingCursor, isNull);
     controller.loadMore('c2');
     controller.loadMore('c2');
-    expect(controller.cursors, [null, 'c2']);
+    expect(controller.pendingCursor, 'c2');
     expect(notifications, 1);
 
     controller.reset();
     controller.reset();
-    expect(controller.cursors, [null]);
+    expect(controller.pendingCursor, isNull);
     expect(notifications, 2);
   });
 }

@@ -1,40 +1,47 @@
 import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
+import 'cache/cache.dart';
 import 'widgets.dart';
 
-/// Owns the cursors of a cursor-paginated list: one entry per loaded page,
-/// `null` being the first page.
+/// The next page a [PaginatedQueryBuilder] is loading, if any.
 ///
-/// Pagination in sling_gql is plain state — every `connection(after: cursor)`
-/// call is its own cache entry — so this controller only decides *which*
-/// pages a [PaginatedQueryBuilder] reads. Keep it in a `State` when the list
-/// must survive rebuilds of the surrounding widget or when a filter change
-/// has to [reset] it.
+/// The pages themselves live in the cache: with [RelayStylePagination] on
+/// the connection field, every page is merged into one growing list, so
+/// the builder reads the first page (which *is* that list) and, while one
+/// is on its way, the page after [pendingCursor]. Keep the controller in a
+/// `State` when the list must survive rebuilds of the surrounding widget or
+/// when a filter change has to [reset] it.
 class PaginationController extends ChangeNotifier {
-  List<String?> _cursors = const [null];
+  String? _pending;
 
-  /// Cursors of the loaded pages, first page first.
-  List<String?> get cursors => _cursors;
+  /// The cursor the page being loaded starts after (`after: pendingCursor`);
+  /// `null` when no page is loading. Cleared once the page is merged.
+  String? get pendingCursor => _pending;
 
-  int get pageCount => _cursors.length;
-
-  /// Appends the page starting after [endCursor]. Ignored when [endCursor] is
-  /// `null` (the last page has not been fetched yet, appending would re-read
-  /// the first page) or already loaded (double tap).
+  /// Loads the page starting after [endCursor]. Ignored when [endCursor] is
+  /// `null` (the last page has not been fetched yet, the request would
+  /// re-read the first page) or already loading (double tap).
   void loadMore(String? endCursor) {
-    if (endCursor == null || _cursors.contains(endCursor)) return;
-    _cursors = [..._cursors, endCursor];
+    if (endCursor == null || endCursor == _pending) return;
+    _pending = endCursor;
     notifyListeners();
   }
 
-  /// Back to the first page only. Call when the arguments that select the
-  /// list change (filter, sort): the old pages stay cached, the new first
-  /// page is read from cache or fetched.
+  /// Forgets the page being loaded. Call when the arguments that select the
+  /// list change (filter, sort): each argument set is its own merged list,
+  /// kept in the cache with the pages it had, so coming back to it shows
+  /// them again without a request.
   void reset() {
-    if (_cursors.length == 1) return;
-    _cursors = const [null];
+    if (_pending == null) return;
+    _pending = null;
     notifyListeners();
+  }
+
+  /// The builder saw the page after [cursor] merged: nothing to load. Not
+  /// notified, it runs during a build that already shows the page.
+  void _loaded(String cursor) {
+    if (_pending == cursor) _pending = null;
   }
 }
 
@@ -42,8 +49,8 @@ class PaginationController extends ChangeNotifier {
 /// from the generated connection accessor by the `page` callback.
 ///
 /// Read every field you pass here unconditionally — the callback runs for
-/// every loaded page during a single build, which is what keeps all pages in
-/// one request per user action.
+/// the merged list and for the page being loaded during a single build,
+/// which is what keeps one request per user action.
 class ConnectionPage<Node> {
   const ConnectionPage({
     required this.nodes,
@@ -56,7 +63,9 @@ class ConnectionPage<Node> {
   /// exactly one skeleton element, see [Accessor].
   final List<Node>? nodes;
 
-  /// `connection.pageInfo.hasNextPage`.
+  /// `connection.pageInfo.hasNextPage`. `null` tells the builder the page
+  /// is not cached yet (`hasNextPage` is non-null in every Relay
+  /// connection).
   final bool? hasNextPage;
 
   /// `connection.pageInfo.endCursor`; fed to [PaginationController.loadMore].
@@ -67,7 +76,8 @@ class ConnectionPage<Node> {
 }
 
 /// Reads the page of the connection that starts after [after] (`null` for the
-/// first page) from the query root.
+/// first page) from the query root. With [RelayStylePagination] on the
+/// field, the first page is the merged list of every page loaded so far.
 typedef PageSelector<Q extends Accessor, Node> = ConnectionPage<Node> Function(
   Q query,
   String? after,
@@ -78,8 +88,8 @@ typedef PaginatedWidgetBuilder<Node> = Widget Function(
   PaginatedState<Node> state,
 );
 
-/// Every loaded page flattened, plus the query status and the actions a list
-/// screen needs.
+/// The merged list, plus the query status and the actions a list screen
+/// needs.
 class PaginatedState<Node> {
   const PaginatedState._({
     required this.items,
@@ -93,20 +103,21 @@ class PaginatedState<Node> {
   final QueryState _query;
   final PaginationController _controller;
 
-  /// `endCursor` of the last page, captured during build so [loadMore] never
-  /// reads (and fetches) it from a callback.
+  /// `endCursor` of the merged list, captured during build so [loadMore]
+  /// never reads (and fetches) it from a callback.
   final String? _endCursor;
 
-  /// Nodes of all loaded pages, in order. While the first page is loading
+  /// Nodes of all loaded pages, in order (the merged list), followed by the
+  /// skeleton of the page being loaded. While the first page is loading
   /// this holds one skeleton element (the skeleton-list rule), so check
   /// [isLoading] or [hasMissingData] before rendering counts or empty states.
   final List<Node> items;
 
-  /// The last loaded page reports a next page. `false` while that page is
-  /// still loading.
+  /// The last loaded page reports a next page. `false` while a page is
+  /// loading.
   final bool hasMore;
 
-  /// `totalCount` of the last loaded page, when the schema provides one.
+  /// `totalCount` of the connection, when the schema provides one.
   final int? totalCount;
 
   /// A fetch containing this list's selections is in flight.
@@ -119,24 +130,41 @@ class PaginatedState<Node> {
   Object? get error => _query.error;
 
   /// Appends the next page. No-op when [hasMore] is `false`; only the new page
-  /// is fetched, the others are served from cache.
+  /// is fetched and merged into the list, the loaded ones stay on screen.
   void loadMore() {
     if (!hasMore) return;
     _controller.loadMore(_endCursor);
   }
 
-  /// Re-fetches every loaded page in one request, keeping the cursors.
-  Future<void> refetch() => _query.refetch();
+  /// Starts the list over: refetches its **first page only**, which
+  /// replaces the merged list (the pages loaded after it are dropped, see
+  /// [RelayStylePagination]), and forgets a page being loaded. Clears
+  /// [error] like [QueryState.refetch].
+  Future<void> refetch() {
+    _controller.reset();
+    return _query.refetch();
+  }
 }
 
-/// A [QueryBuilder] over a cursor-paginated connection.
+/// A [QueryBuilder] over a cursor-paginated connection whose pages the
+/// cache merges into one list: register [RelayStylePagination] for the
+/// field (`SlingClient(typePolicies:)`).
 ///
-/// The [page] callback is run once per cursor held by the [controller] during
-/// every build, so all loaded pages are part of the same selection: the first
-/// frame fetches page one, [PaginatedState.loadMore] fetches only the new
-/// page, and [PaginatedState.refetch] replays every page in one request.
+/// The [page] callback runs during every build for the first page — the
+/// merged list of every page loaded so far — and, while one is on its way,
+/// for the page the [controller] is loading. The first frame fetches page
+/// one, [PaginatedState.loadMore] fetches only the next page (the loaded
+/// ones stay on screen, its skeleton follows them), and
+/// [PaginatedState.refetch] starts the list over from page one.
 ///
 /// ```dart
+/// SlingClient<Query>(
+///   typePolicies: {
+///     Query: TypePolicy(fields: {'launches': RelayStylePagination()}),
+///   },
+///   // …
+/// );
+///
 /// PaginatedQueryBuilder<Query, Launch>(
 ///   controller: _pagination, // optional; reset() it when the filter changes
 ///   page: (query, after) {
@@ -162,8 +190,8 @@ class PaginatedQueryBuilder<Q extends Accessor, Node> extends StatefulWidget {
     required this.builder,
   });
 
-  /// Owns the cursors. When omitted the widget keeps a private one that lives
-  /// as long as the widget does.
+  /// Holds the page being loaded. When omitted the widget keeps a private
+  /// one that lives as long as the widget does.
   final PaginationController? controller;
 
   final PageSelector<Q, Node> page;
@@ -223,17 +251,34 @@ class _PaginatedQueryBuilderState<Q extends Accessor, Node>
     return QueryBuilder<Q>(
       builder: (context, query, queryState) {
         final controller = _controller;
-        final pages = [
-          for (final cursor in controller.cursors) widget.page(query, cursor),
-        ];
-        final last = pages.last;
+        // The merged list: every page loaded so far.
+        final first = widget.page(query, null);
+        final items = <Node>[...?first.nodes];
+        var hasMore = first.hasNextPage ?? false;
+        final pending = controller.pendingCursor;
+        if (pending != null) {
+          final next = widget.page(query, pending);
+          if (next.hasNextPage == null) {
+            // Not merged yet: a miss, fetched now; its skeleton follows.
+            items.addAll(next.nodes ?? const []);
+            hasMore = false;
+          } else {
+            assert(
+              first.endCursor != pending || first.hasNextPage != true,
+              'PaginatedQueryBuilder: the page after "$pending" is cached but '
+              'the first page did not grow. Register RelayStylePagination '
+              'for the connection field in SlingClient(typePolicies:).',
+            );
+            controller._loaded(pending);
+          }
+        }
         return widget.builder(
           context,
           PaginatedState<Node>._(
-            items: [for (final page in pages) ...?page.nodes],
-            hasMore: last.hasNextPage ?? false,
-            totalCount: last.totalCount,
-            endCursor: last.endCursor,
+            items: items,
+            hasMore: hasMore,
+            totalCount: first.totalCount,
+            endCursor: first.endCursor,
             query: queryState,
             controller: controller,
           ),

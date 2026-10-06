@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:meta/meta.dart';
 
+import 'cache/field_policy.dart';
+
 /// A typed GraphQL argument. The [graphqlType] is the *GraphQL* type literal
 /// (e.g. `Int`, `String!`, `LaunchFind`), used to declare the variable in the
 /// operation document. Values are always sent as JSON variables, so enums and
@@ -21,30 +23,70 @@ class Arg {
 ///
 /// The [alias] is derived from the field name and a stable hash of the
 /// arguments so that the same field queried with different arguments can live
-/// side by side in one document *and* in the cache.
+/// side by side in one document *and* in the cache. A [FieldPolicy] can make
+/// several argument sets share one cache entry: the [cacheKey] then hashes
+/// only its key arguments, while each argument set keeps its own [alias] in
+/// documents (see [PrintedOperation.toCacheKeys]).
 class Selection {
-  Selection._(this.field, this.args, this.parent, [String? alias])
-    : alias = alias ?? _aliasFor(field, args),
+  Selection._(this.field, this.args, this.parent, this.alias)
+    : cacheKey = alias,
       typeCondition = null;
 
   Selection._fragment(String typename, this.parent)
     : field = typename,
       args = const {},
       alias = '... on $typename',
+      cacheKey = '... on $typename',
       typeCondition = typename {
     isObject = true;
   }
 
-  Selection.root(String operation) : this._(operation, const {}, null);
+  Selection.root(String operation)
+    : this._(operation, const {}, null, operation);
 
   /// The field name; for an inline fragment, the type condition.
   final String field;
   final Map<String, Arg> args;
   final Selection? parent;
 
-  /// Also the cache key for this field on its parent object. Inline
-  /// fragments use `... on Type`, which no field alias can spell.
+  /// The response name this field is printed under; also its cache key
+  /// unless a [policy] narrows it ([cacheKey]). Inline fragments use
+  /// `... on Type`, which no field alias can spell.
   final String alias;
+
+  /// Where this field is stored on its parent object: [alias], or for a
+  /// field with a [FieldPolicy] the field name and a hash of its key
+  /// arguments only (`launches(first: 20, after: c, filter: f)` and
+  /// `launches(first: 20, filter: f)` both live at the cache key of
+  /// `launches(filter: f)`).
+  String cacheKey;
+
+  FieldPolicy? _policy;
+  bool _policyBound = false;
+
+  /// The policy of this field (see `SlingClient.typePolicies`), once bound.
+  FieldPolicy? get policy => _policy;
+
+  /// [bindPolicy] ran (with or without a policy).
+  bool get policyBound => _policyBound;
+
+  /// Sibling fields sharing a [cacheKey], per cache key (several argument
+  /// sets of one policy field).
+  Map<String, List<Selection>>? _entries;
+
+  /// Set on a node of a pending request only fetched to fill fields a
+  /// cached policy entry lacks ([ensureFillPath]): its response is written
+  /// with [FieldPolicy.fill] instead of being merged as a page.
+  @internal
+  bool fillOnly = false;
+
+  Map<String, Object?>? _argValues;
+
+  /// The non-null argument values (JSON), as a policy sees them.
+  Map<String, Object?> get argValues => _argValues ??= {
+    for (final e in args.entries)
+      if (e.value.value != null) e.key: e.value.value,
+  };
 
   /// Set on an inline fragment node (`... on Launch { … }`): its children are
   /// fields of that concrete type, read at the *parent's* cache location. A
@@ -71,6 +113,19 @@ class Selection {
   Iterable<Selection> get children => _children.values;
   bool get isLeaf => _children.isEmpty;
   bool get isRoot => parent == null;
+
+  /// Cache keys from the root (exclusive) down to this node (inclusive): the
+  /// cache path of this field when no lookup redirected an object on the
+  /// way (fragments skipped, like [aliasPath]).
+  List<String> get cachePath {
+    final out = <String>[];
+    Selection? node = this;
+    while (node != null && !node.isRoot) {
+      if (!node.isFragment) out.insert(0, node.cacheKey);
+      node = node.parent;
+    }
+    return out;
+  }
 
   /// Aliases from the root (exclusive) down to this node (inclusive).
   List<String> get aliasPath {
@@ -123,6 +178,54 @@ class Selection {
 
   Selection? childByAlias(String alias) => _children[alias];
 
+  /// Gives this field its [policy] (`null`: none), deciding its [cacheKey].
+  /// Done once, right after the node is created (by the accessor reading
+  /// it, or when the node is copied into another tree), before it has
+  /// children.
+  @internal
+  void bindPolicy(FieldPolicy? policy) {
+    if (_policyBound) return;
+    _policyBound = true;
+    if (policy == null) return;
+    _policy = policy;
+    final keyArgs = <String, Arg>{
+      for (final e in args.entries)
+        if (policy.isKeyArg(e.key)) e.key: e.value,
+    };
+    cacheKey = keyArgs.length == args.length
+        ? alias
+        : _aliasFor(field, keyArgs);
+    final parent = this.parent;
+    if (parent != null) ((parent._entries ??= {})[cacheKey] ??= []).add(this);
+  }
+
+  /// The fields under this node's parent stored at the same [cacheKey]
+  /// (this one included): the argument sets of one policy entry.
+  Iterable<Selection> get sameEntry => parent?._entries?[cacheKey] ?? [this];
+
+  /// [args] with the policy's page arguments set to [page]'s values
+  /// (absent ones `null`): the same entry's page [page].
+  Map<String, Arg> _argsForPage(Map<String, Object?> page) {
+    final pageArgs = _policy?.pageArgs ?? const <String>{};
+    return {
+      for (final e in args.entries)
+        e.key: pageArgs.contains(e.key)
+            ? Arg(e.value.graphqlType, page[e.key])
+            : e.value,
+    };
+  }
+
+  /// True when [policy] is a paged one and this field asks for a page other
+  /// than the first.
+  bool get _isLaterPage {
+    final policy = _policy;
+    if (policy == null) return false;
+    for (final name in policy.pageArgs) {
+      if (args[name]?.value != null) return true;
+    }
+    return false;
+  }
+
   /// The node in this tree corresponding to [other] (a child of a node
   /// matching [other]'s parent), created when absent.
   Selection _counterpart(Selection other) =>
@@ -147,16 +250,68 @@ class Selection {
     return cursor;
   }
 
-  /// Deep-merges [other]'s subtree into this node.
-  void mergeFrom(Selection other) {
+  /// Deep-merges [other]'s subtree into this node. With [firstPages], a
+  /// policy field asking for a later page (`after: c`) is merged as its
+  /// entry's first page instead: what a fetch of a whole selection sends,
+  /// so a refresh starts a paged entry over (see [FieldPolicy.pageArgs]).
+  void mergeFrom(Selection other, {bool firstPages = false}) {
     for (final c in other.children) {
-      _counterpart(c).mergeFrom(c);
+      final mine = firstPages && c._isLaterPage
+          ? (child(c.field, c._argsForPage(const {})).._adopt(c))
+          : _counterpart(c);
+      // A fetch of the field itself, not a fill.
+      if (c._policy != null) mine.fillOnly = false;
+      mine.mergeFrom(c, firstPages: firstPages);
+    }
+  }
+
+  /// [ensurePath] for a field read *inside* a cached policy entry: each
+  /// policy ancestor for which [pagesOf] returns the pages its entry holds
+  /// is branched into one sibling per page (the ancestor itself for an
+  /// empty list), created as [fillOnly] — the response only fills what the
+  /// entry lacks, for every page it holds, and never resets it. [pagesOf]
+  /// returns `null` for an ancestor that is itself being fetched (a page
+  /// not cached yet): it is followed as in [ensurePath].
+  @internal
+  void ensureFillPath(
+    Selection other,
+    List<Map<String, Object?>>? Function(Selection ancestor) pagesOf,
+  ) {
+    final chain = <Selection>[];
+    Selection? node = other;
+    while (node != null && !node.isRoot) {
+      chain.insert(0, node);
+      node = node.parent;
+    }
+    var cursors = <Selection>[this];
+    for (var i = 0; i < chain.length; i++) {
+      final n = chain[i];
+      final pages = i < chain.length - 1 && (n._policy?.merges ?? false)
+          ? pagesOf(n)
+          : null;
+      final next = <Selection>[];
+      for (final cursor in cursors) {
+        if (pages == null) {
+          next.add(cursor._counterpart(n));
+          continue;
+        }
+        for (final page in pages.isEmpty ? [null] : pages) {
+          final args = page == null ? n.args : n._argsForPage(page);
+          final alias = args.isEmpty ? n.field : _aliasFor(n.field, args);
+          final existed = cursor._children.containsKey(alias);
+          final variant = cursor.child(n.field, args).._adopt(n);
+          if (!existed) variant.fillOnly = true;
+          next.add(variant);
+        }
+      }
+      cursors = next;
     }
   }
 
   void _adopt(Selection other) {
     isObject |= other.isObject;
     keyField ??= other.keyField;
+    if (other._policyBound) bindPolicy(other._policy);
   }
 
   /// True if every leaf of [other] is present in this tree.
@@ -291,7 +446,9 @@ class _ArgsKey {
 /// Prints a selection tree as an operation document, collecting arguments as
 /// variables.
 ///
-/// A field is printed under its [Selection.alias] (the cache key) except
+/// A field is printed under its [Selection.alias] (its cache key, unless a
+/// policy shares one entry between argument sets — see
+/// [Selection.cacheKey]) except
 /// when the same alias is selected in two inline fragments of one object, or
 /// in a fragment and directly on the object: GraphQL requires fields sharing
 /// a response name to have the same shape (FieldsInSetCanMerge), and
@@ -339,6 +496,16 @@ class PrintedOperation {
       final mapped = keys.fields[k];
       final alias = mapped?.alias ?? k;
       final v = mapped == null ? value : _remapValue(value, mapped.sub);
+      if (mapped?.page case final page?) {
+        // Every page of a merging policy field goes to its entry, merged
+        // there by the cache, in document order.
+        final write = switch (out[alias]) {
+          final PolicyWrite write => write,
+          _ => out[alias] = PolicyWrite(page.policy, page.field),
+        };
+        write.pages.add((args: page.args, value: v, fill: page.fill));
+        continue;
+      }
       out[alias] = out.containsKey(alias) ? _merge(out[alias], v) : v;
     }
     return out;
@@ -452,8 +619,21 @@ class PrintedOperation {
           }
           final key = renames[c] ?? c.alias;
           final sub = printField(c, depth, key);
-          if (key != c.alias || sub != null) {
-            (keys ??= _ResponseKeys()).fields[key] = (alias: c.alias, sub: sub);
+          final policy = c.policy;
+          final page = policy != null && policy.merges
+              ? (
+                  policy: policy,
+                  field: c.field,
+                  args: c.argValues,
+                  fill: c.fillOnly,
+                )
+              : null;
+          if (key != c.cacheKey || sub != null || page != null) {
+            (keys ??= _ResponseKeys()).fields[key] = (
+              alias: c.cacheKey,
+              sub: sub,
+              page: page,
+            );
           }
         }
       }
@@ -502,5 +682,21 @@ class PrintedOperation {
 /// Response keys of one object's fields that need remapping: renamed ones
 /// (see [PrintedOperation]) and object fields with renames further down.
 final class _ResponseKeys {
-  final Map<String, ({String alias, _ResponseKeys? sub})> fields = {};
+  /// Per response key: the cache key it is stored under, the remapping of
+  /// its value, and for a merging policy field the page it is.
+  final Map<
+    String,
+    ({
+      String alias,
+      _ResponseKeys? sub,
+      ({
+        FieldPolicy policy,
+        String field,
+        Map<String, Object?> args,
+        bool fill,
+      })?
+      page,
+    })
+  >
+  fields = {};
 }

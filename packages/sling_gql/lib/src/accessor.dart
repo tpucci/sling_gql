@@ -19,6 +19,10 @@ abstract class Recorder {
 
   Cache get cache;
 
+  /// The client's field policies (`SlingClient.typePolicies`), keyed by the
+  /// generated accessor class a field is read through.
+  Map<Type, TypePolicy> get typePolicies;
+
   /// Dependency keys (`entity.field`, `entity.field[2]` for an inline list
   /// element — see `depKey`) read so far in the current scope.
   /// Filled by the cache on every read; used to decide which scopes to
@@ -79,22 +83,54 @@ abstract class Accessor {
   // Read helpers used by generated code
   // ---------------------------------------------------------------------------
 
-  Selection _select(String field, Map<String, Arg>? args) =>
-      selection.child(field, args ?? const {});
+  Selection _select(String field, Map<String, Arg>? args) {
+    final sel = selection.child(field, args ?? const {});
+    if (!sel.policyBound) _bindPolicy(sel);
+    return sel;
+  }
 
-  Selection _selectObject(String field, Map<String, Arg>? args, bool keyed) =>
-      selection.objectChild(
-        field,
-        args ?? const {},
-        keyed ? recorder.cache.normalization.selectedKeyField : null,
-      );
+  Selection _selectObject(String field, Map<String, Arg>? args, bool keyed) {
+    final sel = selection.objectChild(
+      field,
+      args ?? const {},
+      keyed ? recorder.cache.normalization.selectedKeyField : null,
+    );
+    if (!sel.policyBound) _bindPolicy(sel);
+    return sel;
+  }
+
+  /// Once per selection node: the policy of [sel]'s field on this accessor's
+  /// class (an exact match on [runtimeType]: a field read through an
+  /// interface accessor and through a member's `asType` are two entries of
+  /// `typePolicies`).
+  void _bindPolicy(Selection sel) => sel.bindPolicy(
+    recorder.typePolicies.isEmpty
+        ? null
+        : recorder.typePolicies[runtimeType]?.fields[sel.field],
+  );
 
   Object? _read(Selection sel) => recorder.cache.readField(
     recorder.operation,
     path,
-    sel.alias,
+    sel.cacheKey,
     deps: recorder.deps,
   );
+
+  /// The cache key the accessor for [sel] reads under, given [value] read
+  /// at [Selection.cacheKey]: that key, or — when [sel]'s policy says the
+  /// cached entry does not cover its arguments (a page not merged yet) —
+  /// its alias, which is never written, so everything read through it is
+  /// a miss (a skeleton) and fetched with those arguments.
+  static String _keyFor(Selection sel, Object? value) {
+    final policy = sel.policy;
+    if (policy == null ||
+        value == missing ||
+        value == null ||
+        policy.covers(value, sel.argValues)) {
+      return sel.cacheKey;
+    }
+    return sel.alias;
+  }
 
   /// True when the cache holds a value for [field] on this object —
   /// including an explicit server `null` — false when it was never fetched.
@@ -108,7 +144,7 @@ abstract class Accessor {
   /// (see `QueryState.error`) also reads as not fetched here.
   bool isFetched(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
-    return recorder.cache.readField(recorder.operation, path, sel.alias) !=
+    return recorder.cache.readField(recorder.operation, path, sel.cacheKey) !=
         missing;
   }
 
@@ -220,8 +256,10 @@ abstract class Accessor {
     String? lookup,
   }) {
     final sel = _selectObject(field, args, keyed || lookup != null);
-    final value = _read(sel);
+    var value = _read(sel);
     if (value == null) return null; // explicit null from the server
+    final key = _keyFor(sel, value);
+    if (key != sel.cacheKey) value = missing;
     if (value == missing) {
       if (lookup != null) {
         final key = recorder.cache.normalization.lookup(lookup, sel.args);
@@ -232,7 +270,7 @@ abstract class Accessor {
       recorder.onMiss(sel); // skeleton
     }
     // Either cached object or `missing` → skeleton; both read through the cache.
-    return ctor(recorder, sel, [...path, sel.alias]);
+    return ctor(recorder, sel, [...path, key]);
   }
 
   /// Reads a list of objects. Skeleton lists contain a single skeleton element
@@ -247,19 +285,21 @@ abstract class Accessor {
     // Inline elements are read through their own paths (element keys): the
     // list itself only needs its length. A keyed list keeps depending on the
     // whole field (its membership).
-    final value = keyed
+    var value = keyed
         ? _read(sel)
         : recorder.cache.readListField(
             recorder.operation,
             path,
-            sel.alias,
+            sel.cacheKey,
             deps: recorder.deps,
           );
+    final key = _keyFor(sel, value);
+    if (key != sel.cacheKey) value = missing;
     final List<R>? result;
     if (value == missing) {
       recorder.onMiss(sel);
       result = [
-        ctor(recorder, sel, [...path, sel.alias, 0]),
+        ctor(recorder, sel, [...path, key, 0]),
       ];
     } else if (value == null) {
       result = null;
@@ -267,11 +307,11 @@ abstract class Accessor {
       final items = value as List;
       result = List.generate(
         items.length,
-        (i) => ctor(recorder, sel, [...path, sel.alias, i]),
+        (i) => ctor(recorder, sel, [...path, key, i]),
       );
     }
     if (recorder case final ListLocator locator) {
-      locator.locateList([...path, sel.alias], result);
+      locator.locateList([...path, key], result);
     }
     return result;
   }
