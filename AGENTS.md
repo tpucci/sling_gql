@@ -1,7 +1,9 @@
 # AGENTS.md — sling_gql
 
-GQty-style GraphQL client for Flutter, **proof of concept** (queries,
-normalized cache, mutations, subscriptions over SSE, SQLite persistence).
+GQty-style GraphQL client for Flutter (queries, normalized cache with type
+policies, mutations with an offline queue, subscriptions over SSE, SQLite
+persistence), six packages heading to 1.0 under a semver policy
+(`website/src/content/docs/internals/versioning.mdx`).
 Read `README.md` first for the user-facing picture; this file is for working
 on the code.
 
@@ -66,7 +68,8 @@ on the code.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.
   - `packages/sling_gql_test` — test helpers (Flutter package, depends on
     `flutter_test`): `MockGraphQLServer` (parses the printed document,
-    resolves it against maps/resolvers, answers under the right aliases),
+    resolves it against maps/resolvers, answers under the right aliases;
+    a resolver throws `MockGraphQLError` for an `errors[]` entry),
     `pumpUntilSettled` (on `SlingClient.isIdle`/`whenIdle`),
     `useRealNetwork`, `disposeAfterTest`. Tests: `flutter test`. Prefer it
     over hand-rolled `MockClient` + alias regexes in new tests.
@@ -125,7 +128,8 @@ on the code.
     optimistic values.
     Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
     files; `tester.runAsync` in `testWidgets`); `benchmark/` is run by
-    hand (`flutter test benchmark/persistence_bench_test.dart`).
+    hand (`flutter test benchmark/persistence_bench_test.dart`) and by
+    `melos run bench` (below).
   - `example` — Flutter app, **iOS, Android and web** (no other platforms).
     Android: application id `com.sling.slingGqlExample` like the iOS bundle,
     the emulator reaches the host at `10.0.2.2` (`mockApiHost` in
@@ -170,8 +174,15 @@ on the code.
   `+1` build bump (`sling_gql_test` 0.1.1 -> 0.1.1+1).
   Never hand-edit versions or `CHANGELOG.md` files.
 - **Publishing** (`sling_gql`, `sling_gql_gen`, `sling_gql_test`, `sling_gql_hooks`, `sling_gql_link`, `sling_gql_sqflite`; MIT; each with its own
-  `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). Versions are
-  independent. Release from a clean, up-to-date `main`:
+  `README.md`, `CHANGELOG.md`, `LICENSE`, `example/`). From 1.0 the six
+  packages share a **major** version (minors/patches stay independent) and
+  follow the semver + deprecation policy in
+  `website/src/content/docs/internals/versioning.mdx` (each README has a
+  short *Versioning* section; keep them in sync with it): breaking = major,
+  deprecations live ≥ 1 minor and go in the next major, `sling_gql` 1.x runs
+  the output of `sling_gql_gen` 1.y for y ≤ x. Security reports go through
+  GitHub advisories (`SECURITY.md`). Release from a clean, up-to-date
+  `main`:
 
   ```sh
   melos run publish:dry-run          # pub.dev validation of both packages
@@ -203,7 +214,16 @@ on the code.
   runtime + generator tests, a check that `melos run generate` leaves
   `example/lib/generated/schema.dart` unchanged, example tests against the
   mock API and against the graphql-http server, the example's web build,
-  the example's Android debug APK (`android` job), website build. The
+  the example's Android debug APK (`android` job), website build, and the
+  benchmarks (`bench` job: `node scripts/bench.mjs`, also `melos run
+  bench`). The benchmarks (`example/benchmark/bench_test.dart`, read path;
+  `packages/sling_gql_sqflite/benchmark/persistence_bench_test.dart`) write
+  ratio metrics to `$SLING_BENCH_OUT` — each cost divided by reference work
+  measured in the same run (jsonDecode of the response, plain sqflite
+  inserts/reads), so they compare across machines; the script takes the
+  median of 5 fresh `flutter test` runs and fails only when one exceeds
+  1.5× `scripts/bench-baseline.json`. An intended slowdown: `melos run
+  bench:update` and commit the baseline. The
   Android integration test is not run in CI (no emulator job).
   `website.yml` builds the
   web demo and deploys the docs on push to `main`.
@@ -402,7 +422,14 @@ Input: introspection JSON. Output: one Dart file. Rules are documented in the
 package README; the contract it must satisfy is the hand-written example at the
 top of `packages/sling_gql/test/core_test.dart` (unions/interfaces:
 `packages/sling_gql/test/fragments_test.dart`). If you change `Accessor`'s
-helper signatures, update the generator **and** that test in the same change.
+helper signatures, update the generator **and** that test in the same change —
+and since `sling_gql` 1.x must keep running the output of every earlier
+`sling_gql_gen` 1.y, such a change is a major (see the versioning policy);
+adding a helper the generator starts calling is a minor of both, with the
+minimum `sling_gql` named in the generator's changelog. The library
+(`package:sling_gql_gen/sling_gql_gen.dart`) exports only `generate`,
+`generatedCodeHash`, `IntrospectionSchema` (+ `Gql*`, `TypeRef`),
+`ScalarMapping`, `introspectionQuery`; the emitter's helpers stay in `src/`.
 
 The generator emits the `Mutation` root (with `.root`) and an
 `extension SlingMutations on SlingClient<Query>` providing `client.mutate(...)`,
@@ -441,11 +468,19 @@ dart run ../packages/sling_gql_gen/bin/sling_gql_gen.dart \
   `Cache` interface, `CacheScope`); `package:sling_gql/internal.dart` exports
   the building blocks (`NormalizedCache`, `Ref`, `missing`, `depKey`,
   `CacheWrite`, `MutationScope`, `ListLocator`) with no stability promise.
-  Path-level `Cache.read/write/remove/writeResponse` are `@internal`
-  (`package:meta`). New public symbols go in the main library only if an app
-  would call them; everything else in `internal.dart`.
+  Runtime machinery on exported types is `@internal` (`package:meta`):
+  path-level `Cache.read/write/remove/writeResponse`, `Selection`'s
+  tree-building/policy members, `PrintedOperation.from/toCacheKeys`,
+  `ListRule.evaluate`. `Accessor`'s read/write helpers are `@protected`
+  (generated subclasses only). First-party code outside `sling_gql` that
+  needs one (tests, benchmarks) says why next to an
+  `ignore: invalid_use_of_internal_member`. New public symbols go in the
+  main library only if an app would call them; everything else in
+  `internal.dart` or `@internal`. Every public change follows the
+  versioning policy (above); `doc/api-audit-1.0.md` records the 1.0
+  surface decisions.
 - Keep the runtime dependency-light (`http` and `meta` only). No `gql`/`ferry` in the
-  runtime for now — the point of the PoC is to see how small the core can be;
+  runtime — the core stays small on purpose;
   `gql_link` users go through `packages/sling_gql_link`.
 - Every runtime behaviour change gets a test in `packages/sling_gql/test`.
   Never hit the network: the runtime tests use `MockClient` from

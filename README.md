@@ -1,7 +1,10 @@
 # sling_gql
 
-**Proof of concept** — a GraphQL client for Flutter where the widget is the query.
-Inspired by [GQty](https://gqty.dev). Docs: https://tpucci.github.io/sling_gql/
+A GraphQL client for Flutter where the widget is the query.
+Inspired by [GQty](https://gqty.dev). Docs: https://tpucci.github.io/sling_gql/ ·
+[Versioning policy](https://tpucci.github.io/sling_gql/internals/versioning/) ·
+[Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/) ·
+[Security](SECURITY.md)
 
 > Read a field, get the query. No operation documents, no fragments, no
 > `builder`-per-query boilerplate: widgets read typed accessors during
@@ -136,7 +139,7 @@ cd .. && melos run generate                    # → example/lib/generated/schem
    and merged; scopes that read any of the touched `entity.field` keys are told
    to `setState`.
 
-## Lessons from the PoC
+## Lessons learned
 
 - **Waterfalls are the main footgun**, exactly as in GQty. A field read only
   inside an `if` on fetched data, or only inside an `onPressed`, costs a second
