@@ -37,7 +37,7 @@ expect(server.lastRequest.selects('launch.rocket.name'), isTrue);
 
 Only the selected fields are returned, under the document's aliases. Unknown
 fields and objects without `__typename` fail the test loudly. Throw
-`GraphQLError('…')` (optionally `code: 'FORBIDDEN'`) from a resolver for an
+`MockGraphQLError('…')` (optionally `code: 'FORBIDDEN'`) from a resolver for an
 `errors[]` entry with a path. `latency:` delays responses on the fake clock.
 
 `failNext` fails the next requests, for error-handling, retry and auth tests

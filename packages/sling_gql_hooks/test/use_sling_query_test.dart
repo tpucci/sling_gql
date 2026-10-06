@@ -188,7 +188,9 @@ void main() {
   ) async {
     var fail = true;
     final server = MockGraphQLServer(
-      query: {'me': () => fail ? throw GraphQLError('down') : user('1', 'Ada')},
+      query: {
+        'me': () => fail ? throw MockGraphQLError('down') : user('1', 'Ada'),
+      },
     );
     final client = server.client(Query.root);
     late QueryState state;
@@ -284,7 +286,7 @@ void main() {
       query: {
         'me': {
           ...user('1', 'Ada'),
-          'age': (Map<String, Object?> _) => throw GraphQLError('hidden'),
+          'age': (Map<String, Object?> _) => throw MockGraphQLError('hidden'),
         },
       },
     );

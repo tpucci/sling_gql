@@ -17,11 +17,14 @@ typedef Resolver = FutureOr<Object?> Function(Map<String, Object?> args);
 /// field (the field resolves to `null`, siblings still resolve). Any other
 /// exception propagates and fails the test.
 ///
-/// [code] becomes `extensions.code` (`GraphQLError('who?', code:
+/// [code] becomes `extensions.code` (`MockGraphQLError('who?', code:
 /// 'UNAUTHENTICATED')`), merged over [extensions].
-class GraphQLError implements Exception {
-  GraphQLError(this.message, {String? code, Map<String, Object?>? extensions})
-    : extensions = code == null ? extensions : {...?extensions, 'code': code};
+class MockGraphQLError implements Exception {
+  MockGraphQLError(
+    this.message, {
+    String? code,
+    Map<String, Object?>? extensions,
+  }) : extensions = code == null ? extensions : {...?extensions, 'code': code};
 
   final String message;
   final Map<String, Object?>? extensions;
@@ -30,7 +33,7 @@ class GraphQLError implements Exception {
   String? get code => extensions?['code'] as String?;
 
   @override
-  String toString() => 'GraphQLError: $message';
+  String toString() => 'MockGraphQLError: $message';
 }
 
 /// How [MockGraphQLServer.failNext] fails a request instead of answering
@@ -413,7 +416,7 @@ class MockGraphQLServer {
           Object? data;
           try {
             data = await _project(value, field, [field.alias], errors);
-          } on GraphQLError catch (e) {
+          } on MockGraphQLError catch (e) {
             errors.add({
               'message': e.message,
               'path': [field.alias],
@@ -484,7 +487,7 @@ class MockGraphQLServer {
     Object? value;
     try {
       value = await _invoke(source, field.args);
-    } on GraphQLError catch (e) {
+    } on MockGraphQLError catch (e) {
       errors.add({
         'message': e.message,
         'path': path,

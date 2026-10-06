@@ -92,11 +92,11 @@ void main() {
     });
   });
 
-  test('GraphQLError(code:) becomes extensions.code', () async {
+  test('MockGraphQLError(code:) becomes extensions.code', () async {
     final server = MockGraphQLServer(
       query: {
         'user': (Map<String, Object?> _) =>
-            throw GraphQLError('who?', code: 'UNAUTHENTICATED'),
+            throw MockGraphQLError('who?', code: 'UNAUTHENTICATED'),
       },
     );
     final result = await server.execute('query { user(id: "x") { id } }');

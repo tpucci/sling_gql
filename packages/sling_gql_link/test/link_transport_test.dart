@@ -303,7 +303,7 @@ void main() {
 
     test('partial errors are pruned and reported like over HTTP', () async {
       final server = _server()
-        ..query['user'] = (args) => throw mock.GraphQLError(
+        ..query['user'] = (args) => throw mock.MockGraphQLError(
           'hidden',
           extensions: {'code': 'FORBIDDEN'},
         );

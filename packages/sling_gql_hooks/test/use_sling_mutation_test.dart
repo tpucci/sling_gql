@@ -32,7 +32,7 @@ void main() {
       mutation: {
         'rename': (Map<String, Object?> args) async {
           await gate.future;
-          if (fail) throw GraphQLError('nope');
+          if (fail) throw MockGraphQLError('nope');
           return ada..['name'] = args['name'];
         },
       },

@@ -60,29 +60,32 @@ void main() {
       expect(server.openSubscriptions, 0, reason: 'completed with the stream');
     });
 
-    test('a GraphQLError from a nested resolver becomes errors[]', () async {
-      final server = MockGraphQLServer(
-        subscription: {
-          'userChanged': Stream.value({
-            ...user('a', 'Bob'),
-            'age': (Map<String, Object?> _) => throw GraphQLError('nope'),
-          }),
-        },
-      );
-      final client = server.client(Query.root);
-      final errors = <Object>[];
-      final values = <(String?, int?)>[];
-      await client
-          .subscribeWith(
-            Subscription.root,
-            (s) => (s.userChanged?.name, s.userChanged?.age),
-          )
-          .stream
-          .handleError(errors.add)
-          .forEach(values.add);
-      expect(values, [('Bob', null)]);
-      expect(errors.single, isA<SlingException>());
-    });
+    test(
+      'a MockGraphQLError from a nested resolver becomes errors[]',
+      () async {
+        final server = MockGraphQLServer(
+          subscription: {
+            'userChanged': Stream.value({
+              ...user('a', 'Bob'),
+              'age': (Map<String, Object?> _) => throw MockGraphQLError('nope'),
+            }),
+          },
+        );
+        final client = server.client(Query.root);
+        final errors = <Object>[];
+        final values = <(String?, int?)>[];
+        await client
+            .subscribeWith(
+              Subscription.root,
+              (s) => (s.userChanged?.name, s.userChanged?.age),
+            )
+            .stream
+            .handleError(errors.add)
+            .forEach(values.add);
+        expect(values, [('Bob', null)]);
+        expect(errors.single, isA<SlingException>());
+      },
+    );
 
     test('unknown field and non-stream values are clear errors', () async {
       final server = MockGraphQLServer(subscription: {'userChanged': 42});

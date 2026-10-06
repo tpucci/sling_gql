@@ -67,10 +67,10 @@ What the server checks for you, loudly (a `StateError`, not a silent `null`):
 - a sub-field selected on an object that does not have it;
 - a selected object without `__typename`.
 
-Throw `GraphQLError('message')` from a resolver to produce an `errors[]`
+Throw `MockGraphQLError('message')` from a resolver to produce an `errors[]`
 entry with the right `path` — the field resolves to `null`, siblings still
 resolve, and the client's partial-error handling kicks in;
-`GraphQLError('who?', code: 'UNAUTHENTICATED')` sets `extensions.code`. Any
+`MockGraphQLError('who?', code: 'UNAUTHENTICATED')` sets `extensions.code`. Any
 other exception propagates and fails the test.
 
 To fail whole requests — error handling, retries, auth refresh — queue

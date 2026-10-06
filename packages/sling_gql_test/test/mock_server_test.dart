@@ -72,35 +72,38 @@ void main() {
       },
     );
 
-    test('GraphQLError from a resolver becomes errors[] with a path', () async {
-      final server = MockGraphQLServer(
-        query: {
-          'me': user('1', 'Ada'),
-          'user': (Map<String, Object?> _) => throw GraphQLError('nope'),
-        },
-      );
-      final result = await server.execute(
-        'query { me { __typename id name } u: user(id: "x") { id } }',
-      );
-      expect(result['data'], {
-        'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
-        'u': null,
-      });
-      expect(result['errors'], [
-        {
-          'message': 'nope',
-          'path': ['u'],
-        },
-      ]);
+    test(
+      'MockGraphQLError from a resolver becomes errors[] with a path',
+      () async {
+        final server = MockGraphQLServer(
+          query: {
+            'me': user('1', 'Ada'),
+            'user': (Map<String, Object?> _) => throw MockGraphQLError('nope'),
+          },
+        );
+        final result = await server.execute(
+          'query { me { __typename id name } u: user(id: "x") { id } }',
+        );
+        expect(result['data'], {
+          'me': {'__typename': 'User', 'id': '1', 'name': 'Ada'},
+          'u': null,
+        });
+        expect(result['errors'], [
+          {
+            'message': 'nope',
+            'path': ['u'],
+          },
+        ]);
 
-      // Through the client: partial data is cached, the error surfaces.
-      final client = server.client(Query.root);
-      await expectLater(
-        client.resolve((q) => (q.me.name, q.user(id: 'x')?.name)),
-        throwsA(isA<SlingException>()),
-      );
-      expect(client.cacheScope.query.me.name, 'Ada');
-    });
+        // Through the client: partial data is cached, the error surfaces.
+        final client = server.client(Query.root);
+        await expectLater(
+          client.resolve((q) => (q.me.name, q.user(id: 'x')?.name)),
+          throwsA(isA<SlingException>()),
+        );
+        expect(client.cacheScope.query.me.name, 'Ada');
+      },
+    );
 
     test(
       'unknown fields and missing __typename fail the test, not silently',
