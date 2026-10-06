@@ -103,6 +103,9 @@ abstract interface class MutationQueueStore {
 
   /// Drops the entry with [id]; a no-op when there is none.
   Future<void> remove(String id);
+
+  /// Drops every entry (`SlingClient.clearMutationQueue`, sign-out).
+  Future<void> clear();
 }
 
 /// A [MutationQueueStore] in memory: queued mutations survive as long as
@@ -126,12 +129,17 @@ final class InMemoryMutationQueueStore implements MutationQueueStore {
   @override
   Future<void> remove(String id) async =>
       _entries.removeWhere((e) => e.id == id);
+
+  @override
+  Future<void> clear() async => _entries.clear();
 }
 
 /// A queued mutation that failed for good when it was replayed (see
-/// `SlingClient.onQueuedMutationFailed`): the server answered with an error
-/// (or the response could not be cached), the entry was dropped and its
-/// optimistic writes rolled back.
+/// `SlingClient.onQueuedMutationFailed`): the server rejected it (HTTP
+/// 4xx, GraphQL errors, credentials refused after a refresh — what
+/// `SlingClient.mutationQueueBackoff`'s `retryIf` does not retry) or the
+/// response could not be cached; the entry was dropped and its optimistic
+/// writes rolled back.
 final class QueuedMutationFailure {
   const QueuedMutationFailure(this.mutation, this.error);
 

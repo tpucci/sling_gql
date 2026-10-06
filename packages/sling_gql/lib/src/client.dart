@@ -1808,23 +1808,26 @@ class SlingClient<Q extends Accessor> {
   /// when the client is created is replayed first.
   final MutationQueueStore mutationQueue;
 
-  /// The waits between replays of the queued mutations while the server
-  /// stays unreachable (see [mutateWith]'s `offline`): only its delays are
-  /// used ([RetryPolicy.initialDelay], [RetryPolicy.multiplier],
-  /// [RetryPolicy.maxDelay], [RetryPolicy.jitter]) — the queue retries until
-  /// the server answers. By default 1 s, doubling up to 5 min.
+  /// When and how fast the queued mutations are replayed (see
+  /// [mutateWith]'s `offline`). Its delays ([RetryPolicy.initialDelay],
+  /// [RetryPolicy.multiplier], [RetryPolicy.maxDelay],
+  /// [RetryPolicy.jitter]) space the replays; its [RetryPolicy.retryIf]
+  /// decides which replay failures keep the call queued (by default
+  /// [RetryPolicy.isTransient]: network errors, timeouts, HTTP 5xx) — the
+  /// rest drop it. [RetryPolicy.maxAttempts] is not used: the queue retries
+  /// until the server takes or rejects the call. By default 1 s, doubling up
+  /// to 5 min.
   final RetryPolicy mutationQueueBackoff;
 
   /// Offline mutations not landed yet, oldest first: [_queue]'s head is
   /// being sent or waits for the network.
   final List<_QueuedCall> _queue = [];
 
-  /// The head of [_queue] failed to reach the server: the queue waits for
+  /// The head of [_queue] failed and stays queued: the queue waits for
   /// [_queueTimer], [replayQueue] or any successful request.
   bool _queueWaiting = false;
 
-  /// Consecutive replays that found the server unreachable (the backoff
-  /// step).
+  /// Consecutive sends that failed and kept the queue (the backoff step).
   int _queueFailures = 0;
   Timer? _queueTimer;
 
@@ -1840,8 +1843,10 @@ class SlingClient<Q extends Accessor> {
       StreamController<QueuedMutationFailure>.broadcast(sync: true);
 
   /// Queued mutations that failed for good when they were replayed: the
-  /// server answered with an error (a non-network failure), the entry was
-  /// dropped from [mutationQueue] and its optimistic writes rolled back.
+  /// server rejected them (a failure [mutationQueueBackoff]'s `retryIf`
+  /// does not retry: HTTP 4xx, GraphQL errors, credentials refused after a
+  /// refresh), the entry was dropped from [mutationQueue] and its
+  /// optimistic writes rolled back.
   /// The only report of a mutation queued by an earlier run of the app;
   /// in-session calls also fail their `mutateWith` future.
   Stream<QueuedMutationFailure> get onQueuedMutationFailed =>
@@ -1867,6 +1872,19 @@ class SlingClient<Q extends Accessor> {
   void _restored(List<QueuedMutation> entries) {
     _queueLoading = false;
     if (_disposed) return;
+    if (_clearedWhileLoading) {
+      // [clearMutationQueue] ran before the store answered: undo what the
+      // entries left in the cache and forget them.
+      _clearedWhileLoading = false;
+      cache.batch(() {
+        final touched = <String>{};
+        for (final m in entries.reversed) {
+          touched.addAll(_rollback(decodeRollback(m.rollback)));
+        }
+        _notify(touched);
+      });
+      return;
+    }
     // A store that loads asynchronously may list the calls added meanwhile.
     final added = {for (final call in _queue) call.mutation.id};
     _queue.insertAll(0, [
@@ -1918,6 +1936,7 @@ class SlingClient<Q extends Accessor> {
       onOperation?.call(call.op);
       final record = _track('mutation', call.op, call.tree, [?call.debugLabel]);
       _mutationsInFlight++;
+      final cancel = call.sending = _CancelToken();
       _Received? received;
       SlingException? failure;
       try {
@@ -1926,13 +1945,23 @@ class SlingClient<Q extends Accessor> {
           record: record,
           timeout: call.timeout ?? timeout,
           retry: call.retry ?? RetryPolicy.none,
+          cancel: cancel,
         );
       } on SlingException catch (e) {
         failure = e;
       }
+      call.sending = null;
       if (_disposed) return;
-      if (failure != null && failure.isNetworkUnreachable) {
-        // Not sent: everything in the queue waits for the network.
+      if (call.cleared) {
+        // [clearMutationQueue] dropped it (and rolled it back) meanwhile:
+        // whatever came back is not written.
+        record?._finish(const SlingCancelledException());
+        _mutationsInFlight--;
+        _checkIdle();
+        continue;
+      }
+      if (failure != null && _keepsQueued(call, failure)) {
+        // Not landed: everything in the queue waits and tries again.
         record?._finish(failure);
         _mutationsInFlight--;
         _queueWaiting = true;
@@ -1961,6 +1990,53 @@ class SlingClient<Q extends Accessor> {
         }
       }
     }
+  }
+
+  /// Whether [failure] leaves [call] at the head of the queue, to be sent
+  /// again after a backoff: the server was unreachable, or — once the call
+  /// was queued — [mutationQueueBackoff]'s `retryIf` holds (by default
+  /// timeouts and HTTP 5xx too). Anything else drops it.
+  bool _keepsQueued(_QueuedCall call, SlingException failure) =>
+      failure.isNetworkUnreachable ||
+      (call.queued && mutationQueueBackoff.retryIf(failure));
+
+  /// Set by [clearMutationQueue] while [mutationQueue] is still loading:
+  /// the entries it returns are rolled back and dropped.
+  bool _clearedWhileLoading = false;
+
+  /// Drops every queued offline mutation — on sign-out, so nothing queued
+  /// by one user is sent with the next one's credentials (replays use the
+  /// headers of the moment they are sent: `headers`, [auth]). Each call's
+  /// optimistic writes are rolled back (newest first, from the stored undo
+  /// log for calls restored from an earlier run), its `mutateWith` future
+  /// fails with a [SlingCancelledException] (nothing is reported on
+  /// [onQueuedMutationFailed]), a request in flight for the queue's head is
+  /// aborted and its response ignored (the server may still have applied
+  /// it), and [mutationQueue] is emptied. Completes once the store is.
+  ///
+  /// Call it before clearing the cache (`SqflitePersistence.clear()`
+  /// clears the stored queue too, but not the client's).
+  Future<void> clearMutationQueue() {
+    _queueTimer?.cancel();
+    _queueTimer = null;
+    _queueWaiting = false;
+    _queueFailures = 0;
+    if (_queueLoading) _clearedWhileLoading = true;
+    final calls = List.of(_queue);
+    _queue.clear();
+    cache.batch(() {
+      final touched = <String>{};
+      for (final call in calls.reversed) {
+        call.cleared = true;
+        call.sending?.cancel();
+        touched.addAll(_rollback(call.journal));
+      }
+      _notify(touched);
+    });
+    for (final call in calls) {
+      call.onCleared?.call();
+    }
+    return mutationQueue.clear();
   }
 
   /// Queues an offline call (see [mutateWith]) and sends it when its turn
@@ -2000,6 +2076,11 @@ class SlingClient<Q extends Accessor> {
       timeout: timeout,
       retry: retry,
       onQueued: onQueued,
+      onCleared: () {
+        if (!outcome.isCompleted) {
+          outcome.completeError(const SlingCancelledException());
+        }
+      },
       land: (record, received, failure) {
         try {
           outcome.complete(
@@ -2587,9 +2668,17 @@ class SlingClient<Q extends Accessor> {
   ///   or with the error of a replay the server rejected (optimistic writes
   ///   rolled back, [onQueuedMutationFailed] notified). If the client is
   ///   disposed (or the app killed) first, it never completes;
+  ///   [clearMutationQueue] fails it with a [SlingCancelledException];
   /// - queued calls are sent again in order, one at a time — after the next
   ///   request of any kind that reaches the server, on [replayQueue], and on
-  ///   timers backing off along [mutationQueueBackoff];
+  ///   timers backing off along [mutationQueueBackoff]. A replay that fails
+  ///   with what its `retryIf` retries (by default network errors, timeouts
+  ///   and HTTP 5xx) stays queued and backs off; any other failure drops
+  ///   the call. The first send queues on a network error only: a timeout
+  ///   or a 5xx before the call was ever queued fails it as usual;
+  /// - replays carry the headers of the moment they are sent ([headers],
+  ///   [auth]), not those of the call: call [clearMutationQueue] on
+  ///   sign-out;
   /// - the call is in [mutationQueue] from the moment it is sent until it
   ///   lands or fails for good: the printed document, its variables (as they
   ///   were at the call) and the undo log of its optimistic writes. A later
@@ -3341,6 +3430,7 @@ class _QueuedCall {
     this.timeout,
     this.retry,
     this.onQueued,
+    this.onCleared,
     this.queued = false,
   });
 
@@ -3356,6 +3446,15 @@ class _QueuedCall {
   final Duration? timeout;
   final RetryPolicy? retry;
   final void Function()? onQueued;
+
+  /// Fails the caller's future (`SlingClient.clearMutationQueue`).
+  final void Function()? onCleared;
+
+  /// Aborts the request in flight for this call, while there is one.
+  _CancelToken? sending;
+
+  /// Dropped by `SlingClient.clearMutationQueue`: never lands.
+  bool cleared = false;
 
   /// Writes the response (or rolls back) and completes the call; throws the
   /// [SlingException] it failed with. Decrements `_mutationsInFlight`.

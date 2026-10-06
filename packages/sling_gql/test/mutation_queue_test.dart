@@ -264,6 +264,208 @@ void main() {
     expect(store.entries, isEmpty);
   });
 
+  group('replay failures', () {
+    /// `rename(Grace)` queued while offline, then the network is back.
+    Future<(SlingClient<Query>, Future<String?>, List<QueuedMutationFailure>)>
+    queuedCall({RetryPolicy? backoff}) async {
+      final client = backoff == null
+          ? newClient()
+          : newClient(backoff: backoff);
+      await loadMe(client);
+      final failures = <QueuedMutationFailure>[];
+      client.onQueuedMutationFailed.listen(failures.add);
+      server.online = false;
+      final call = renameOffline(client, 'Grace');
+      await client.whenIdle;
+      await pumpEventQueue();
+      server.online = true;
+      return (client, call, failures);
+    }
+
+    test('a retryable failure (5xx) keeps the call queued, optimistic write '
+        'and store entry included; the next replay lands it', () async {
+      final (client, call, failures) = await queuedCall();
+      String? result;
+      unawaited(call.then((v) => result = v));
+      server.statusNext.add(503);
+      await client.replayQueue();
+      await pumpEventQueue();
+      expect(result, isNull, reason: 'still pending');
+      expect(failures, isEmpty);
+      expect(cachedName(client), 'Grace', reason: 'not rolled back');
+      expect(store.entries, hasLength(1));
+      expect(client.queuedMutations, hasLength(1));
+
+      await client.replayQueue();
+      expect(await call, 'Grace');
+      expect(store.entries, isEmpty);
+    });
+
+    test('a non-retryable failure (4xx) drops the call, rolls back and is '
+        'reported', () async {
+      final (client, call, failures) = await queuedCall();
+      final failed = expectLater(
+        call,
+        throwsA(
+          isA<SlingHttpException>().having((e) => e.statusCode, 'status', 400),
+        ),
+      );
+      server.statusNext.add(400);
+      await client.replayQueue();
+      await failed;
+      expect(failures.single.error.statusCode, 400);
+      expect(cachedName(client), 'Ada');
+      expect(store.entries, isEmpty);
+    });
+
+    test("mutationQueueBackoff's retryIf decides what is retryable", () async {
+      final (client, call, failures) = await queuedCall(
+        backoff: RetryPolicy(retryIf: (e) => e.isNetworkUnreachable),
+      );
+      final failed = expectLater(call, throwsA(isA<SlingHttpException>()));
+      server.statusNext.add(503);
+      await client.replayQueue();
+      await failed;
+      expect(failures, hasLength(1));
+      expect(cachedName(client), 'Ada');
+    });
+
+    test('before it was ever queued, a 5xx fails the call as usual', () async {
+      final client = newClient();
+      await loadMe(client);
+      server.statusNext.add(503);
+      await expectLater(
+        renameOffline(client, 'Grace'),
+        throwsA(isA<SlingHttpException>()),
+      );
+      expect(cachedName(client), 'Ada');
+      expect(store.entries, isEmpty);
+    });
+  });
+
+  group('clearMutationQueue', () {
+    test('rolls every queued call back, fails its future with '
+        'SlingCancelledException, empties the store and sends nothing '
+        'more', () async {
+      final client = newClient();
+      await loadMe(client);
+      final failures = <QueuedMutationFailure>[];
+      client.onQueuedMutationFailed.listen(failures.add);
+      server.online = false;
+      final first = renameOffline(client, 'B');
+      final firstFailed = expectLater(
+        first,
+        throwsA(isA<SlingCancelledException>()),
+      );
+      await client.whenIdle;
+      await pumpEventQueue();
+      final second = renameOffline(client, 'C');
+      final secondFailed = expectLater(
+        second,
+        throwsA(isA<SlingCancelledException>()),
+      );
+      expect(cachedName(client), 'C');
+
+      await client.clearMutationQueue();
+      await Future.wait([firstFailed, secondFailed]);
+      expect(cachedName(client), 'Ada', reason: 'newest undone first');
+      expect(client.queuedMutations, isEmpty);
+      expect(store.entries, isEmpty);
+      expect(failures, isEmpty, reason: 'a clear is not a failure');
+
+      server.online = true;
+      final sent = server.mutations;
+      await loadMe(client);
+      await client.replayQueue();
+      expect(server.mutations, sent);
+      expect(server.renames, isEmpty);
+    });
+
+    test('aborts the replay in flight and ignores its response', () async {
+      final client = newClient();
+      await loadMe(client);
+      server.online = false;
+      final call = renameOffline(client, 'Grace');
+      final failed = expectLater(call, throwsA(isA<SlingCancelledException>()));
+      await client.whenIdle;
+      await pumpEventQueue();
+      server
+        ..online = true
+        ..latency = const Duration(milliseconds: 20);
+      final replay = client.replayQueue();
+      await pumpEventQueue();
+      expect(client.isIdle, isFalse, reason: 'replay in flight');
+      await client.clearMutationQueue();
+      await failed;
+      await replay;
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(cachedName(client), 'Ada', reason: 'response not written');
+      expect(client.isIdle, isTrue);
+      expect(store.entries, isEmpty);
+    });
+
+    test('rolls calls restored from an earlier run back from their stored '
+        'log', () async {
+      final previous = newClient();
+      await loadMe(previous);
+      server.online = false;
+      unawaited(renameOffline(previous, 'Grace'));
+      await previous.whenIdle;
+      await pumpEventQueue();
+      final persisted = previous.cache.snapshot;
+      previous.dispose();
+
+      final client = newClient(
+        cache: Cache(
+          normalization: slingSchema.normalization,
+          initial: persisted,
+        ),
+      );
+      expect(cachedName(client), 'Grace');
+      await client.clearMutationQueue();
+      expect(cachedName(client), 'Ada');
+      expect(store.entries, isEmpty);
+      server.online = true;
+      await pumpEventQueue();
+      await client.whenIdle;
+      expect(server.renames, isEmpty);
+    });
+
+    test('while the store is still loading, its entries are rolled back '
+        'and dropped when they arrive', () async {
+      final previous = newClient();
+      await loadMe(previous);
+      server.online = false;
+      unawaited(renameOffline(previous, 'Grace'));
+      await previous.whenIdle;
+      await pumpEventQueue();
+      final persisted = previous.cache.snapshot;
+      previous.dispose();
+      server.online = true;
+
+      final slow = _SlowStore(store);
+      final client = SlingClient<Query>(
+        endpoint: testEndpoint,
+        schema: slingSchema,
+        cache: Cache(
+          normalization: slingSchema.normalization,
+          initial: persisted,
+        ),
+        httpClient: server.httpClient,
+        mutationQueue: slow,
+      );
+      addTearDown(client.dispose);
+      final cleared = client.clearMutationQueue();
+      slow.release();
+      await cleared;
+      await pumpEventQueue();
+      await client.whenIdle;
+      expect(cachedName(client), 'Ada');
+      expect(client.queuedMutations, isEmpty);
+      expect(server.renames, isEmpty);
+    });
+  });
+
   group('after an app restart (a new client on the same store)', () {
     /// A run that queued `rename(Grace)` offline, then was killed: the
     /// cache it persisted holds the optimistic value.
@@ -441,6 +643,9 @@ class _Server {
   final Map<String, String> names = {'1': 'Ada', 'a': 'Bob', 'b': 'Cy'};
   bool online = true;
   bool rejectNext = false;
+
+  /// HTTP statuses the next mutations answer with, in order.
+  final List<int> statusNext = [];
   Duration latency = Duration.zero;
   int mutations = 0;
   final List<String> renames = [];
@@ -482,6 +687,9 @@ class _Server {
         }
         return http.Response(jsonEncode({'data': data}), 200);
       }
+      if (statusNext.isNotEmpty) {
+        return http.Response('', statusNext.removeAt(0));
+      }
       if (rejectNext) {
         rejectNext = false;
         return http.Response(
@@ -510,14 +718,16 @@ class _Server {
   });
 }
 
-/// A store whose [load] completes on [release].
+/// A store whose [load] completes on [release], with what [inner] held
+/// when it was created (what a slow store read before anything changed).
 class _SlowStore implements MutationQueueStore {
-  _SlowStore(this.inner);
+  _SlowStore(this.inner) : _held = inner.load();
 
   final InMemoryMutationQueueStore inner;
+  final List<QueuedMutation> _held;
   final _loaded = Completer<List<QueuedMutation>>();
 
-  void release() => _loaded.complete(inner.load());
+  void release() => _loaded.complete(_held);
 
   @override
   Future<List<QueuedMutation>> load() => _loaded.future;
@@ -527,4 +737,7 @@ class _SlowStore implements MutationQueueStore {
 
   @override
   Future<void> remove(String id) => inner.remove(id);
+
+  @override
+  Future<void> clear() => inner.clear();
 }
