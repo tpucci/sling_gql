@@ -162,10 +162,11 @@ void main() {
 
     expect(documents, hasLength(1));
     final error = scope.error;
-    expect(error, isA<SlingException>());
-    final graphqlErrors = (error! as SlingException).graphqlErrors;
-    expect(graphqlErrors.single['message'], 'Invalid cursor: nope');
-    expect((graphqlErrors.single['path']! as List).first, startsWith('rocket'));
+    expect(error, isA<SlingGraphQLException>());
+    expect((error! as SlingGraphQLException).isPartial, isTrue);
+    final graphqlError = error.errors.single;
+    expect(graphqlError.message, 'Invalid cursor: nope');
+    expect(graphqlError.path!.first, startsWith('rocket'));
     expect(
       await client.resolve((q) => q.company?.name),
       'Sling Space',
