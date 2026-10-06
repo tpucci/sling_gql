@@ -50,6 +50,12 @@ export 'src/errors.dart'
         SlingTransportException,
         SlingGraphQLError,
         ErrorPolicy;
+export 'src/mutation_queue.dart'
+    show
+        QueuedMutation,
+        MutationQueueStore,
+        InMemoryMutationQueueStore,
+        QueuedMutationFailure;
 export 'src/pagination.dart'
     show
         PaginationController,

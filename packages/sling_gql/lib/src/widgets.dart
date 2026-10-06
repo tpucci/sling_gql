@@ -445,7 +445,9 @@ class _SlingRowState<T extends Accessor> extends State<SlingRow<T>> {
 /// Runs a mutation: records the fields read in [body], sends it, returns the
 /// value [body] computes from the response. Resolves to `null` on failure
 /// (the error is on [MutationState.error]). The named arguments are
-/// `SlingClient.mutateWith`'s.
+/// `SlingClient.mutateWith`'s; with `offline: true` a call the server cannot
+/// be reached for is queued ([MutationState.isQueued]) and resolves once it
+/// is replayed.
 typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
   T Function(M mutation) body, {
   void Function()? optimistic,
@@ -453,6 +455,7 @@ typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
   ErrorPolicy? errorPolicy,
   Duration? timeout,
   RetryPolicy? retry,
+  bool offline,
 });
 
 /// Status of the last mutation run by a [MutationBuilder].
@@ -462,10 +465,21 @@ typedef Mutate<M extends Accessor> = Future<T?> Function<T>(
 class MutationState {
   /// [MutationBuilder] builds one per build; public for adapters that call
   /// `SlingClient.mutateWith` themselves (`sling_gql_hooks`).
-  const MutationState({this.isLoading = false, this.error, this.data});
+  const MutationState({
+    this.isLoading = false,
+    this.isQueued = false,
+    this.error,
+    this.data,
+  });
 
   /// A `mutate` call is in flight.
   final bool isLoading;
+
+  /// The last call (`offline: true`) could not reach the server and waits
+  /// in the client's mutation queue, its optimistic writes applied (see
+  /// `SlingClient.mutateWith`). [isLoading] is false meanwhile; once it is
+  /// replayed the state shows its [data] or [error] like any call.
+  final bool isQueued;
 
   /// Why the last call failed (network, HTTP, GraphQL errors, …), or
   /// `null`. Cleared when the next call starts. `mutate` itself never throws
@@ -545,6 +559,7 @@ class MutationBuilder<M extends Accessor> extends StatefulWidget {
 class _MutationBuilderState<M extends Accessor>
     extends State<MutationBuilder<M>> {
   bool _loading = false;
+  bool _queued = false;
   SlingException? _error;
   Object? _data;
   // Incremented per `mutate` call; only the latest call updates the state.
@@ -572,11 +587,13 @@ class _MutationBuilderState<M extends Accessor>
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
+    bool offline = false,
   }) async {
     final client = SlingScope.clientOf(context);
     final call = ++_call;
     setState(() {
       _loading = true;
+      _queued = false;
       _error = null;
     });
     void settle(void Function() update) {
@@ -584,6 +601,7 @@ class _MutationBuilderState<M extends Accessor>
       setState(() {
         update();
         _loading = false;
+        _queued = false;
       });
     }
 
@@ -597,6 +615,14 @@ class _MutationBuilderState<M extends Accessor>
         errorPolicy: errorPolicy,
         timeout: timeout,
         retry: retry,
+        offline: offline,
+        onQueued: () {
+          if (!mounted || call != _call) return;
+          setState(() {
+            _loading = false;
+            _queued = true;
+          });
+        },
       );
       settle(() => _data = result);
       return result;
@@ -619,7 +645,12 @@ class _MutationBuilderState<M extends Accessor>
   Widget build(BuildContext context) => widget.builder(
     context,
     _mutate,
-    MutationState(isLoading: _loading, error: _error, data: _data),
+    MutationState(
+      isLoading: _loading,
+      isQueued: _queued,
+      error: _error,
+      data: _data,
+    ),
   );
 }
 

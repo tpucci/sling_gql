@@ -111,6 +111,8 @@ extension on SlingClient<Query> {
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
+    bool offline = false,
+    void Function()? onQueued,
   }) => mutateWith(
     Mutation.root,
     body,
@@ -119,6 +121,8 @@ extension on SlingClient<Query> {
     errorPolicy: errorPolicy,
     timeout: timeout,
     retry: retry,
+    offline: offline,
+    onQueued: onQueued,
   );
 }
 

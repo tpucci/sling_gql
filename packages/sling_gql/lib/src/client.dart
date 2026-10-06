@@ -8,6 +8,7 @@ import 'accessor.dart';
 import 'auth.dart';
 import 'cache/cache.dart';
 import 'errors.dart';
+import 'mutation_queue.dart';
 import 'retry.dart';
 import 'selection.dart';
 
@@ -1638,6 +1639,7 @@ class SlingSubscription<T> {
     _eventCount++;
     _record?._event();
     _authReplayed = false;
+    _client._serverReached();
     for (final e in errors) {
       SlingClient._prune(data, e.path);
     }
@@ -1711,6 +1713,11 @@ class SlingClient<Q extends Accessor> {
     this.timeout,
     this.retry = const RetryPolicy(),
     this.auth,
+    MutationQueueStore? mutationQueue,
+    this.mutationQueueBackoff = const RetryPolicy(
+      initialDelay: Duration(seconds: 1),
+      maxDelay: Duration(minutes: 5),
+    ),
     // Clock behind `retryFailedAfter` and `maxAge`; only worth overriding in
     // tests.
     DateTime Function() now = DateTime.now,
@@ -1745,7 +1752,10 @@ class SlingClient<Q extends Accessor> {
        onWaterfall = onWaterfall ?? _printWaterfall,
        // ignore: prefer_initializing_formals
        _now = now,
-       _random = random ?? Random();
+       _random = random ?? Random(),
+       mutationQueue = mutationQueue ?? InMemoryMutationQueueStore() {
+    _restoreQueue();
+  }
 
   final Uri endpoint;
   final RootFactory<Q> rootFactory;
@@ -1790,6 +1800,261 @@ class SlingClient<Q extends Accessor> {
   final SlingAuth? auth;
 
   final Random _random;
+
+  /// Where `mutateWith(offline: true)` calls wait for the network, persisted
+  /// so they survive the app being killed (see [MutationQueueStore]): an
+  /// [InMemoryMutationQueueStore] by default, `SqflitePersistence
+  /// .mutationQueue` to keep them in the cache's database. What it holds
+  /// when the client is created is replayed first.
+  final MutationQueueStore mutationQueue;
+
+  /// The waits between replays of the queued mutations while the server
+  /// stays unreachable (see [mutateWith]'s `offline`): only its delays are
+  /// used ([RetryPolicy.initialDelay], [RetryPolicy.multiplier],
+  /// [RetryPolicy.maxDelay], [RetryPolicy.jitter]) — the queue retries until
+  /// the server answers. By default 1 s, doubling up to 5 min.
+  final RetryPolicy mutationQueueBackoff;
+
+  /// Offline mutations not landed yet, oldest first: [_queue]'s head is
+  /// being sent or waits for the network.
+  final List<_QueuedCall> _queue = [];
+
+  /// The head of [_queue] failed to reach the server: the queue waits for
+  /// [_queueTimer], [replayQueue] or any successful request.
+  bool _queueWaiting = false;
+
+  /// Consecutive replays that found the server unreachable (the backoff
+  /// step).
+  int _queueFailures = 0;
+  Timer? _queueTimer;
+
+  /// Set while the queue is being sent, completed when it stops.
+  Completer<void>? _queueDrain;
+
+  /// [mutationQueue]'s [MutationQueueStore.load] has not completed yet:
+  /// nothing is sent before what it holds.
+  bool _queueLoading = false;
+  bool _disposed = false;
+
+  final StreamController<QueuedMutationFailure> _queuedMutationFailed =
+      StreamController<QueuedMutationFailure>.broadcast(sync: true);
+
+  /// Queued mutations that failed for good when they were replayed: the
+  /// server answered with an error (a non-network failure), the entry was
+  /// dropped from [mutationQueue] and its optimistic writes rolled back.
+  /// The only report of a mutation queued by an earlier run of the app;
+  /// in-session calls also fail their `mutateWith` future.
+  Stream<QueuedMutationFailure> get onQueuedMutationFailed =>
+      _queuedMutationFailed.stream;
+
+  /// The offline mutations not landed yet, oldest first: queued ones and
+  /// the one being sent.
+  List<QueuedMutation> get queuedMutations => [
+    for (final call in _queue) call.mutation,
+  ];
+
+  void _restoreQueue() {
+    final loaded = mutationQueue.load();
+    if (loaded is List<QueuedMutation>) {
+      _restored(loaded);
+    } else {
+      // Calls made meanwhile wait behind what the store had.
+      _queueLoading = true;
+      loaded.then(_restored, onError: (Object _) => _restored(const []));
+    }
+  }
+
+  void _restored(List<QueuedMutation> entries) {
+    _queueLoading = false;
+    if (_disposed) return;
+    // A store that loads asynchronously may list the calls added meanwhile.
+    final added = {for (final call in _queue) call.mutation.id};
+    _queue.insertAll(0, [
+      for (final m in entries)
+        if (!added.contains(m.id)) _restoredCall(m),
+    ]);
+    if (_queue.isEmpty) return;
+    // Replayed once the code creating the client has run (and wired its
+    // listeners).
+    scheduleMicrotask(() {
+      if (_queueTimer == null && _queueDrain == null) unawaited(replayQueue());
+    });
+  }
+
+  /// Sends the queued mutations now, oldest first and one at a time (see
+  /// [mutateWith]'s `offline`), instead of waiting for the next backoff
+  /// timer or successful request — e.g. when the app knows it is back
+  /// online. Completes when the queue is empty, or when the server is still
+  /// unreachable (the queue then waits again).
+  Future<void> replayQueue() {
+    _queueTimer?.cancel();
+    _queueTimer = null;
+    _queueWaiting = false;
+    return _drainQueue();
+  }
+
+  /// A request reached the server: a waiting queue is replayed now.
+  void _serverReached() {
+    if (!_queueWaiting || _queueDrain != null || _queue.isEmpty) return;
+    unawaited(replayQueue());
+  }
+
+  Future<void> _drainQueue() {
+    if (_queueDrain case final running?) return running.future;
+    if (_queue.isEmpty || _queueWaiting || _queueLoading || _disposed) {
+      return Future.value();
+    }
+    final done = _queueDrain = Completer<void>();
+    _sendQueue().whenComplete(() {
+      _queueDrain = null;
+      done.complete();
+    });
+    return done.future;
+  }
+
+  Future<void> _sendQueue() async {
+    while (_queue.isNotEmpty && !_disposed) {
+      final call = _queue.first;
+      onOperation?.call(call.op);
+      final record = _track('mutation', call.op, call.tree, [?call.debugLabel]);
+      _mutationsInFlight++;
+      _Received? received;
+      SlingException? failure;
+      try {
+        received = await _execute(
+          call.op,
+          record: record,
+          timeout: call.timeout ?? timeout,
+          retry: call.retry ?? RetryPolicy.none,
+        );
+      } on SlingException catch (e) {
+        failure = e;
+      }
+      if (_disposed) return;
+      if (failure != null && failure.isNetworkUnreachable) {
+        // Not sent: everything in the queue waits for the network.
+        record?._finish(failure);
+        _mutationsInFlight--;
+        _queueWaiting = true;
+        _queueFailures++;
+        _queueTimer = Timer(
+          mutationQueueBackoff.delayFor(_queueFailures, _random),
+          () {
+            _queueTimer = null;
+            unawaited(replayQueue());
+          },
+        );
+        for (final c in _queue) {
+          c.markQueued();
+        }
+        _checkIdle();
+        return;
+      }
+      _queue.removeAt(0);
+      _queueFailures = 0;
+      unawaited(mutationQueue.remove(call.mutation.id));
+      try {
+        call.land(record, received, failure);
+      } on SlingException catch (e) {
+        if (call.queued && !_queuedMutationFailed.isClosed) {
+          _queuedMutationFailed.add(QueuedMutationFailure(call.mutation, e));
+        }
+      }
+    }
+  }
+
+  /// Queues an offline call (see [mutateWith]) and sends it when its turn
+  /// comes; completes with its outcome.
+  Future<T> _mutateOffline<M extends Accessor, T>(
+    RootFactory<M> root,
+    T Function(M mutation) body,
+    MutationScope scope,
+    PrintedOperation op,
+    List<CacheWrite> journal, {
+    required Iterable<String>? refetchQueries,
+    required String? debugLabel,
+    required ErrorPolicy policy,
+    required Duration? timeout,
+    required RetryPolicy? retry,
+    required void Function()? onQueued,
+  }) {
+    final outcome = Completer<T>();
+    final now = _now();
+    final mutation = QueuedMutation(
+      id:
+          '${now.microsecondsSinceEpoch.toRadixString(36)}-'
+          '${_random.nextInt(1 << 32).toRadixString(36)}',
+      document: op.document,
+      variables: op.variables,
+      createdAt: now,
+      rollback: encodeRollback(journal),
+      refetchQueries: [...?refetchQueries],
+      renamesFields: op.renamesFields,
+    );
+    final call = _QueuedCall(
+      mutation,
+      op,
+      scope.root,
+      journal,
+      debugLabel: debugLabel,
+      timeout: timeout,
+      retry: retry,
+      onQueued: onQueued,
+      land: (record, received, failure) {
+        try {
+          outcome.complete(
+            _landMutation(
+              op,
+              record,
+              received,
+              failure,
+              journal,
+              policy: policy,
+              rootAliases: scope.root.childAliases,
+              refetchQueries: refetchQueries,
+              result: () => body(root(scope)),
+            ),
+          );
+        } catch (e, st) {
+          outcome.completeError(e, st);
+          if (e is SlingException) rethrow; // reported if it was queued
+        }
+      },
+    );
+    _queue.add(call);
+    unawaited(mutationQueue.add(mutation));
+    if (_queueWaiting) {
+      call.markQueued();
+    } else {
+      unawaited(_drainQueue());
+    }
+    return outcome.future;
+  }
+
+  /// A [QueuedMutation] restored from [mutationQueue], replayed without
+  /// the closure that recorded it.
+  _QueuedCall _restoredCall(QueuedMutation mutation) {
+    final op = PrintedOperation(mutation.document, mutation.variables);
+    final journal = decodeRollback(mutation.rollback);
+    return _QueuedCall(
+      mutation,
+      op,
+      Selection.root('mutation'),
+      journal,
+      queued: true,
+      land: (record, received, failure) => _landMutation<void>(
+        op,
+        record,
+        received,
+        failure,
+        journal,
+        policy: errorPolicy,
+        writeResponse: !mutation.renamesFields,
+        refetchQueries: mutation.refetchQueries,
+        result: () {},
+      ),
+    );
+  }
 
   /// Bumped by each successful [SlingAuth.refresh]: a request sent with
   /// headers from an older generation replays without refreshing again.
@@ -2006,6 +2271,9 @@ class SlingClient<Q extends Accessor> {
     for (final r in _rows) {
       addEntities(r._deps);
     }
+    for (final call in _queue) {
+      retain.addAll(rollbackEntities(call.journal));
+    }
     return cache.gc(retain: retain);
   }
 
@@ -2197,7 +2465,8 @@ class SlingClient<Q extends Accessor> {
   /// query request in flight, no mutation awaiting its response. Scopes can
   /// still be about to *rebuild* (their `onChanged` ran, the frame has not)
   /// — pump a frame and check again. Test helpers (`pumpUntilSettled` in
-  /// `sling_gql_test`) loop on exactly that.
+  /// `sling_gql_test`) loop on exactly that. Offline mutations waiting in
+  /// the queue for the network do not count; one being sent does.
   bool get isIdle =>
       !_flushScheduled && _inflight == null && _mutationsInFlight == 0;
 
@@ -2307,6 +2576,34 @@ class SlingClient<Q extends Accessor> {
   /// new/removed row" case. Refetches are fire-and-forget — the returned
   /// future completes once the mutation itself lands, not once the refetches
   /// do; their errors surface on the affected scopes' `state.error` as usual.
+  ///
+  /// [offline] queues the call when the server cannot be reached
+  /// ([SlingException.isNetworkUnreachable]) instead of failing it:
+  /// - its optimistic writes **stay applied** while it waits, and [onQueued]
+  ///   is called (once) — `MutationBuilder` shows it as
+  ///   `MutationState.isQueued`;
+  /// - the returned future **stays pending** until the call is finally sent:
+  ///   it completes as above, with [body]'s value once the response landed,
+  ///   or with the error of a replay the server rejected (optimistic writes
+  ///   rolled back, [onQueuedMutationFailed] notified). If the client is
+  ///   disposed (or the app killed) first, it never completes;
+  /// - queued calls are sent again in order, one at a time — after the next
+  ///   request of any kind that reaches the server, on [replayQueue], and on
+  ///   timers backing off along [mutationQueueBackoff];
+  /// - the call is in [mutationQueue] from the moment it is sent until it
+  ///   lands or fails for good: the printed document, its variables (as they
+  ///   were at the call) and the undo log of its optimistic writes. A later
+  ///   run of the app with the same store replays it — **at least once**: a
+  ///   call the server applied just before the app was killed is sent
+  ///   again — and still rolls its optimistic writes back if the server
+  ///   then rejects it (reported on [onQueuedMutationFailed] only). [body]
+  ///   is not run for a restored call; its response is cached like any
+  ///   other (unless [QueuedMutation.renamesFields]).
+  ///
+  /// An offline call made while others wait is queued behind them (sent in
+  /// order); calls without [offline] are sent at once as usual. A call
+  /// killed mid-flight *without* [offline] leaves its optimistic writes in a
+  /// persisted cache until a response for those fields overwrites them.
   Future<T> mutateWith<M extends Accessor, T>(
     RootFactory<M> root,
     T Function(M mutation) body, {
@@ -2316,6 +2613,8 @@ class SlingClient<Q extends Accessor> {
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
+    bool offline = false,
+    void Function()? onQueued,
   }) async {
     final policy = errorPolicy ?? this.errorPolicy;
     final journal = <CacheWrite>[];
@@ -2339,6 +2638,21 @@ class SlingClient<Q extends Accessor> {
     final scope = MutationScope(this);
     body(root(scope));
     final op = PrintedOperation.from(scope.root);
+    if (offline) {
+      return _mutateOffline(
+        root,
+        body,
+        scope,
+        op,
+        journal,
+        refetchQueries: refetchQueries,
+        debugLabel: debugLabel,
+        policy: policy,
+        timeout: timeout,
+        retry: retry,
+        onQueued: onQueued,
+      );
+    }
     onOperation?.call(op);
     final record = _track('mutation', op, scope.root, [?debugLabel]);
 
@@ -2355,6 +2669,38 @@ class SlingClient<Q extends Accessor> {
     } on SlingException catch (e) {
       failure = e;
     }
+    return _landMutation(
+      op,
+      record,
+      received,
+      failure,
+      journal,
+      policy: policy,
+      rootAliases: scope.root.childAliases,
+      refetchQueries: refetchQueries,
+      result: () => body(root(scope)),
+    );
+  }
+
+  /// Ends a mutation that was in flight (counted in [_mutationsInFlight]):
+  /// writes its response, or rolls back its optimistic [journal] and throws
+  /// [failure]; returns [result] computed once the response is cached.
+  /// [rootAliases] are the root fields written under `ROOT_MUTATION` (the
+  /// response's when `null`); without [writeResponse] nothing is written
+  /// (a restored call whose response keys cannot be mapped back).
+  T _landMutation<T>(
+    PrintedOperation op,
+    SlingRequest? record,
+    _Received? received,
+    SlingException? failure,
+    List<CacheWrite> journal, {
+    required ErrorPolicy policy,
+    Iterable<String>? rootAliases,
+    Iterable<String>? refetchQueries,
+    bool writeResponse = true,
+    required T Function() result,
+  }) {
+    var written = const <String>[];
     // From here on everything is synchronous: one cache change for the
     // response, the rollback, list rules and the root removal.
     return cache.batch(() {
@@ -2378,21 +2724,22 @@ class SlingClient<Q extends Accessor> {
         final undone = partial != null && policy == ErrorPolicy.none
             ? _rollback(journal)
             : const <String>{};
-        try {
-          touched = cache.writeResponse(
-            'mutation',
-            op.toCacheKeys(data),
-            at: _now(),
-          );
-        } catch (e, st) {
-          throw SlingTransportException(
-            e,
-            st,
-            'Could not cache the response: $e',
-          );
+        touched = const {};
+        if (writeResponse) {
+          try {
+            final cached = op.toCacheKeys(data);
+            written = [...(rootAliases ?? cached.keys)];
+            touched = cache.writeResponse('mutation', cached, at: _now());
+          } catch (e, st) {
+            throw SlingTransportException(
+              e,
+              st,
+              'Could not cache the response: $e',
+            );
+          }
+          _writesSinceGc++;
         }
         touched = touched.union(undone);
-        _writesSinceGc++;
       } on SlingException catch (e) {
         record?._finish(e);
         _notify(_rollback(journal));
@@ -2402,7 +2749,7 @@ class SlingClient<Q extends Accessor> {
         _checkIdle();
       }
       if (partial != null && policy == ErrorPolicy.none) {
-        _removeMutationRoot(scope.root);
+        _removeMutationRoot(written);
         _notify(touched);
         throw partial;
       }
@@ -2417,19 +2764,19 @@ class SlingClient<Q extends Accessor> {
         }
       }
 
-      final result = body(root(scope));
-      _removeMutationRoot(scope.root);
+      final value = result();
+      _removeMutationRoot(written);
       if (partial != null && policy == ErrorPolicy.all) {
-        throw partial.withData(result);
+        throw partial.withData(value);
       }
-      return result;
+      return value;
     });
   }
 
   /// The payload lives on in the entities it referenced; the root fields
   /// would only pin them in memory.
-  void _removeMutationRoot(Selection root) {
-    for (final alias in root.childAliases) {
+  void _removeMutationRoot(Iterable<String> aliases) {
+    for (final alias in aliases) {
       cache.remove('mutation', [alias]);
     }
   }
@@ -2795,7 +3142,9 @@ class SlingClient<Q extends Accessor> {
   }) async {
     for (var attempt = 1; ; attempt++) {
       try {
-        return await _authorized(op, record, timeout, cancel);
+        final received = await _authorized(op, record, timeout, cancel);
+        _serverReached();
+        return received;
       } on SlingCancelledException {
         rethrow;
       } on SlingException catch (e) {
@@ -2952,14 +3301,20 @@ class SlingClient<Q extends Accessor> {
     return _Received(data, errors);
   }
 
-  /// Closes every open subscription, aborts the query batch in flight and
-  /// closes the HTTP client.
+  /// Closes every open subscription, aborts the query batch in flight, stops
+  /// replaying the mutation queue (what it holds stays in [mutationQueue];
+  /// the futures of queued calls never complete) and closes the HTTP
+  /// client.
   void dispose() {
+    _disposed = true;
+    _queueTimer?.cancel();
+    _queueTimer = null;
     for (final s in _subscriptions.toList()) {
       s.cancel();
     }
     _inflightCancel?.cancel();
     _requests.close();
+    _queuedMutationFailed.close();
     _http.close();
   }
 }
@@ -2971,6 +3326,54 @@ class _Received {
 
   final Map<String, Object?> data;
   final List<SlingGraphQLError> errors;
+}
+
+/// One offline mutation in `SlingClient._queue`: what is persisted
+/// ([mutation]) and what this run of the app still has of the call.
+class _QueuedCall {
+  _QueuedCall(
+    this.mutation,
+    this.op,
+    this.tree,
+    this.journal, {
+    required this.land,
+    this.debugLabel,
+    this.timeout,
+    this.retry,
+    this.onQueued,
+    this.queued = false,
+  });
+
+  final QueuedMutation mutation;
+  final PrintedOperation op;
+
+  /// The recorded selection, for the request log (empty once restored).
+  final Selection tree;
+
+  /// The optimistic writes to undo on a final failure.
+  final List<CacheWrite> journal;
+  final String? debugLabel;
+  final Duration? timeout;
+  final RetryPolicy? retry;
+  final void Function()? onQueued;
+
+  /// Writes the response (or rolls back) and completes the call; throws the
+  /// [SlingException] it failed with. Decrements `_mutationsInFlight`.
+  final void Function(
+    SlingRequest? record,
+    _Received? received,
+    SlingException? failure,
+  )
+  land;
+
+  /// The call waited for the network at least once (restored calls did).
+  bool queued;
+
+  void markQueued() {
+    if (queued) return;
+    queued = true;
+    onQueued?.call();
+  }
 }
 
 /// Fired once to abandon a query batch (every waiting scope was disposed,

@@ -95,6 +95,8 @@ query {
   error, the widgets that asked for it), `logRequests: true` for one console
   line per operation, `SlingRequestOverlay` for the same list in the app.
 - Mutations with optimistic writes (journaled, rolled back on failure).
+- Offline mutations (`offline: true`): queued while the server is
+  unreachable, replayed in order, persisted through a `MutationQueueStore`.
 - A sealed error model (`SlingNetworkException`, `SlingHttpException`,
   `SlingGraphQLException` with error codes, …), `errorPolicy` (none / all /
   ignore), sticky errors, retry cooldown.
