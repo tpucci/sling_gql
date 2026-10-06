@@ -40,7 +40,8 @@ import 'debug_label.dart';
 /// cascade (`q.latestLaunch?..name..rocket?.name`) reads fields and returns
 /// the object; a record (`(q.me.name, q.me.age)`) returns the values.
 ///
-/// [fetchPolicy], [maxAge] and [scheduler] are [QueryBuilder]'s and, like
+/// [fetchPolicy], [maxAge], [errorPolicy], [timeout] and [scheduler] are
+/// [QueryBuilder]'s and, like
 /// there, are read once, when the scope is created (first build, or when the
 /// [SlingScope] above provides another client). [debugLabel] names the scope
 /// in `SlingRequest.scopes` and waterfall warnings; it defaults to this
@@ -52,6 +53,8 @@ import 'debug_label.dart';
   T Function(Q query) select, {
   FetchPolicy? fetchPolicy,
   Duration? maxAge,
+  ErrorPolicy? errorPolicy,
+  Duration? timeout,
   String? debugLabel,
   FlushScheduler scheduler = frameEndScheduler,
 }) => use(
@@ -59,6 +62,8 @@ import 'debug_label.dart';
     select,
     fetchPolicy: fetchPolicy,
     maxAge: maxAge,
+    errorPolicy: errorPolicy,
+    timeout: timeout,
     debugLabel: debugLabel,
     scheduler: scheduler,
   ),
@@ -69,6 +74,8 @@ class _SlingQueryHook<Q extends Accessor, T> extends Hook<(T, QueryState)> {
     this.select, {
     this.fetchPolicy,
     this.maxAge,
+    this.errorPolicy,
+    this.timeout,
     this.debugLabel,
     required this.scheduler,
   });
@@ -76,6 +83,8 @@ class _SlingQueryHook<Q extends Accessor, T> extends Hook<(T, QueryState)> {
   final T Function(Q query) select;
   final FetchPolicy? fetchPolicy;
   final Duration? maxAge;
+  final ErrorPolicy? errorPolicy;
+  final Duration? timeout;
   final String? debugLabel;
   final FlushScheduler scheduler;
 
@@ -108,6 +117,8 @@ class _SlingQueryHookState<Q extends Accessor, T>
             debugHookOwnerLabel(context),
         fetchPolicy: hook.fetchPolicy,
         maxAge: hook.maxAge,
+        errorPolicy: hook.errorPolicy,
+        timeout: hook.timeout,
       );
     }
     final scope = _scope!;

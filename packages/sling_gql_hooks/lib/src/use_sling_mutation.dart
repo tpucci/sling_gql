@@ -33,8 +33,10 @@ import 'debug_label.dart';
 /// reads, sends the mutation at once (never batched), normalizes the
 /// response into the shared cache — widgets showing the returned entities
 /// rebuild on their own — and resolves to the body's value computed from the
-/// cache, or to `null` on failure (it never throws; the exception is on
-/// [MutationState.error], optimistic writes are rolled back). The state
+/// cache, or to `null` on failure (it never throws a [SlingException]; it is
+/// on [MutationState.error], optimistic writes are rolled back; under
+/// [ErrorPolicy.all] a partial response sets both [MutationState.data] and
+/// the error). Its named arguments are `SlingClient.mutateWith`'s. The state
 /// describes the latest call only; this widget rebuilds when it changes.
 ///
 /// `mutate` is the same function across builds (safe as a `useCallback` /
@@ -75,7 +77,7 @@ class _SlingMutationHook<M extends Accessor>
 class _SlingMutationHookState<M extends Accessor>
     extends HookState<_SlingMutationValue<M>, _SlingMutationHook<M>> {
   bool _loading = false;
-  Object? _error;
+  SlingException? _error;
   Object? _data;
   // Incremented per `mutate` call; only the latest call updates the state.
   int _call = 0;
@@ -90,6 +92,9 @@ class _SlingMutationHookState<M extends Accessor>
     T Function(M mutation) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
+    ErrorPolicy? errorPolicy,
+    Duration? timeout,
+    RetryPolicy? retry,
   }) async {
     final call = ++_call;
     setState(() {
@@ -111,15 +116,24 @@ class _SlingMutationHookState<M extends Accessor>
         optimistic: optimistic,
         refetchQueries: refetchQueries,
         debugLabel: _label,
+        errorPolicy: errorPolicy,
+        timeout: timeout,
+        retry: retry,
       );
       settle(() => _data = result);
       return result;
-    } catch (e) {
+    } on SlingException catch (e) {
+      // `ErrorPolicy.all`: the call landed, with errors.
+      final landed =
+          e is SlingGraphQLException &&
+          e.isPartial &&
+          (errorPolicy ?? _client.errorPolicy) == ErrorPolicy.all;
+      final data = landed ? e.data as T : null;
       settle(() {
         _error = e;
-        _data = null;
+        _data = data;
       });
-      return null;
+      return data;
     }
   }
 

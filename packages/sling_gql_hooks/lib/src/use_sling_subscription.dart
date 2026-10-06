@@ -85,7 +85,7 @@ class _SlingSubscriptionHookState<S extends Accessor>
   StreamSubscription<S>? _listener;
   S? _latest;
   bool _active = false;
-  Object? _error;
+  SlingException? _error;
   bool _disposed = false;
 
   void _rebuild() {
@@ -117,8 +117,10 @@ class _SlingSubscriptionHookState<S extends Accessor>
             _error = null;
           });
         },
-        onError: (Object e) {
-          if (!_disposed) setState(() => _error = e);
+        onError: (Object e, StackTrace st) {
+          if (!_disposed) {
+            setState(() => _error = SlingException.from(e, st));
+          }
         },
         onDone: () {
           if (!_disposed) setState(() => _active = false);

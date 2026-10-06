@@ -116,6 +116,26 @@ void main() {
     expect(state.data, isNull);
   });
 
+  testWidgets('errorPolicy all: state has both data and the error', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    fail = true;
+    final result = await tester.runAsync(
+      () => mutate<String>((m) {
+        m.rename(id: '1', name: 'Cy')?.name;
+        return 'landed';
+      }, errorPolicy: ErrorPolicy.all),
+    );
+    await tester.pump();
+    expect(result, 'landed');
+    expect(state.data, 'landed');
+    expect(
+      state.error,
+      isA<SlingGraphQLException>().having((e) => e.isPartial, 'partial', true),
+    );
+  });
+
   testWidgets('an older call finishing late does not overwrite a newer one', (
     tester,
   ) async {

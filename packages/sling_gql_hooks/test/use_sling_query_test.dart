@@ -277,6 +277,66 @@ void main() {
     expect(state.isStale, isFalse);
   });
 
+  testWidgets('errorPolicy and timeout are passed to the scope', (
+    tester,
+  ) async {
+    final server = MockGraphQLServer(
+      query: {
+        'me': {
+          ...user('1', 'Ada'),
+          'age': (Map<String, Object?> _) => throw GraphQLError('hidden'),
+        },
+      },
+    );
+    final client = server.client(Query.root);
+    late QueryState state;
+    await tester.pumpWidget(
+      app(
+        client,
+        HookBuilder(
+          builder: (context) {
+            final (name, s) = useSlingQuery(
+              (Query q) => (q.me.name, q.me.age),
+              errorPolicy: ErrorPolicy.ignore,
+            );
+            state = s;
+            return Text(name.$1 ?? '…');
+          },
+        ),
+      ),
+    );
+    await tester.pumpUntilSettled(client);
+    expect(find.text('Ada'), findsOneWidget);
+    expect(state.error, isNull);
+    expect(state.hasMissingData, isFalse);
+    expect(server.requests, hasLength(1));
+
+    final slow = MockGraphQLServer(
+      query: {'me': user('1', 'Ada')},
+      latency: const Duration(seconds: 2),
+    );
+    final slowClient = slow.client(Query.root, retry: RetryPolicy.none);
+    await tester.pumpWidget(
+      app(
+        slowClient,
+        HookBuilder(
+          key: const ValueKey('timeout'),
+          builder: (context) {
+            final (name, s) = useSlingQuery(
+              (Query q) => q.me.name,
+              timeout: const Duration(milliseconds: 100),
+            );
+            state = s;
+            return Text(name ?? '…');
+          },
+        ),
+      ),
+    );
+    await tester.pumpUntilSettled(slowClient);
+    expect(state.error, isA<SlingTimeoutException>());
+    await tester.pump(const Duration(seconds: 2)); // the latency timer
+  });
+
   testWidgets('scheduler decides when the misses are flushed', (tester) async {
     final server = MockGraphQLServer(query: {'me': user('1', 'Ada')});
     final client = server.client(Query.root);
