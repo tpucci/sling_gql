@@ -48,7 +48,7 @@ class LogEntry {
 }
 
 /// Keeps every GraphQL operation the client sent, newest first. The whole
-/// point of the PoC is to *see* what the widgets produce.
+/// point of the example is to *see* what the widgets produce.
 ///
 /// Subscriptions are long-lived connections, not round trips: they go to
 /// [subscriptions], so [entries] keeps counting requests.

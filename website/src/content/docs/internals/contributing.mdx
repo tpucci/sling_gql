@@ -55,6 +55,12 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
    (`packages/sling_gql_sqflite/test/soak_test.dart`); the long one is
    `flutter test benchmark/soak_bench_test.dart` in that package, by hand.
 
+   `melos run bench` runs the read-path and persistence benchmarks five times each and
+   fails when a median regressed by more than 1.5× against `scripts/bench-baseline.json`.
+   The metrics are ratios to reference work measured in the same run (`jsonDecode` of the
+   same response, plain sqflite inserts and reads), so they hold across machines. After an
+   intended slowdown, `melos run bench:update` and commit the baseline.
+
    The example test asserts **exact request counts** after each interaction. It is the one
    test that catches waterfalls — keep it exact.
 
@@ -86,7 +92,8 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
 7. **CI and releases.** Every push and pull request runs the gates above
    (`.github/workflows/ci.yml`), plus analyze, format, a check that the example's
-   generated file is up to date and a debug build of the example's Android app.
+   generated file is up to date, a debug build of the example's Android app and the
+   benchmarks (`melos run bench`).
 
    Commits follow [Conventional Commits](https://www.conventionalcommits.org/) scoped by
    package (`feat(sling_gql): …`, `fix(sling_gql_gen): …`, `docs(website): …`), because
@@ -98,11 +105,17 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
    git push --follow-tags      # publish.yml publishes each tagged package to pub.dev
    ```
 
+   What a release may change is the [versioning policy](/sling_gql/internals/versioning/):
+   a breaking change is a major (`!` + a `BREAKING CHANGE:` footer), deprecations come
+   first and live at least one minor.
 </Steps>
 
 ## Conventions
 
-- Runtime stays dependency-light: `package:http` only. No `gql`, no `ferry`, no `build_runner`.
+- Runtime stays dependency-light: `package:http` and `package:meta` only. No `gql`, no
+  `ferry`, no `build_runner`.
+- Runtime machinery on public types is `@internal`, `Accessor`'s helpers `@protected`;
+  building blocks apps never need go to `package:sling_gql/internal.dart`.
 - Every runtime behaviour change ships with a test in `packages/sling_gql/test`, using
   `MockClient` from `package:http/testing.dart` rather than the network.
 - The hand-written accessor classes at the top of `packages/sling_gql/test/core_test.dart`

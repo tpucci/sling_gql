@@ -141,9 +141,10 @@ export const gqlSnippet = `query {
 </section>
 
 <section class="landing-section">
-  <h2>Proof-of-concept status</h2>
+  <h2>Status</h2>
   <p class="lead">Queries, the normalized cache, mutations, subscriptions and unions are
-  solid; the cache persists in SQLite through a separate adapter.</p>
+  solid; the cache persists in SQLite through a separate adapter. From 1.0 every package
+  follows a <a href="/sling_gql/internals/versioning/">semver and deprecation policy</a>.</p>
 
   | Capability | Status |
   | --- | --- |
@@ -161,10 +162,10 @@ export const gqlSnippet = `query {
   | Persistence (`sling_gql_sqflite`: SQLite, deltas, bounded) | <span class="pill pill-ok">done</span> |
 
   <div class="poc-banner">
-    <strong>This is a feasibility study</strong>, built in a day to answer one question: <em>can
-    "the widget is the query" work in Dart, without JavaScript's <code>Proxy</code>?</em> The answer
-    is yes — read the <a href="/sling_gql/internals/feasibility/">feasibility notes</a> for what
-    changed along the way.
+    <strong>It started as a feasibility study</strong>, built in a day to answer one question:
+    <em>can "the widget is the query" work in Dart, without JavaScript's <code>Proxy</code>?</em>
+    The answer was yes — read the <a href="/sling_gql/internals/feasibility/">feasibility notes</a>
+    for what changed along the way.
   </div>
 </section>
 

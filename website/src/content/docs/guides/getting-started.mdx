@@ -5,11 +5,13 @@ description: Add sling_gql to a Flutter app, generate typed accessors from your 
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Proof of concept">
-sling_gql is a 0.x proof of concept. It supports **queries** (with a normalized cache and a
-pagination helper), **mutations**, **subscriptions** over SSE, **unions and interfaces**, and
-a single `transport` hook for auth/retry/logging — and APIs will change between
-minor versions. Everything below works against any GraphQL endpoint that allows introspection.
+<Aside type="note" title="What you get">
+sling_gql supports **queries** (normalized cache, type policies, cursor pagination),
+**mutations** (optimistic writes, an offline queue), **subscriptions** over SSE, **unions and
+interfaces**, typed errors with retry, timeouts and auth, and SQLite persistence. From 1.0 the
+packages follow [semantic versioning](/sling_gql/internals/versioning/); coming from 0.x, see
+[Upgrading to 1.0](/sling_gql/guides/upgrading-to-1-0/). Everything below works against any
+GraphQL endpoint that allows introspection.
 </Aside>
 
 <Steps>
@@ -22,7 +24,8 @@ minor versions. Everything below works against any GraphQL endpoint that allows 
    ```
 
    Both are on pub.dev ([`sling_gql`](https://pub.dev/packages/sling_gql),
-   [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen)), each versioned on its own.
+   [`sling_gql_gen`](https://pub.dev/packages/sling_gql_gen)); they share a major version
+   (see [Versioning](/sling_gql/internals/versioning/)).
    To track `main` instead, use a `git:` dependency with
    `url: https://github.com/tpucci/sling_gql` and `path: packages/sling_gql`
    (resp. `packages/sling_gql_gen`).

@@ -105,7 +105,10 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
   that page's cursor.
 - **`PaginatedState`** hands the builder `items` (the merged list, then the skeleton of the
   page loading), `hasMore`, `totalCount`, `loadMore()`, `refetch()`, plus `isLoading` /
-  `hasMissingData` / `error` from the underlying `QueryBuilder`.
+  `hasMissingData` / `isSkeleton` / `isStale` / `error` and `revalidate()` from the
+  underlying `QueryBuilder`.
+- **`QueryBuilder`'s options** — `fetchPolicy`, `maxAge`, `errorPolicy`, `timeout`,
+  `debugLabel`, `scheduler` — are `PaginatedQueryBuilder`'s too, passed to it as is.
 - **`PaginationController`** holds the cursor of the page being loaded. It is optional:
   pass your own when something outside the builder must `reset()` it (a filter or sort
   change); otherwise the widget keeps a private one.

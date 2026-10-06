@@ -1,0 +1,113 @@
+---
+title: Versioning & deprecation policy
+description: What counts as sling_gql's public API, what a major, minor or patch release may change, how deprecations work, and which generator versions work with which runtime.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+From 1.0 the six packages — `sling_gql`, `sling_gql_gen`, `sling_gql_test`,
+`sling_gql_hooks`, `sling_gql_link` and `sling_gql_sqflite` — follow
+[semantic versioning](https://semver.org). They **share a major version**: 1.x of
+every package works with 1.x of the others. Minors and patches are independent (a
+fix in the generator does not bump the runtime).
+
+## What is public
+
+The public API of a package is what its main library exports —
+`package:sling_gql/sling_gql.dart`, `package:sling_gql_gen/sling_gql_gen.dart`,
+`package:sling_gql_test/sling_gql_test.dart`, … — and the documented behaviour of
+those symbols (their dartdoc), **except**:
+
+- **`package:sling_gql/internal.dart`** — the runtime's building blocks
+  (`NormalizedCache`, `Ref`, `missing`, `depKey`, `CacheWrite`, `MutationScope`,
+  `RowScope`, …). First-party adapters use it and move in lockstep with the runtime;
+  it can change in any minor release. No app feature requires it.
+- **Anything under `src/`** (`package:sling_gql/src/…`).
+- **Members marked `@internal`** (`package:meta`): `Selection`'s tree-building and
+  policy members, `PrintedOperation.from` / `toCacheKeys`, the path-level
+  `Cache.read` / `write` / `remove` / `writeResponse`, `ListRule.evaluate`. The
+  analyzer warns when they are used outside sling_gql.
+- **Members marked `@protected`**: `Accessor`'s read/write helpers (`scalar`,
+  `object`, `list`, `on`, `whenType`, `write`, …). They are public *to generated
+  code* (see [Generated code](#generated-code)), not to apps: apps read through the
+  generated getters.
+- **Interfaces apps are not meant to implement**: `Cache`, `Recorder`. New members
+  can appear in a minor release.
+- Debug output: `SlingRequest.logLine`, `WaterfallWarning.toString`, the request
+  overlay's layout, assertion messages.
+
+The CLI of `sling_gql_gen` is public: its flags, their defaults, and the shape of
+the code it writes (class and member names, constructors, the `slingSchema`
+constant and the extensions).
+
+## What each release may change
+
+| Release | May contain |
+| --- | --- |
+| **Patch** (1.2.3 → 1.2.4) | Bug fixes and performance work that keep documented behaviour; docs. |
+| **Minor** (1.2 → 1.3) | New symbols, new optional parameters, deprecations, raised minimum Dart/Flutter SDK or dependency versions, a persisted-format change that is **migrated** or (for the SQLite store) wipes the store once — always called out in the changelog. |
+| **Major** (1.x → 2.0) | Everything else: removing or renaming a public symbol or parameter, a new required parameter, a changed default, changed documented behaviour, removing deprecated APIs. |
+
+Breaking changes that are easy to miss, and therefore only happen in a major:
+
+- **A new subtype of a sealed class.** `SlingException` is sealed so apps can
+  `switch` over it exhaustively; a new error type would break those switches.
+  Likewise a new value of a public enum (`FetchPolicy`, `ErrorPolicy`,
+  `ListPosition`).
+- **A new member on an interface apps implement**: `MutationQueueStore`,
+  `SqfliteCodec`, `SlingAuth`'s callbacks, the `Transport` /
+  `SubscriptionTransport` function types.
+- **A new major of a dependency whose types appear in the API**: `http`
+  (`Transport` takes an `http.Request`), `gql_link` (`sling_gql_link`), `sqflite`
+  (`SqflitePersistence.open(databaseFactory:)`), `flutter_hooks`
+  (`sling_gql_hooks`).
+- **A changed default** — `SlingClient(retry:)`, `gcAfterWrites`,
+  `SqflitePersistence.open(maxAge:, maxEntities:)`.
+
+## Deprecations
+
+A symbol that is going away is first marked
+`@Deprecated('Use X instead; removed in <next major>.')` in a minor release, with the
+replacement available in the same release. It keeps working for **at least one
+minor release** and is removed only in the **next major**. The changelog of the
+deprecating release and the upgrade guide of the major list it.
+
+<Aside>
+The 1.0 release itself removed and renamed APIs outright, without deprecations: see
+[Upgrading to 1.0](/sling_gql/guides/upgrading-to-1-0/). The policy applies from 1.0
+on.
+</Aside>
+
+## Generated code
+
+The generated file calls `Accessor`'s helpers, extends `Accessor`, and builds a
+`SlingSchema`; those are the contract between `sling_gql_gen` and `sling_gql`:
+
+- **`sling_gql` 1.x runs the output of every `sling_gql_gen` 1.y with y ≤ x.**
+  The helper signatures generated code calls only change in a major. You can
+  upgrade the runtime without regenerating.
+- **A newer generator may need a newer runtime.** When a `sling_gql_gen` minor
+  emits code that calls something new, its changelog names the minimum
+  `sling_gql` minor (the generated file then fails to compile against an older one —
+  never silently misbehaves). Upgrade both when you upgrade the generator.
+- Regenerating with the same generator version, introspection and flags gives the
+  same file (and the same `slingSchema.hash`), on every platform.
+
+## Persisted data
+
+- `sling_gql_sqflite` stamps its tables with `sqfliteFormatVersion`. A release that
+  changes the tables bumps it, and the first `open` after the upgrade **wipes the
+  store** (the app starts cold once; queued offline mutations are kept, minus their
+  rollback logs). That is a minor release, called out in the changelog.
+- A new `slingSchema.hash` (you regenerated after a schema change) **migrates** the
+  store along `slingSchema.fields` rather than wiping it.
+- Cache keys (`launches_<hash>` aliases) are part of the persisted format: changing
+  how they are computed is handled like a format change.
+- `QueuedMutation.toJson()` entries are read back by later versions within a major.
+
+## Reporting problems
+
+Bugs and regressions: [GitHub issues](https://github.com/tpucci/sling_gql/issues).
+Security issues: see the repository's
+[SECURITY.md](https://github.com/tpucci/sling_gql/blob/main/SECURITY.md) — not a
+public issue.

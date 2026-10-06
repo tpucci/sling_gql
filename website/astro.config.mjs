@@ -9,7 +9,7 @@ export default defineConfig({
     starlight({
       title: 'sling_gql',
       description:
-        'A GraphQL client for Flutter where the widget is the query. Proof of concept.',
+        'A GraphQL client for Flutter where the widget is the query.',
       logo: { src: './src/assets/logo.svg', alt: 'sling_gql' },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/tpucci/sling_gql' }],
@@ -29,6 +29,7 @@ export default defineConfig({
             { label: 'Why sling_gql?', slug: 'guides/why' },
             { label: 'Getting started', slug: 'guides/getting-started' },
             { label: 'Try it live', slug: 'guides/try-it' },
+            { label: 'Upgrading to 1.0', slug: 'guides/upgrading-to-1-0' },
           ],
         },
         {
@@ -61,6 +62,7 @@ export default defineConfig({
           items: [
             { label: 'Architecture', slug: 'internals/architecture' },
             { label: 'Feasibility notes', slug: 'internals/feasibility' },
+            { label: 'Versioning & deprecation', slug: 'internals/versioning' },
             { label: 'Roadmap', slug: 'internals/roadmap' },
             { label: 'Working on the repo', slug: 'internals/contributing' },
           ],
