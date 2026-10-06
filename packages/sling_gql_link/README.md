@@ -82,3 +82,13 @@ final link = Link.split(
 
 Or keep sling_gql's default GraphQL-over-SSE subscriptions and only pass
 `transport:`.
+
+## Versioning
+
+From 1.0 `sling_gql_link` follows semantic versioning and shares its major
+version with `sling_gql`. A new major of `gql_link` / `gql_exec` (whose types
+are part of this API) is a major here. Deprecated APIs keep working for at least one minor release and are
+removed only in the next major. Full policy:
+[Versioning & deprecation](https://tpucci.github.io/sling_gql/internals/versioning/); coming from 0.x:
+[Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/). Security issues:
+[SECURITY.md](https://github.com/tpucci/sling_gql/blob/main/SECURITY.md).

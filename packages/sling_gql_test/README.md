@@ -87,3 +87,15 @@ mock server, a hand-rolled `MockClient`, or a real server.
 test` installs and turns keep-alive off, so tests against a running server
 need no `client.dispose()` dance. `disposeAfterTest(client)` registers the
 dispose as a tear-down for plain `test()`s.
+
+## Versioning
+
+From 1.0 `sling_gql_test` follows semantic versioning and shares its major
+version with `sling_gql`. Public: what `package:sling_gql_test/sling_gql_test.dart`
+exports; the documents `MockGraphQLServer` parses are whatever the runtime
+prints, so assert on `MockRequest.rootFields` / `selects(...)`, not on
+aliases. Deprecated APIs keep working for at least one minor release and are
+removed only in the next major. Full policy:
+[Versioning & deprecation](https://tpucci.github.io/sling_gql/internals/versioning/); coming from 0.x:
+[Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/). Security issues:
+[SECURITY.md](https://github.com/tpucci/sling_gql/blob/main/SECURITY.md).

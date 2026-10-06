@@ -167,3 +167,15 @@ and each save compacts the cache's change records, so a big `gc` is a few
 mostly `jsonDecode` of the rows. Only `clear()` (or a store opened with
 `compact: false` once the cache forgot over a thousand removals) gets a full
 delta.
+
+## Versioning
+
+From 1.0 `sling_gql_sqflite` follows semantic versioning and shares its
+major version with `sling_gql`. A change to the tables bumps
+`sqfliteFormatVersion` in a minor release and wipes the store once at the
+next `open` (called out in the changelog); a regenerated schema migrates it
+instead. A new major of `sqflite` is a major here. Deprecated APIs keep working for at least one minor release and are
+removed only in the next major. Full policy:
+[Versioning & deprecation](https://tpucci.github.io/sling_gql/internals/versioning/); coming from 0.x:
+[Upgrading to 1.0](https://tpucci.github.io/sling_gql/guides/upgrading-to-1-0/). Security issues:
+[SECURITY.md](https://github.com/tpucci/sling_gql/blob/main/SECURITY.md).
