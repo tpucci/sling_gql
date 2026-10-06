@@ -375,7 +375,8 @@ final class SqflitePersistence {
   /// their rollback logs are dropped: the optimistic values they would
   /// undo are gone with the cache. Under another [codec] id they cannot be
   /// decoded and are dropped; a row that does not decode is reported to
-  /// `onError` and deleted. A recovered (deleted) file loses them.
+  /// `onError` and deleted. A recovered (deleted) file loses them. [clear]
+  /// empties it.
   late final MutationQueueStore mutationQueue;
 
   /// What [open] loaded and dropped, with timings.
@@ -667,9 +668,14 @@ final class SqflitePersistence {
     }
   }
 
-  /// Logout: empties the cache (every query refetches) and the database.
+  /// Logout: empties the cache (every query refetches), the stored
+  /// [mutationQueue] and the database. Call the client's
+  /// `clearMutationQueue()` first: it also rolls back the queued calls'
+  /// optimistic writes, fails their futures and stops replaying them (this
+  /// only empties the table the next run would replay).
   Future<void> clear() {
     cache.clear();
+    unawaited(mutationQueue.clear());
     return flush();
   }
 
@@ -923,6 +929,12 @@ final class _SqfliteMutationQueue implements MutationQueueStore {
         'created_at': entry.createdAt.millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace),
     );
+  }
+
+  @override
+  Future<void> clear() {
+    _entries.clear();
+    return _persistence._enqueueWrite((batch) => batch.delete(_mutationQueue));
   }
 
   @override

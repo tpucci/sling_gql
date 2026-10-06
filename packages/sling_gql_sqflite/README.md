@@ -68,7 +68,9 @@ await persistence.clear();
 optimistic writes; through the codec), read at `open` and replayed by the
 next client — whose rollback still works if the server rejects them. The
 table is not part of the format version: a wiped cache keeps the entries
-(without their rollback logs); another codec id drops them. See
+(without their rollback logs); another codec id drops them;
+`persistence.clear()` empties it (call `client.clearMutationQueue()` first on
+sign-out: replays use the current auth headers). See
 https://tpucci.github.io/sling_gql/guides/mutations/#offline-mutations.
 
 ## Bounds

@@ -210,6 +210,46 @@ void main() {
     expect(await queueRows(p), hasLength(1));
   });
 
+  test('sign-out: clearMutationQueue rolls back and empties the table; '
+      'persistence.clear() empties it too', () async {
+    final path = await killedRun(names: ['Grace', 'Hopper']);
+    final p = await openStore(path);
+    addTearDown(p.close);
+    final client = SlingClient<Query>(
+      endpoint: Uri.parse('http://mock/graphql'),
+      schema: slingSchema,
+      cache: p.cache,
+      httpClient: server.httpClient,
+      mutationQueue: p.mutationQueue,
+    );
+    addTearDown(client.dispose);
+    expect(p.cache.entity('User:1')?['name'], 'Hopper');
+    await client.clearMutationQueue();
+    expect(p.cache.entity('User:1')?['name'], 'User 1', reason: 'rolled back');
+    await p.flush();
+    expect(await queueRows(p), isEmpty);
+    await pumpEventQueue();
+    expect(
+      server.requests.where((r) => r.type == 'mutation'),
+      hasLength(1),
+      reason: "only the killed run's failed send",
+    );
+
+    // persistence.clear() alone empties the table the next run replays.
+    await p.mutationQueue.add(
+      QueuedMutation(
+        id: 'x',
+        document: 'mutation { a }',
+        variables: const {},
+        createdAt: DateTime(2026),
+      ),
+    );
+    await p.clear();
+    expect(await queueRows(p), isEmpty);
+    expect(await p.mutationQueue.load(), isEmpty);
+    expect(p.cache.entityKeys, isEmpty);
+  });
+
   test('a superseded instance stores no queue entries', () async {
     final path = tempDatabasePath();
     final errors = <Object>[];
