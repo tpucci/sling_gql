@@ -123,6 +123,16 @@ melos:
         melos run test:example:graphql-http &&
         melos run test:website
 
+    bench:
+      description: >-
+        Read-path and persistence benchmarks, 5 runs each; fails when a
+        median regresses by more than 1.5× against scripts/bench-baseline.json.
+      run: node scripts/bench.mjs
+
+    bench:update:
+      description: Re-measure the benchmarks and rewrite scripts/bench-baseline.json.
+      run: node scripts/bench.mjs --update
+
     generate:
       description: Regenerate example/lib/generated/schema.dart from the introspection snapshot.
       run: >-

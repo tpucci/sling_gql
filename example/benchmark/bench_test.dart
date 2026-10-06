@@ -1,11 +1,17 @@
 // Micro-benchmarks of the runtime hot paths using the example's generated
-// schema. Not a CI test: run explicitly with
+// schema. Not part of `flutter test`'s default run: run explicitly with
 //   flutter test benchmark/bench_test.dart
 // Numbers are JIT (test VM), not AOT — use them for ratios, not absolutes.
+//
+// With SLING_BENCH_OUT=<dir> it also writes <dir>/read_path.json: each cost
+// as a ratio to jsonDecode of the same response measured in the same run,
+// so the numbers compare across machines. `node scripts/bench.mjs` (CI's bench job) checks them against
+// scripts/bench-baseline.json.
 //
 // Measures the runtime's internals (printer, writeResponse) directly.
 // ignore_for_file: invalid_use_of_internal_member
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -192,5 +198,24 @@ sling_gql bench — $rows rows × 7 reads/row (${rows * 7} accessor reads per bu
 ''';
     // ignore: avoid_print
     print(report);
+
+    final out = Platform.environment['SLING_BENCH_OUT'];
+    if (out != null) {
+      double per(Duration d, int n) => d.inMicroseconds / n;
+      // jsonDecode of the response: native-heavy and stable from run to
+      // run, unlike the 15 µs raw-map loop (JIT-sensitive, ±30%).
+      final decoded = per(decode, 50);
+      File('$out/read_path.json').writeAsStringSync(
+        jsonEncode({
+          'read.warm_build_vs_json_decode': per(warmBuild, 500) / decoded,
+          'read.skeleton_build_vs_json_decode':
+              per(skeletonBuild, 200) / decoded,
+          'read.print_document_vs_json_decode': per(printCost, 1000) / decoded,
+          'read.notify_50_scopes_vs_json_decode': per(notify, 200) / decoded,
+          'read.write_response_vs_json_decode': per(write, 50) / decoded,
+          'read.snapshot_vs_json_decode': per(snapshot, 200) / decoded,
+        }),
+      );
+    }
   });
 }

@@ -1,9 +1,15 @@
 // Open/hydrate and delta-save timings of SqflitePersistence at 1k and 10k
 // entities (~600 B of JSON each), on the host through sqflite_common_ffi.
-// Not a CI test: run explicitly with
+// Not part of `flutter test`'s default run: run explicitly with
 //   flutter test benchmark/persistence_bench_test.dart
 // Numbers are JIT (test VM) on the host's SQLite, not a device: use them for
 // orders of magnitude.
+//
+// With SLING_BENCH_OUT=<dir> it runs 1k entities only and writes
+// <dir>/persistence.json: saves and open as ratios to plain sqflite work
+// measured in the same run (inserting / reading and decoding the same JSON
+// rows), so the numbers compare across machines. `node scripts/bench.mjs`
+// (CI's bench job) checks them against scripts/bench-baseline.json.
 import 'dart:convert';
 import 'dart:io';
 
@@ -59,10 +65,57 @@ Map<String, Object?> _pages(int entities, {String name = 'Mission'}) => {
 Duration _median(List<Duration> times) =>
     (List.of(times)..sort())[times.length ~/ 2];
 
+/// The host's SQLite and JSON speed, measured on a plain table at [path]:
+/// [n] launch rows inserted in one transaction, read back and decoded, and
+/// a transaction of 21 rows (what a delta save below writes). Medians of
+/// three rounds after a warm-up one.
+Future<({Duration insert, Duration read, Duration smallInsert})> _calibrate(
+  String path,
+  int n,
+) async {
+  final db = await databaseFactoryFfi.openDatabase(path);
+  await db.execute('CREATE TABLE t (key TEXT PRIMARY KEY, data TEXT NOT NULL)');
+  Future<void> insert(int from, int count, String name) =>
+      db.transaction((txn) async {
+        final batch = txn.batch();
+        for (var i = from; i < from + count; i++) {
+          batch.insert('t', {
+            'key': 'Launch:launch-$i',
+            'data': jsonEncode(_launch(i, name: name)),
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        await batch.commit(noResult: true);
+      });
+  final inserts = <Duration>[], reads = <Duration>[], small = <Duration>[];
+  for (var round = 0; round < 4; round++) {
+    var watch = Stopwatch()..start();
+    await insert(0, n, 'Raw $round');
+    final inserted = watch.elapsed;
+    watch = Stopwatch()..start();
+    for (final row in await db.query('t')) {
+      jsonDecode(row['data']! as String);
+    }
+    final read = watch.elapsed;
+    watch = Stopwatch()..start();
+    await insert(round * 21, 21, 'Small $round');
+    if (round == 0) continue; // warm-up
+    inserts.add(inserted);
+    reads.add(read);
+    small.add(watch.elapsed);
+  }
+  await db.close();
+  return (
+    insert: _median(inserts),
+    read: _median(reads),
+    smallInsert: _median(small),
+  );
+}
+
 String _ms(Duration d) => (d.inMicroseconds / 1000).toStringAsFixed(2);
 
 void main() {
-  for (final n in [1000, 10000]) {
+  final out = Platform.environment['SLING_BENCH_OUT'];
+  for (final n in out == null ? [1000, 10000] : [1000]) {
     test('$n entities', () async {
       final dir = Directory.systemTemp.createTempSync('sling_bench_');
       addTearDown(() => dir.deleteSync(recursive: true));
@@ -104,7 +157,9 @@ void main() {
       // each one as changed, as after a long session), saved.
       // ignore: invalid_use_of_internal_member
       p.cache.writeResponse('query', _pages(n, name: 'Session'));
+      watch = Stopwatch()..start();
       await p.flush();
+      final rewriteSave = watch.elapsed;
 
       // Then the common response: a new root field (a page alias) holding
       // 20 launches that changed, five times (median reported). Each one
@@ -175,8 +230,31 @@ void main() {
         '${_ms(isolate.hydrateTime)} ms; delta of $changed entities '
         '(ROOT_QUERY field by field): changesSince ${_ms(changesSince)} ms, save '
         '${_ms(deltaSave)} ms; save after a gc of 60%: '
-        '${_ms(gcSaves[true]!)} ms (${_ms(gcSaves[false]!)} ms without compact)',
+        '${_ms(gcSaves[true]!)} ms (${_ms(gcSaves[false]!)} ms without compact); '
+        'rewrite of every entity ${_ms(rewriteSave)} ms',
       );
+
+      if (out != null) {
+        final raw = await _calibrate('${dir.path}/raw.db', n);
+        double ratio(Duration a, Duration b) =>
+            a.inMicroseconds / b.inMicroseconds;
+        File('$out/persistence.json').writeAsStringSync(
+          jsonEncode({
+            'persist.rewrite_save_vs_raw_insert': ratio(
+              rewriteSave,
+              raw.insert,
+            ),
+            'persist.open_vs_raw_read': ratio(
+              main.readTime + main.hydrateTime,
+              raw.read,
+            ),
+            'persist.delta_save_vs_raw_small_insert': ratio(
+              deltaSave,
+              raw.smallInsert,
+            ),
+          }),
+        );
+      }
     }, timeout: const Timeout(Duration(minutes: 2)));
   }
 }

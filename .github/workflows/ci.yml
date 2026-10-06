@@ -75,6 +75,45 @@ jobs:
       - name: Example web build
         run: node scripts/build-web-demo.mjs --no-copy
 
+  # Benchmarks (read path, persistence) as ratios to work measured in the
+  # same run, medians of 5 runs; fails only on a >1.5× regression against
+  # scripts/bench-baseline.json. The medians are uploaded either way.
+  bench:
+    name: benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          echo "flutter=$(awk '/^flutter/ {print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .tool-versions
+
+      - name: Bootstrap workspace
+        run: |
+          dart pub global activate melos
+          melos bootstrap
+
+      - name: Benchmarks vs baseline
+        run: node scripts/bench.mjs --out bench-results.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench-results.json
+          if-no-files-found: ignore
+
   # The example's Android app builds (debug APK). Its end-to-end flows run on
   # an emulator by hand: integration_test/app_test.dart (see example/README).
   android:

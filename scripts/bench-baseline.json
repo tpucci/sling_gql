@@ -1,0 +1,17 @@
+{
+  "_comment": "Medians of `node scripts/bench.mjs --update`: each metric is a cost divided by a reference cost measured in the same run (lower is faster). The bench job fails when a median exceeds `threshold` × its value here.",
+  "threshold": 1.5,
+  "runs": 5,
+  "measuredOn": "darwin-arm64",
+  "metrics": {
+    "read.warm_build_vs_json_decode": 2.6748,
+    "read.skeleton_build_vs_json_decode": 0.1271,
+    "read.print_document_vs_json_decode": 0.0258,
+    "read.notify_50_scopes_vs_json_decode": 0.0839,
+    "read.write_response_vs_json_decode": 2.4151,
+    "read.snapshot_vs_json_decode": 0.3438,
+    "persist.rewrite_save_vs_raw_insert": 1.978,
+    "persist.open_vs_raw_read": 3.2072,
+    "persist.delta_save_vs_raw_small_insert": 1.0935
+  }
+}
