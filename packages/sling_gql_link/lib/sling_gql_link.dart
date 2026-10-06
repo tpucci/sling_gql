@@ -5,4 +5,4 @@
 library;
 
 export 'src/link_transport.dart'
-    show linkTransport, linkSubscriptionTransport, SlingLinkException;
+    show linkTransport, linkSubscriptionTransport, slingExceptionFromLink;

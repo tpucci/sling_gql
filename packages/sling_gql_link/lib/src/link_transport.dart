@@ -4,7 +4,8 @@ import 'dart:convert';
 import 'package:gql/ast.dart';
 import 'package:gql/language.dart';
 import 'package:gql_exec/gql_exec.dart';
-import 'package:gql_http_link/gql_http_link.dart' show HttpLinkParserException;
+import 'package:gql_http_link/gql_http_link.dart'
+    show HttpLinkParserException, HttpLinkServerException;
 import 'package:gql_link/gql_link.dart';
 import 'package:http/http.dart' as http;
 import 'package:sling_gql/sling_gql.dart';
@@ -29,10 +30,11 @@ import 'package:sling_gql/sling_gql.dart';
 /// The first `Response` of the link's stream is the result: `data`, `errors`
 /// (message, locations, path, extensions) and `extensions` are encoded back
 /// into a `200` JSON body, which the client handles like any other (partial
-/// errors pruned, `data: null` a [SlingException]). A [LinkException] becomes
-/// a [SlingLinkException] (`HTTP <code>` and its [SlingException.statusCode]
-/// for a [ServerException] with an error status); anything else a link
-/// throws surfaces unchanged.
+/// errors pruned, `data: null` a [SlingGraphQLException]). A [LinkException]
+/// becomes the [SlingException] it stands for ([slingExceptionFromLink]: a
+/// failed connection a [SlingNetworkException], an error status a
+/// [SlingHttpException], …); anything else a link throws is classified by
+/// the client ([SlingException.from]).
 Transport linkTransport(Link link) => (request) async {
   Response? first;
   try {
@@ -41,10 +43,14 @@ Transport linkTransport(Link link) => (request) async {
       break;
     }
   } on LinkException catch (e, st) {
-    Error.throwWithStackTrace(SlingLinkException(e), st);
+    Error.throwWithStackTrace(slingExceptionFromLink(e, st), st);
   }
   if (first == null) {
-    throw SlingException('The link completed without a response');
+    throw SlingTransportException(
+      StateError('The link completed without a response'),
+      null,
+      'The link completed without a response',
+    );
   }
   return http.Response.bytes(
     utf8.encode(jsonEncode(_executionResult(first))),
@@ -58,8 +64,8 @@ Transport linkTransport(Link link) => (request) async {
 /// each `Response` the link's stream emits is one event (encoded like
 /// [linkTransport]'s results), the stream completing completes the
 /// subscription, and a stream error is a transport failure (a [LinkException]
-/// as a [SlingLinkException]) — which reconnects when the subscription has a
-/// `retryAfter`. Cancelling the subscription cancels the link's stream.
+/// as [slingExceptionFromLink] maps it) — which reconnects when the
+/// subscription has a `retryAfter`. Cancelling the subscription cancels the link's stream.
 ///
 /// The link has to be able to run subscriptions (a websocket link, usually
 /// routed with `Link.split`); an `HttpLink` cannot.
@@ -74,7 +80,9 @@ SubscriptionTransport linkSubscriptionTransport(Link link) => (request) {
     StreamTransformer.fromHandlers(
       handleData: (response, sink) => sink.add(_executionResult(response)),
       handleError: (error, stackTrace, sink) => sink.addError(
-        error is LinkException ? SlingLinkException(error) : error,
+        error is LinkException
+            ? slingExceptionFromLink(error, stackTrace)
+            : error,
         stackTrace,
       ),
     ),
@@ -82,45 +90,55 @@ SubscriptionTransport linkSubscriptionTransport(Link link) => (request) {
 };
 
 /// A [LinkException] a link threw, as the [SlingException] the client and
-/// the widgets report: `HTTP <code>` with [statusCode] for a
-/// [ServerException] with an error status — or an [HttpLinkParserException]
-/// of one (`HttpLink` parses the body before it checks the status, so a 502
-/// HTML page or an empty 401 fails as a parse error) — else the GraphQL
-/// errors of its parsed response, else the original exception's message.
-class SlingLinkException extends SlingException {
-  SlingLinkException(this.linkException)
-    : super(
-        _message(linkException),
-        statusCode: _statusCode(linkException),
-        graphqlErrors: switch (linkException) {
-          ServerException(:final parsedResponse?) => [
-            for (final e in parsedResponse.errors ?? const <GraphQLError>[])
-              _errorJson(e),
-          ],
-          _ => const [],
-        },
-      );
-
-  /// What the link threw; [LinkException.originalException] is the cause
-  /// (the `http.ClientException` of a failed connection, a parse error, …).
-  final LinkException linkException;
-
-  static int? _statusCode(LinkException e) => switch (e) {
+/// the widgets report:
+///
+/// - a [ServerException] with an error status (`>= 300`) — or an
+///   [HttpLinkParserException] of one (`HttpLink` parses the body before it
+///   checks the status, so a 502 HTML page or an empty 401 fails as a parse
+///   error) — is a [SlingHttpException] with the body and its GraphQL
+///   errors;
+/// - a [ServerException] wrapping the HTTP client's failure (no response) is
+///   that failure classified by [SlingException.from]: an
+///   `http.ClientException` is a [SlingNetworkException];
+/// - a [ServerException] with GraphQL errors and no data is a
+///   [SlingGraphQLException] (`Empty response` without errors either);
+/// - anything else (an unparsable 200, a context error) is a
+///   [SlingTransportException] whose `cause` is the link exception.
+SlingException slingExceptionFromLink(LinkException e, [StackTrace? st]) {
+  final status = switch (e) {
     ServerException(:final statusCode) => statusCode,
     HttpLinkParserException(:final response) => response.statusCode,
     _ => null,
   };
-
-  static String _message(LinkException e) {
-    final status = _statusCode(e);
-    if (status != null && status >= 300) return 'HTTP $status';
-    if (e is ServerException) {
-      final errors = e.parsedResponse?.errors ?? const [];
-      if (errors.isNotEmpty) return errors.map((e) => e.message).join('\n');
-      if (e.originalException == null) return 'Empty response';
-    }
-    return '${e.originalException ?? e}';
+  final errors = switch (e) {
+    ServerException(:final parsedResponse?) => [
+      for (final error in parsedResponse.errors ?? const <GraphQLError>[])
+        SlingGraphQLError.fromJson(_errorJson(error)),
+    ],
+    _ => const <SlingGraphQLError>[],
+  };
+  if (status != null && status >= 300) {
+    return switch (e) {
+      HttpLinkServerException(:final response) => SlingHttpException(
+        status,
+        body: response.body,
+        errors: errors,
+      ),
+      HttpLinkParserException(:final response) => SlingHttpException.fromBody(
+        status,
+        response.body,
+      ),
+      _ => SlingHttpException(status, errors: errors),
+    };
   }
+  if (e is ServerException) {
+    final cause = e.originalException;
+    if (e.parsedResponse == null && cause != null) {
+      return SlingException.from(cause, e.originalStackTrace ?? st);
+    }
+    if (e.parsedResponse != null) return SlingGraphQLException(errors);
+  }
+  return SlingTransportException(e, st, '${e.originalException ?? e}');
 }
 
 /// Headers the terminating link sets itself: the client's

@@ -29,6 +29,7 @@ SlingClient<Query> _client(
     transport: linkTransport(link),
     subscriptionTransport: linkSubscriptionTransport(link),
     warnOnWaterfall: false,
+    retry: RetryPolicy.none,
   );
   addTearDown(client.dispose);
   return client;
@@ -314,9 +315,10 @@ void main() {
       scope.run(read);
       await scope.whenSettled;
 
-      final error = scope.error as SlingException;
+      final error = scope.error as SlingGraphQLException;
       expect(error.message, 'hidden');
-      expect(error.graphqlErrors.single['extensions'], {'code': 'FORBIDDEN'});
+      expect(error.isPartial, isTrue);
+      expect(error.errors.single.code, 'FORBIDDEN');
       expect(scope.run(read), 'Ada null', reason: 'me resolved and is cached');
     });
 
@@ -335,37 +337,33 @@ void main() {
       await expectLater(
         client.resolve((q) => q.me.name),
         throwsA(
-          isA<SlingException>()
+          isA<SlingGraphQLException>()
               .having((e) => e.message, 'message', 'not authenticated')
-              .having((e) => e.graphqlErrors, 'graphqlErrors', [
+              .having((e) => e.errors.map((e) => e.toJson()), 'errors', [
                 {'message': 'not authenticated'},
               ]),
         ),
       );
     });
 
-    test('an HTTP error status is a SlingLinkException with the status code '
-        'and the body\'s errors', () async {
+    test('an HTTP error status is a SlingHttpException with the status code, '
+        'the body and its errors', () async {
       final client = _client(_httpLink(_server(), send: (_) => _unavailable()));
 
       final error = await _scopeError(client);
       expect(
         error,
-        isA<SlingLinkException>()
+        isA<SlingHttpException>()
             .having((e) => e.message, 'message', 'HTTP 503')
             .having((e) => e.statusCode, 'statusCode', 503)
-            .having((e) => e.graphqlErrors, 'graphqlErrors', [
-              {'message': 'down for maintenance'},
-            ])
-            .having(
-              (e) => e.linkException,
-              'linkException',
-              isA<HttpLinkServerException>(),
-            ),
+            .having((e) => e.body, 'body', contains('down for maintenance'))
+            .having((e) => e.errors.map((e) => e.message), 'errors', [
+              'down for maintenance',
+            ]),
       );
     });
 
-    test('a failed connection is a SlingLinkException keeping its '
+    test('a failed connection is a SlingNetworkException keeping its '
         'cause', () async {
       final client = _client(
         _httpLink(
@@ -377,14 +375,10 @@ void main() {
       final error = await _scopeError(client);
       expect(
         error,
-        isA<SlingLinkException>()
+        isA<SlingNetworkException>()
             .having((e) => e.message, 'message', contains('offline'))
-            .having((e) => e.statusCode, 'statusCode', isNull)
-            .having(
-              (e) => e.linkException.originalException,
-              'originalException',
-              isA<http.ClientException>(),
-            ),
+            .having((e) => e.isNetworkUnreachable, 'unreachable', isTrue)
+            .having((e) => e.cause, 'cause', isA<http.ClientException>()),
       );
     });
 
@@ -398,18 +392,14 @@ void main() {
 
         expect(
           await _scopeError(client),
-          isA<SlingLinkException>()
+          isA<SlingHttpException>()
               .having(
                 (e) => e.message,
                 'message',
                 'HTTP ${response.statusCode}',
               )
               .having((e) => e.statusCode, 'statusCode', response.statusCode)
-              .having(
-                (e) => e.linkException,
-                'linkException',
-                isA<HttpLinkParserException>(),
-              ),
+              .having((e) => e.body, 'body', response.body),
         );
       }
     });
@@ -421,9 +411,9 @@ void main() {
 
       expect(
         await _scopeError(client),
-        isA<SlingLinkException>()
+        isA<SlingTransportException>()
             .having((e) => e.message, 'message', contains('FormatException'))
-            .having((e) => e.statusCode, 'statusCode', 200),
+            .having((e) => e.cause, 'cause', isA<HttpLinkParserException>()),
       );
     });
 
@@ -435,7 +425,7 @@ void main() {
 
       expect(
         await _scopeError(client),
-        isA<SlingLinkException>().having(
+        isA<SlingGraphQLException>().having(
           (e) => e.message,
           'message',
           'Empty response',
@@ -443,12 +433,19 @@ void main() {
       );
     });
 
-    test('other errors a link throws surface unchanged', () async {
+    test('other errors a link throws are classified by the client', () async {
       final client = _client(
         Link.function((request, [_]) => throw StateError('no route')),
       );
 
-      expect(await _scopeError(client), isA<StateError>());
+      expect(
+        await _scopeError(client),
+        isA<SlingTransportException>().having(
+          (e) => e.cause,
+          'cause',
+          isA<StateError>(),
+        ),
+      );
     });
 
     test('a link completing without a response is an error', () async {
@@ -506,7 +503,7 @@ void main() {
       expect(server.openSubscriptions, 0);
     });
 
-    test('a LinkException on the stream is a SlingLinkException transport '
+    test('a LinkException on the stream is a SlingException transport '
         'error', () async {
       final client = _client(
         Link.function(
@@ -525,9 +522,9 @@ void main() {
       sub.stream.listen(null, onError: errors.add, onDone: done.complete);
       await done.future;
 
-      expect(errors.single, isA<SlingLinkException>());
+      expect(errors.single, isA<SlingTransportException>());
       expect(
-        (errors.single as SlingLinkException).message,
+        (errors.single as SlingTransportException).message,
         contains('dropped'),
       );
     });

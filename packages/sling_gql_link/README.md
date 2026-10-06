@@ -42,24 +42,26 @@ link adds to them with `request.updateContextEntry<HttpLinkHeaders>(...)`;
 The first `Response` of the link's stream is the result: `data`, `errors`
 (message, locations, path, extensions) and `extensions` are encoded back into
 a JSON body the client handles exactly like an HTTP response — partial errors
-pruned before caching and reported on the scope, `data: null` a
-`SlingException`.
+pruned before caching and reported on the scope (or kept, per `ErrorPolicy`),
+`data: null` a `SlingGraphQLException`.
 
-A `LinkException` becomes a `SlingLinkException` (a `SlingException`):
+A `LinkException` becomes the `SlingException` it stands for
+(`slingExceptionFromLink`), so error handling, `RetryPolicy` and `SlingAuth`
+treat a link exactly like the default transport:
 
-| Link exception | `message` | `statusCode` | `graphqlErrors` |
-| --- | --- | --- | --- |
-| `ServerException` with a status `>= 300` (`HttpLinkServerException`) | `HTTP <code>` | the status | the body's errors |
-| `HttpLinkParserException` with a status `>= 300` (a 502 HTML page, an empty 401: `HttpLink` parses before it checks the status) | `HTTP <code>` | the status | `[]` |
-| `ServerException` with errors, no error status | the errors' messages | the status, if any | the errors |
-| `ServerException` with neither data nor errors | `Empty response` | the status, if any | `[]` |
-| `ServerException` of a failed connection | the cause's message | `null` | `[]` |
-| `HttpLinkParserException` of a `2xx` | the cause's message | the status | `[]` |
-| any other `LinkException` | the cause's message | `null` | `[]` |
+| Link exception | becomes |
+| --- | --- |
+| `ServerException` with a status `>= 300` (`HttpLinkServerException`) | `SlingHttpException` (status, body, the body's errors) |
+| `HttpLinkParserException` with a status `>= 300` (a 502 HTML page, an empty 401: `HttpLink` parses before it checks the status) | `SlingHttpException` (status, body) |
+| `ServerException` of a failed connection (`http.ClientException`) | `SlingNetworkException` (`isNetworkUnreachable`) |
+| `ServerException` with errors and no data | `SlingGraphQLException` with the errors |
+| `ServerException` with neither data nor errors | `SlingGraphQLException` `Empty response` |
+| `HttpLinkParserException` of a `2xx`, any other `LinkException` | `SlingTransportException` (`cause`: the link exception) |
 
-`linkException` keeps what the link threw (and its `originalException`).
 Errors that are not `LinkException`s (a `TimeoutException` from your own
-link) surface unchanged, as with the default transport.
+link) are classified by the client like the default transport's
+(`SlingException.from`). Prefer the client's own `timeout`, `retry` and
+`auth` to a link's: they also cover subscriptions and know about scopes.
 
 ## Subscriptions
 

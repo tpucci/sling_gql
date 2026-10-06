@@ -59,8 +59,8 @@ Future<void> main() async {
 
   try {
     print(await client.resolve((q) => q.me.name));
-  } on SlingLinkException catch (e) {
-    print('${e.message} (${e.linkException.runtimeType})');
+  } on SlingException catch (e) {
+    print('${e.message} (${e.runtimeType})');
   } finally {
     client.dispose();
     await link.dispose();
