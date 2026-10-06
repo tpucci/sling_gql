@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import 'accessor.dart';
 import 'cache/cache.dart';
+import 'client.dart';
 import 'errors.dart';
 import 'widgets.dart';
 
@@ -127,6 +128,15 @@ class PaginatedState<Node> {
   /// The last build read data that is not (yet) cached.
   bool get hasMissingData => _query.hasMissingData;
 
+  /// The first page is still loading: every item is a skeleton (see
+  /// [QueryState.isSkeleton]). A page loaded by [loadMore] does not make it
+  /// true again — its skeleton follows the loaded items.
+  bool get isSkeleton => _query.isSkeleton;
+
+  /// The list was rendered from cached data older than the builder's
+  /// `maxAge` and is being refreshed (see [QueryState.isStale]).
+  bool get isStale => _query.isStale;
+
   /// Sticky until [refetch], like [QueryState.error].
   SlingException? get error => _query.error;
 
@@ -144,6 +154,13 @@ class PaginatedState<Node> {
   Future<void> refetch() {
     _controller.reset();
     return _query.refetch();
+  }
+
+  /// [refetch] unless everything the list read is within the builder's
+  /// `maxAge` (see [QueryState.revalidate]).
+  Future<void> revalidate() {
+    _controller.reset();
+    return _query.revalidate();
   }
 }
 
@@ -183,21 +200,51 @@ class PaginatedState<Node> {
 ///   ),
 /// )
 /// ```
+///
+/// [debugLabel], [fetchPolicy], [maxAge], [errorPolicy], [timeout] and
+/// [scheduler] are the inner [QueryBuilder]'s, with the same defaults.
 class PaginatedQueryBuilder<Q extends Accessor, Node> extends StatefulWidget {
   const PaginatedQueryBuilder({
     super.key,
     this.controller,
     required this.page,
     required this.builder,
+    this.debugLabel,
+    this.fetchPolicy,
+    this.maxAge,
+    this.errorPolicy,
+    this.timeout,
+    this.scheduler = frameEndScheduler,
   });
 
   /// Holds the page being loaded. When omitted the widget keeps a private
   /// one that lives as long as the widget does.
   final PaginationController? controller;
 
+  /// Reads one page of the connection (see [PageSelector]).
   final PageSelector<Q, Node> page;
 
+  /// Builds the list from the merged pages.
   final PaginatedWidgetBuilder<Node> builder;
+
+  /// Names the list's scope in waterfall warnings and `SlingRequest.scopes`;
+  /// defaults (debug builds) to the type of the enclosing widget.
+  final String? debugLabel;
+
+  /// See [QueryBuilder.fetchPolicy].
+  final FetchPolicy? fetchPolicy;
+
+  /// See [QueryBuilder.maxAge].
+  final Duration? maxAge;
+
+  /// See [QueryBuilder.errorPolicy].
+  final ErrorPolicy? errorPolicy;
+
+  /// See [QueryBuilder.timeout].
+  final Duration? timeout;
+
+  /// See [QueryBuilder.scheduler].
+  final FlushScheduler scheduler;
 
   @override
   State<PaginatedQueryBuilder<Q, Node>> createState() =>
@@ -250,6 +297,12 @@ class _PaginatedQueryBuilderState<Q extends Accessor, Node>
   @override
   Widget build(BuildContext context) {
     return QueryBuilder<Q>(
+      debugLabel: widget.debugLabel,
+      fetchPolicy: widget.fetchPolicy,
+      maxAge: widget.maxAge,
+      errorPolicy: widget.errorPolicy,
+      timeout: widget.timeout,
+      scheduler: widget.scheduler,
       builder: (context, query, queryState) {
         final controller = _controller;
         // The merged list: every page loaded so far.

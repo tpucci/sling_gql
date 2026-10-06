@@ -70,10 +70,15 @@ Map<String, Object?> _page(Object? after) {
 }
 
 class Harness {
-  Harness({bool merged = true, this.renderSkeletons = true}) {
+  Harness({
+    bool merged = true,
+    this.renderSkeletons = true,
+    DateTime Function() now = DateTime.now,
+  }) {
     client = SlingClient<Query>(
       endpoint: Uri.parse('http://test/graphql'),
       rootFactory: Query.root,
+      now: now,
       onOperation: sent.add,
       typePolicies: merged
           ? const {
@@ -101,12 +106,23 @@ class Harness {
   /// The last state handed to the builder.
   late PaginatedState<User> state;
 
-  Widget app({PaginationController? controller}) => SlingScope<Query>(
+  /// `state.isSkeleton` as each build saw it.
+  final skeletonSeen = <bool>[];
+
+  Widget app({
+    PaginationController? controller,
+    String? debugLabel,
+    FetchPolicy? fetchPolicy,
+    Duration? maxAge,
+  }) => SlingScope<Query>(
     client: client,
     child: Directionality(
       textDirection: TextDirection.ltr,
       child: PaginatedQueryBuilder<Query, User>(
         controller: controller,
+        debugLabel: debugLabel,
+        fetchPolicy: fetchPolicy,
+        maxAge: maxAge,
         page: (query, after) {
           final page = query.users(after: after);
           return ConnectionPage(
@@ -118,6 +134,7 @@ class Harness {
         },
         builder: (context, state) {
           this.state = state;
+          skeletonSeen.add(state.isSkeleton);
           return Column(
             children: [
               for (final u in state.items)
@@ -162,6 +179,49 @@ void main() {
     expect(h.state.totalCount, 4);
     expect(h.state.isLoading, isFalse);
     expect(h.state.hasMissingData, isFalse);
+  });
+
+  testWidgets('forwards debugLabel and fetchPolicy to its QueryBuilder; '
+      'isSkeleton on the first page', (tester) async {
+    final h = Harness();
+    final scopes = <List<String>>[];
+    h.client.requests.listen((r) {
+      if (!r.isDone) scopes.add(r.scopes);
+    });
+    await tester.pumpWidget(h.app(debugLabel: 'Users'));
+    await tester.pump();
+
+    expect(h.skeletonSeen.first, isTrue);
+    expect(h.skeletonSeen.last, isFalse);
+    expect(scopes, [
+      ['Users'],
+    ]);
+
+    // Cached now: a cache-first list would send nothing; network-only does.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(h.app(fetchPolicy: FetchPolicy.networkOnly));
+    await tester.pump();
+    expect(h.sent, hasLength(2));
+    expect(h.names, ['Ada', 'Bob']);
+  });
+
+  testWidgets('maxAge: isStale and revalidate()', (tester) async {
+    var now = DateTime(2026, 10, 1);
+    final h = Harness(now: () => now);
+    await tester.pumpWidget(h.app(maxAge: const Duration(minutes: 1)));
+    await tester.pump();
+    expect(h.sent, hasLength(1));
+    expect(h.state.isStale, isFalse);
+
+    await h.state.revalidate();
+    expect(h.sent, hasLength(1), reason: 'fresh: nothing sent');
+
+    now = now.add(const Duration(minutes: 2));
+    final done = h.state.revalidate();
+    await tester.pump();
+    await done;
+    expect(h.sent, hasLength(2));
+    expect(h.names, ['Ada', 'Bob']);
   });
 
   testWidgets('loadMore fetches only the next page, merged into one list', (
