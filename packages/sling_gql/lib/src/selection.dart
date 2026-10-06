@@ -235,8 +235,10 @@ class Selection {
         .._adopt(other);
 
   /// Ensures every node of [other]'s path from its root exists under this
-  /// root, and returns the corresponding node in this tree.
-  Selection ensurePath(Selection other) {
+  /// root, and returns the corresponding node in this tree. With
+  /// [firstPages], a policy field on the path asking for a later page is
+  /// mapped to its entry's first page, as in [mergeFrom].
+  Selection ensurePath(Selection other, {bool firstPages = false}) {
     final chain = <Selection>[];
     Selection? node = other;
     while (node != null && !node.isRoot) {
@@ -245,7 +247,9 @@ class Selection {
     }
     var cursor = this;
     for (final n in chain) {
-      cursor = cursor._counterpart(n);
+      cursor = firstPages && n._isLaterPage
+          ? (cursor.child(n.field, n._argsForPage(const {})).._adopt(n))
+          : cursor._counterpart(n);
     }
     return cursor;
   }

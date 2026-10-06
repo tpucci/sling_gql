@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:sling_gql/internal.dart' show RowScope;
 import 'package:sling_gql/sling_gql.dart';
 
 import 'support/test_schema.dart';
@@ -21,6 +22,7 @@ class Harness {
       now: () => now,
       httpClient: MockClient((req) async {
         calls++;
+        documents.add((jsonDecode(req.body) as Map)['query'] as String);
         if (fail) {
           return http.Response(
             jsonEncode({
@@ -55,6 +57,9 @@ class Harness {
   var now = DateTime(2026, 1, 1, 12);
   var name = 'Ada';
   var calls = 0;
+
+  /// The documents sent, oldest first.
+  final documents = <String>[];
   bool fail;
 
   /// Lets the flush microtask run and the response land.
@@ -261,6 +266,44 @@ void main() {
   });
 
   group('maxAge (stale-while-revalidate)', () {
+    test('a stale field only a row read is revalidated once, not forever '
+        '(a restored cache under maxAge)', () async {
+      final h = Harness(maxAge: const Duration(minutes: 5));
+      final documents = h.documents;
+      await h.client.resolve((q) => q.me.name);
+      // Like a restored cache: everything older than maxAge.
+      h.now = h.now.add(const Duration(minutes: 10));
+
+      // The list owns `me`, a row reads `me.name`. When a response lands
+      // the list re-runs; the row does not (its data did not change).
+      late QueryScope<Query> list;
+      late RowScope row;
+      User? me;
+      list = h.client.createScope(onChanged: () => me = list.run((q) => q.me));
+      me = list.run((q) => q.me);
+      row = list.row(onChanged: () {});
+      expect(row.run(me!, User.new, (u) => u.name), 'Ada');
+      expect(list.isStale, isTrue);
+
+      for (var i = 0; i < 5; i++) {
+        await h.settle();
+      }
+      expect(h.calls, 2, reason: 'one revalidation, then fresh');
+      expect(documents.last, contains('name'), reason: "the row's field");
+      expect(list.isStale, isFalse);
+
+      // Later revalidations still carry the row's field, read in the
+      // previous tree (the row has not re-run since).
+      h.now = h.now.add(const Duration(minutes: 10));
+      me = list.run((q) => q.me);
+      for (var i = 0; i < 5; i++) {
+        await h.settle();
+      }
+      expect(h.calls, 3);
+      expect(documents.last, contains('name'));
+      expect(list.isStale, isFalse);
+    });
+
     test('fresh data: no request; stale data: shown and refetched', () async {
       final h = Harness(maxAge: const Duration(minutes: 5));
       await h.client.resolve((q) => q.me.name);

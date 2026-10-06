@@ -397,6 +397,30 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// that stayed missing (pruned for another scope of the batch).
   bool _errorHidden = false;
 
+  /// The pending fetch wants this scope's whole selection (revalidation,
+  /// cache-and-network, [refetch]); merged at flush by [_enqueueWhole], so
+  /// what children and rows read after [run] in the same frame is in it.
+  bool _fetchWhole = false;
+
+  /// [_root] plus the subtrees this scope's rows read through. A row that
+  /// did not re-run since this scope's last [run] recorded its fields in the
+  /// previous tree; without them a revalidation never refreshes the row's
+  /// fields, they stay stale, and every run revalidates again (a request
+  /// loop on a restored cache under `maxAge`).
+  ///
+  /// Paged policy entries are sent as their first page (see
+  /// [FieldPolicy.pageArgs]): a refresh starts a merged list over.
+  void _enqueueWhole() {
+    client._pending.mergeFrom(_root, firstPages: true);
+    for (final r in _rows) {
+      for (final node in r._bound) {
+        client._pending
+            .ensurePath(node, firstPages: true)
+            .mergeFrom(node, firstPages: true);
+      }
+    }
+  }
+
   /// When [_error] was set; used to expire it once `retryFailedAfter` elapses.
   DateTime? _errorAt;
   Completer<void>? _settled;
@@ -477,7 +501,7 @@ class QueryScope<Q extends Accessor> implements Recorder {
     // block it like they block misses, so a failing server cannot loop.
     var backgroundStarted = false;
     if (wantsNetwork && !_awaiting && !_errorBlocksFetch()) {
-      client._enqueue(_root);
+      _fetchWhole = true;
       _awaiting = true;
       _backgroundFetch = !_hadMiss;
       client._schedule(this);
@@ -535,7 +559,8 @@ class QueryScope<Q extends Accessor> implements Recorder {
     _clearError();
     _awaiting = true;
     _backgroundFetch = !_hadMiss;
-    client._enqueue(_root, force: true);
+    _fetchWhole = true;
+    client._clearFailure();
     client._schedule(this);
     return whenSettled;
   }
@@ -700,7 +725,14 @@ class RowScope implements Recorder {
   A bind<A extends Accessor>(
     A accessor,
     A Function(Recorder, Selection, List<Object>) ctor,
-  ) => ctor(this, accessor.selection, accessor.path);
+  ) {
+    _bound.add(accessor.selection);
+    return ctor(this, accessor.selection, accessor.path);
+  }
+
+  /// The selection nodes of the accessors bound since the last [run]: where
+  /// this row's reads went, for the parent's whole-selection fetches.
+  final Set<Selection> _bound = {};
 
   /// Runs [body] with [accessor] bound to this scope and fresh [deps].
   T run<A extends Accessor, T>(
@@ -709,6 +741,7 @@ class RowScope implements Recorder {
     T Function(A bound) body,
   ) {
     _deps = {};
+    _bound.clear();
     return body(bind(accessor, ctor));
   }
 
@@ -2455,15 +2488,10 @@ class SlingClient<Q extends Accessor> {
     return policy.pages(value) ?? const [];
   }
 
-  /// Fetches of a whole selection (refetch, cache-and-network, a stale
-  /// `maxAge`) send paged policy entries as their first page (see
-  /// [FieldPolicy.pageArgs]): a refresh starts a merged list over.
-  void _enqueue(Selection tree, {bool force = false}) {
-    if (force) {
-      _failedDocument = null;
-      _failedAt = null;
-    }
-    _pending.mergeFrom(tree, firstPages: true);
+  /// Forgets the failed document, so [refetch] may send it again.
+  void _clearFailure() {
+    _failedDocument = null;
+    _failedAt = null;
   }
 
   static Selection _singleton(Selection leaf) {
@@ -2480,6 +2508,14 @@ class SlingClient<Q extends Accessor> {
   }
 
   Future<void> _doFlush() async {
+    // Whole-selection fetches (refetch, cache-and-network, a stale
+    // `maxAge`): the scope's tree plus its rows' subtrees, merged now so
+    // reads recorded after run() in this frame are included.
+    for (final scope in _pendingScopes) {
+      if (!scope._fetchWhole) continue;
+      scope._fetchWhole = false;
+      scope._enqueueWhole();
+    }
     // A merged entry's fetch selects what every argument set of it read
     // (the rows read through the first page, not through the next one).
     for (final leaf in _entryFetches) {
