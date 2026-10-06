@@ -1,5 +1,5 @@
 /// sling_gql — "read the field, get the query": a GraphQL client for Flutter
-/// where the widget is the query. Proof of concept.
+/// where the widget is the query.
 ///
 /// This is the app-facing surface: the client and its widgets, the base class
 /// and types generated code builds on, cache access. Building blocks the
