@@ -27,6 +27,8 @@ guides and the example (2026-09-29): #61–#66 done. 2026-09-30: #21 (coalesced
 `onChange`, `changesSince` deltas), #47 (`sling_gql_hooks`), #48
 (`sling_gql_link`), #54 (per-element inline list deps) done. 2026-10-01: #49
 (`sling_gql_sqflite`) done; open follow-ups #68, #69. 2026-10-02: #68, #69 done.
+Production-readiness review (2026-10): next are #50, #70, #71, #72, #73 in
+that order; `graphql-ws` dropped from the core.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -45,6 +47,32 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 45. **Repo — Package split when needed**: `sling_gql_core` (pure Dart) vs
     Flutter widgets vs persistence adapters (see architecture doc). Not before
     a second consumer exists.
+
+## P1 — production readiness (2026-10 review, in this order)
+
+50 first (below), then:
+
+70. **Runtime — Error model + auth/retry**: typed errors (network /
+    HTTP status / GraphQL / partial) with `extensions` and error codes
+    surfaced; `errorPolicy` (none / all / ignore) per query and client-wide;
+    request timeout and cancellation; retry with backoff for queries (never
+    mutations by default); token refresh on 401 as a first-class, tested hook
+    (today only `Transport` recipes + sticky errors / `retryFailedAfter`).
+    Settle the API shape before #73.
+71. **Test — Android + real-backend coverage**: add Android to the example
+    (sqflite persistence included) and run the e2e suite on it; a soak test
+    (memory, batching, GC) on a large generated schema; run the runtime
+    against a second real GraphQL server besides yoga.
+72. **Runtime — Persistence migration + offline mutation queue**: migrate
+    the `sling_gql_sqflite` store across schema-hash changes instead of
+    always wiping (keep entities whose type/fields still exist), corruption
+    recovery, multi-isolate access, encryption option; a persisted mutation
+    queue replayed on reconnect, and defined behaviour for optimistic writes
+    when the app is killed mid-flight.
+73. **Repo — API audit + 1.0**: decide the public surface (what leaves
+    `internal.dart`, what gets hidden), semver + deprecation policy,
+    migration guide, security policy, benchmarks tracked in CI; then release
+    1.0 of every package.
 
 ## Roadmap items not covered above
 
@@ -137,5 +165,8 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 ## Explicitly not planned
 
 - SSR hydration (not applicable).
+- `graphql-ws` (WebSocket) subscriptions in the core: SSE stays the only
+  built-in transport; a separate adapter package maybe later
+  (`SlingClient(subscriptionTransport:)` already allows it).
 - Lazy / transaction / paginated query *variants* as separate APIs:
   `resolve()` plus widget state (and #5's helper) cover the same ground.
