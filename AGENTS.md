@@ -312,8 +312,14 @@ Design decisions worth knowing before changing things:
   microtask after the constructor when the store held entries. The
   caller's future stays pending while queued; restored calls run no body,
   roll back from the decoded journal and report through
-  `onQueuedMutationFailed`. Not part of `isIdle` while waiting; `gc`
-  retains the entities queued journals point to.
+  `onQueuedMutationFailed`. What keeps the head queued: a network error,
+  or — once it was queued — `mutationQueueBackoff.retryIf` (default
+  transient: timeouts, 5xx); anything else drops + rolls back.
+  `clearMutationQueue()` (sign-out) rolls every call back newest first,
+  fails futures with `SlingCancelledException`, cancels the in-flight
+  head (`_QueuedCall.sending`, `cleared`) and empties the store;
+  `SqflitePersistence.clear()` empties the table. Not part of `isIdle`
+  while waiting; `gc` retains the entities queued journals point to.
 - **Optimistic writes are journaled.** `Accessor.write` reports a `CacheWrite`
   (path, previous value, touched keys) via `Recorder.onWrite`; while a
   mutation's `optimistic` callback runs, the client collects them and undoes

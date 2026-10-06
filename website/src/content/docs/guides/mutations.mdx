@@ -191,7 +191,7 @@ mutate(
 // MutationBuilder / useSlingMutation: state.isQueued while it waits
 ```
 
-- **What queues it:** only a failure that means *no response* —
+- **What queues it:** on the first send, only a failure that means *no response* —
   `SlingException.isNetworkUnreachable` (`SlingNetworkException`: offline, DNS, connection
   refused). A timeout, an HTTP error or a GraphQL error fails the call as usual (rolled
   back, rejected): the server answered, or may have applied it.
@@ -207,10 +207,33 @@ mutate(
   back off along `SlingClient(mutationQueueBackoff:)` (1 s doubling up to 5 min by default).
   An offline call made while others wait is queued behind them; calls without `offline` are
   sent at once as usual.
-- **A replay the server rejects** drops the entry, rolls back its optimistic writes and is
-  reported on `client.onQueuedMutationFailed` (a `QueuedMutationFailure`: the
+- **A replay that fails with something retryable** — what `mutationQueueBackoff.retryIf`
+  accepts, by default `RetryPolicy.isTransient`: network errors, timeouts, HTTP 5xx —
+  **stays queued** (optimistic writes and stored entry included) and backs off.
+- **A replay the server rejects** (HTTP 4xx, GraphQL errors, credentials refused after a
+  refresh: anything `retryIf` does not retry) drops the entry, rolls back its optimistic
+  writes and is reported on `client.onQueuedMutationFailed` (a `QueuedMutationFailure`: the
   `QueuedMutation` and the `SlingException`) — the only report a call queued by an
   earlier run of the app gets. `client.queuedMutations` lists what waits.
+
+### Sign-out
+
+Replays carry the headers of the moment they are **sent** — `SlingClient(headers:)` and
+`auth:` — not those of the call. A mutation queued by one user and replayed after the next
+one signed in would run as the new user. Sign-out must clear the queue:
+
+```dart
+Future<void> signOut() async {
+  await client.clearMutationQueue(); // rolls back, fails the futures, empties the store
+  await persistence.clear();         // with sling_gql_sqflite: cache + stored queue
+}
+```
+
+`clearMutationQueue()` rolls back every queued call's optimistic writes (newest first, from
+the stored undo log for calls restored from an earlier run), fails their futures with a
+`SlingCancelledException` (`MutationBuilder`: `state.error`; nothing on
+`onQueuedMutationFailed`), aborts a replay in flight and ignores its response (the server
+may still have applied it), and empties `mutationQueue`.
 
 ### Across app restarts
 

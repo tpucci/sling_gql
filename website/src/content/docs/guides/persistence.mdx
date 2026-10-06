@@ -209,9 +209,14 @@ final client = SlingClient<Query>(
   are gone with it. **Another codec id** drops them (they cannot be decoded); a row that
   does not decode is reported to `onError` and deleted; a recovered (deleted) file loses
   them.
-- `persistence.clear()` (logout) empties the cache, not the queue.
+- `persistence.clear()` (logout) empties the cache **and** the stored queue. It cannot
+  reach the client: call `client.clearMutationQueue()` first, which rolls the queued calls
+  back, fails their futures and stops replaying them (see
+  [Sign-out](/sling_gql/guides/mutations/#sign-out)) — queued mutations replay with the
+  auth headers current when they are sent, so a queue left behind would run as the next
+  user.
 
-Any `MutationQueueStore` works (`load`, `add`, `remove`; JSON via
+Any `MutationQueueStore` works (`load`, `add`, `remove`, `clear`; JSON via
 `QueuedMutation.toJson`/`fromJson`) — `InMemoryMutationQueueStore` is the default, and
 sharing one between two clients simulates a restart in a test.
 
