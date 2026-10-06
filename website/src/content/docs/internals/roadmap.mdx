@@ -115,7 +115,7 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
     codec for encryption — see [Persistence](/sling_gql/guides/persistence/). Hive and file
     adapters are not planned until someone needs them.
 
-11. **Production readiness** — next
+11. **Production readiness** — done, 1.0.0 release pending
 
     Done: type policies and connection merging (one growing cache list for cursor pages,
     `RelayStylePagination`); persistence migration across schema changes; a typed, sealed
@@ -124,8 +124,9 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
     timeouts and cancellation, query retry with backoff and a single-flight token-refresh
     hook ([Transport](/sling_gql/guides/transport/)); Android, a second GraphQL server
     (graphql-http) and a soak test in CI; an offline mutation queue
-    ([Mutations](/sling_gql/guides/mutations/), persisted by `sling_gql_sqflite`). Next: an
-    API audit and 1.0.
+    ([Mutations](/sling_gql/guides/mutations/), persisted by `sling_gql_sqflite`); an API audit with a
+    [versioning policy](/sling_gql/internals/versioning/) and an
+    [upgrade guide](/sling_gql/guides/upgrading-to-1-0/). Next: the 1.0.0 release.
 
 </Steps>
 

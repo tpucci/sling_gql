@@ -33,7 +33,8 @@ connection merging), #70 (error model, `errorPolicy`, timeout/cancellation,
 retry, `SlingAuth`) done; #71 (Android, graphql-http backend, soak) done —
 it found and fixed a revalidation loop on a restored cache (rows' fields
 never refetched); follow-ups #74–#76. #72 (persistence migration +
-offline mutation queue) done. Next: #73.
+offline mutation queue) done. #73 (API audit, versioning policy, Upgrading to
+1.0, SECURITY.md, CI benchmarks) done; left: the 1.0.0 release itself.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -55,12 +56,11 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P1 — production readiness (2026-10 review, in this order)
 
-#50, #70, #71 and #72 done (see Done), then:
+#50, #70, #71, #72 and #73 done (see Done). Left: release 1.0.0 of all six
+packages (checklist in `doc/api-audit-1.0.md` / the #73 notes: explicit
+`melos version -V <pkg>:1.0.0`, raise internal constraints to `^1.0.0`,
+publish `sling_gql` first). Then:
 
-73. **Repo — API audit + 1.0**: decide the public surface (what leaves
-    `internal.dart`, what gets hidden), semver + deprecation policy,
-    migration guide, security policy, benchmarks tracked in CI; then release
-    1.0 of every package.
 74. **Runtime — `accept: application/graphql-response+json`** on queries
     and mutations (found in #71): spec-compliant servers (graphql-http)
     then answer request errors with HTTP 400 + a GraphQL body; make sure
@@ -158,6 +158,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 68. Perf — Roots in `CacheDelta` field by field (`changedFields` / `removedFields`, per-field stamps on the operation roots, a root copied whole only for versions before its removal or a stamp purge; `applyTo` merges): `changesSince` at 10k entities 0.8 → 0.1 ms, a delta save 4 → 2–3 ms; `sling_gql_sqflite` writes exactly those root rows. `NormalizedCache.adopt` hydrates decoded JSON in place (no second copy): open at 10k 57 → 46–57 ms — `jsonDecode` is ~30 ms of it, the copy was less than estimated.
 69. Perf — `Cache.compact(upTo:)`: a store acknowledges what it saved, the change records up to it go (older versions get `full`); a compacted cache only forgets its removals past 100 000. `SqflitePersistence(compact: true)` compacts after each save (the example turns it off: `CacheStats` reads its own deltas) and deletes rows in chunked `IN (…)` statements. Save after a `gc` of 60% at 10k: ~90 → 37–44 ms (70–92 ms without compact); `changesSince` 0.03 ms.
 50. Runtime — Type policies: `SlingClient(typePolicies: {Query: TypePolicy(fields: {...})})` keyed by the generated accessor class (exact `runtimeType`, bound once per selection node); `FieldPolicy(keyArgs:, merge:)` (+ overridable `covers` / `pageArgs` / `pages` / `fill`), `RelayStylePagination` (pages merged into one list: `nodes`/`edges` spliced, `pageInfo` ends, `__pages` record; unmerged page = skeleton miss; first page resets). `Selection.cacheKey` (key args only) vs `alias` (response name), `PrintedOperation.toCacheKeys` → `PolicyWrite`, merged in `NormalizedCache` before the structural merge. Whole-selection fetches send first pages only (refresh resets); a field read inside a merged entry fetches every held page as a fill (no re-merge; entities no page returns leave). `PaginationController` holds the pending cursor, `PaginatedQueryBuilder` reads the merged list; example `type_policies.dart`. Guides: pagination, caching (type policies).
+73. Repo — API audit + 1.0: `doc/api-audit-1.0.md`; no shims (no external users): `SubscriptionState.reconnect`, private `QueryScope` ctor, no `SlingScope(mutationRoot:)`, `@internal` selection/printer machinery, `@protected` `Accessor` helpers, `dispose()` keeps a passed `httpClient`, narrow `sling_gql_gen` exports + `--runtime-import`, `MockGraphQLError`; `PaginatedQueryBuilder` takes `QueryBuilder`'s options; `debugLabel` on generated mutate/subscribe. Policy: internals/versioning (shared major, deprecations ≥1 minor, gen 1.y ↔ runtime 1.x for y ≤ x), guides/upgrading-to-1-0, `SECURITY.md`, ratio-based CI benchmarks (`scripts/bench.mjs`, baseline JSON, fail > 1.5×). "Proof of concept" wording dropped.
 72. Runtime — Persistence migration + offline mutation queue: `slingSchema.fields` (field signatures) → `sling_gql_sqflite` migrates across hash changes (keeps fields with the same signature), recreates a corrupt store, one writer per file (`SqfliteSupersededException`), `SqfliteCodec`, format 2. Offline queue: `mutateWith(offline: true, onQueued:)` (generated `client.mutate`, `MutationBuilder`, `useSlingMutation`), queued only on `isNetworkUnreachable`, `MutationState.isQueued`, ordered replay (`replayQueue()`, after any request reaching the server, backoff `mutationQueueBackoff`), retryable replay failures stay queued, others roll back + `onQueuedMutationFailed`; `MutationQueueStore` (in memory / `persistence.mutationQueue`, own table, optimistic journal persisted: at-least-once after a kill); `clearMutationQueue()` + `persistence.clear()` for sign-out.
 71. Test — Android + backends + soak: example on Android (`10.0.2.2`, sqflite persistence, `integration_test/app_test.dart` 7/7 on an emulator, CI `flutter build apk`); `mock-api/graphql-http-server.mjs` (graphql-http + graphql-sse, :4001) with `melos run test:example:graphql-http` in `melos run test` + CI; soak schema (~200 types, `generate:soak`) + bounded-cache/no-leak soak test, long run under `benchmark/`. Fixed on the way: whole-selection fetches carry the rows' fields (a maxAge revalidation loop on a restored cache).
 70. Runtime — Error model + auth/retry: sealed `SlingException` (`SlingNetworkException` / `SlingTimeoutException` / `SlingHttpException` / `SlingGraphQLException` (`isPartial`) / `SlingAuthException` / `SlingCancelledException` / `SlingTransportException`, `SlingGraphQLError` with `code`, `isNetworkUnreachable`), `ErrorPolicy` none/all/ignore, `timeout` + cancellation on dispose (`http.AbortableRequest`), `RetryPolicy` for queries, `SlingAuth` (single-flight refresh, SSE too); `slingExceptionFromLink`; `MockGraphQLServer.failNext`. Guides: loading-and-errors, transport.
