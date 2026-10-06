@@ -87,6 +87,21 @@ melos:
       packageFilters:
         scope: sling_gql_example
 
+    test:example:graphql-http:
+      description: >-
+        The example's end-to-end tests (app flows + graphql_server_test)
+        against the mock API's schema and resolvers behind graphql-http +
+        graphql-sse (port 4001) instead of yoga.
+      run: >-
+        node $MELOS_ROOT_PATH/scripts/with-mock-api.mjs
+        --server graphql-http-server.mjs --port 4001
+        flutter test --dart-define=SLING_API=http://localhost:4001/graphql
+        test/app_test.dart test/graphql_server_test.dart
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql_example
+
     build:web:
       description: >-
         Web build of the example with the in-browser mock API, copied to
@@ -98,11 +113,14 @@ melos:
       run: cd website && npm ci --no-audit --no-fund && npm run build
 
     test:
-      description: All four gates (runtime, generator, example, website).
+      description: >-
+        All gates (runtime, generator, example against yoga and against
+        graphql-http, website).
       run: >-
         melos run test:runtime &&
         melos run test:gen &&
         melos run test:example &&
+        melos run test:example:graphql-http &&
         melos run test:website
 
     generate:
@@ -115,6 +133,16 @@ melos:
         concurrency: 1
       packageFilters:
         scope: sling_gql_example
+
+    generate:soak:
+      description: >-
+        Regenerate packages/sling_gql_sqflite/test/soak/soak_schema.dart (the
+        soak tests' large schema) from sling_gql_gen's synthetic introspection.
+      run: dart run tool/generate_soak_schema.dart
+      exec:
+        concurrency: 1
+      packageFilters:
+        scope: sling_gql_gen
 
     publish:dry-run:
       description: Dry-run pub.dev publish for the public packages.

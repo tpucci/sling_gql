@@ -15,7 +15,7 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
     - sling_gql_hooks/  flutter_hooks adapter — useSlingQuery, useSlingMutation
     - sling_gql_link/  gql_link adapter — a Link chain as the transport
   - mock-api/  graphql-yoga server the example and its tests run against
-  - example/  Flutter app (iOS + web)
+  - example/  Flutter app (iOS + Android + web)
   - website/  this site (Astro + Starlight)
   - AGENTS.md  conventions and design decisions, read it first
 </FileTree>
@@ -43,12 +43,17 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 3. **Run the tests.**
 
    ```sh
-   melos run test                               # all four gates below
+   melos run test                               # all the gates below
    melos run test:runtime                       # runtime, pure Dart + widget tests
    melos run test:gen                           # generator
    melos run test:example                       # e2e; starts the mock API itself if needed
+   melos run test:example:graphql-http          # the same e2e on graphql-http + graphql-sse
    melos run test:website                       # docs build
    ```
+
+   `test:runtime` includes a short soak on a large generated schema
+   (`packages/sling_gql_sqflite/test/soak_test.dart`); the long one is
+   `flutter test benchmark/soak_bench_test.dart` in that package, by hand.
 
    The example test asserts **exact request counts** after each interaction. It is the one
    test that catches waterfalls — keep it exact.
@@ -56,7 +61,7 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 4. **Run the example.**
 
    ```sh
-   cd example && flutter run -d <ios-simulator-id>
+   cd example && flutter run -d <ios-simulator-id>   # or an Android emulator
    # or, from the repo root, with the mock API in the page (no server):
    (cd mock-api && npm run build:browser) && cd example && flutter run -d chrome
    ```
@@ -79,9 +84,9 @@ import { Steps, FileTree, Aside } from '@astrojs/starlight/components';
 
    It deploys to GitHub Pages on every push to `main` that touches `website/`.
 
-7. **CI and releases.** Every push and pull request runs the four gates above
-   (`.github/workflows/ci.yml`), plus analyze, format and a check that the example's
-   generated file is up to date.
+7. **CI and releases.** Every push and pull request runs the gates above
+   (`.github/workflows/ci.yml`), plus analyze, format, a check that the example's
+   generated file is up to date and a debug build of the example's Android app.
 
    Commits follow [Conventional Commits](https://www.conventionalcommits.org/) scoped by
    package (`feat(sling_gql): …`, `fix(sling_gql_gen): …`, `docs(website): …`), because

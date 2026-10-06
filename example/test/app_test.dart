@@ -17,9 +17,25 @@ import 'package:sling_gql_test/sling_gql_test.dart';
 /// Runs against the real mock API: `cd mock-api && npm start` first
 /// (`melos run test:example` starts it for you). `useRealNetwork()` lifts
 /// the HTTP block `flutter test` installs.
+///
+/// `--dart-define=SLING_API=<url>` points the same flows at another server
+/// running the mock API's schema and resolvers (`melos run
+/// test:example:graphql-http`: graphql-http + graphql-sse on port 4001).
 void main() {
   useRealNetwork();
+  appFlows(
+    Uri.parse(
+      const String.fromEnvironment(
+        'SLING_API',
+        defaultValue: 'http://localhost:4000/graphql',
+      ),
+    ),
+  );
+}
 
+/// The end-to-end flows against the mock API at [endpoint]; also run on a
+/// device by `integration_test/app_test.dart`.
+void appFlows(Uri endpoint) {
   late NetworkLog log;
   late MockLatencyController latency;
   late SlingClient<Query> client;
@@ -32,7 +48,7 @@ void main() {
     // reported as pending timers by the test binding.
     client = disposeAfterTest(
       SlingClient<Query>(
-        endpoint: Uri.parse('http://localhost:4000/graphql'),
+        endpoint: endpoint,
         schema: slingSchema,
         httpClient: httpClient,
         transport: log.transport(latency.transport(httpClient)),
@@ -456,7 +472,7 @@ void main() {
       // not written to our cache); only the subscription can tell the list.
       Future<void> setStatus(LaunchStatus status) => tester.runAsync(() async {
         final response = await http.post(
-          Uri.parse('http://localhost:4000/graphql'),
+          endpoint,
           headers: {'content-type': 'application/json'},
           body: jsonEncode({
             'query':
@@ -470,7 +486,7 @@ void main() {
       // Put it back whatever happens, other tests assume the seed data.
       addTearDown(
         () => http.post(
-          Uri.parse('http://localhost:4000/graphql'),
+          endpoint,
           headers: {'content-type': 'application/json'},
           body: jsonEncode({
             'query':

@@ -58,6 +58,25 @@ The example's web build loads the bundle and sends every request to it (no
 server; each tab has its own data). Keep `resolvers.mjs` / `data.mjs` free of
 Node-only APIs (`Buffer`, `process`, `fs`).
 
+## A second server: graphql-http + graphql-sse
+
+`graphql-http-server.mjs` serves the same `schema.graphql` and `resolvers.mjs`
+through a different server implementation: [graphql-http](https://github.com/graphql/graphql-http)
+(the GraphQL-over-HTTP reference server) for queries and mutations and
+[graphql-sse](https://github.com/enisdenjo/graphql-sse) ("distinct connections"
+mode) for subscriptions, on plain `node:http`; only the schema builder and the
+pubsub come from yoga's utilities. Same env vars and `x-mock-latency-ms`
+header, port `4001` by default:
+
+```sh
+PORT=4001 node graphql-http-server.mjs
+```
+
+The example's end-to-end tests run against it with `melos run
+test:example:graphql-http --no-select` from the repo root (part of `melos run
+test` and CI), so sling_gql is checked against a server it was not developed
+against.
+
 ## Schema highlights
 
 ### `Viewer` and `me`

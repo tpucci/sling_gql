@@ -1,11 +1,11 @@
 ---
 title: Example app
-description: A Cupertino app (iOS and web) against the mock API — Launches list with a status filter, a Me profile screen with favourites, in-app network log with latency and cache dev tools, and request-counting tests.
+description: A Cupertino app (iOS, Android and web) against the mock API — Launches list with a status filter, a Me profile screen with favourites, in-app network log with latency and cache dev tools, and request-counting tests.
 ---
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
 
-`example/` is a small Cupertino app for **iOS and web** (no other platforms)
+`example/` is a small Cupertino app for **iOS, Android and web** (no other platforms)
 built against the mock API — the web build runs on this site, see
 [Try it live](/sling_gql/guides/try-it/). Three
 tabs — Launches, Search and Me — plus an in-app log of every GraphQL document sent.
@@ -18,8 +18,8 @@ not asserted.
   - lib/
     - app.dart             `SlingApp`: dark theme + three-tab scaffold
     - main.dart            client + `SlingScope` setup
-    - in_browser_api.dart  where requests go: localhost on iOS, the page on web
-    - persisted_cache.dart the cache: SQLite on iOS, in memory on web
+    - in_browser_api.dart  where requests go: the host on iOS/Android, the page on web
+    - persisted_cache.dart the cache: SQLite on iOS/Android, in memory on web
     - demos/               the small demos embedded in the guides
     - mock_latency.dart    latency picker, sent as a request header
     - network_log.dart     records every `PrintedOperation`
@@ -35,6 +35,7 @@ not asserted.
       - skeleton.dart      loading placeholders
     - generated/schema.dart  committed, generated — see Code generation
   - test/app_test.dart     the request-counting end-to-end tests
+  - integration_test/      the same flows on a device or emulator
 </FileTree>
 
 ## Wiring
@@ -42,17 +43,17 @@ not asserted.
 ```dart title="example/lib/main.dart"
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // iOS: the previous run's cache from SQLite; the web: a new in-memory one.
+  // iOS/Android: the previous run's cache from SQLite; the web: a new in-memory one.
   final cache = await openCache();
 
   final log = NetworkLog();
   final latency = MockLatencyController();
-  final httpClient = mockApiHttpClient(); // localhost on iOS, in the page on web
+  final httpClient = mockApiHttpClient(); // the host on iOS/Android, in the page on web
   final client = SlingClient<Query>(
     endpoint: Uri.parse(endpoint),
     schema: slingSchema,
     cache: cache, // normalized on `id`: one `Launch:<id>` entity
-    maxAge: restoredCacheMaxAge, // iOS: revalidate restored data
+    maxAge: restoredCacheMaxAge, // iOS/Android: revalidate restored data
     httpClient: httpClient,
     transport: log.transport(latency.transport(httpClient)), // x-mock-latency-ms
     logRequests: true, // one console line per operation
@@ -77,7 +78,7 @@ batched or not, with its timing, size and the widgets that asked for it.
 `SlingApp` also wraps the app in a `SlingRequestOverlay` (debug builds): the
 same requests, one line each, in a chip you can open from any screen.
 `openCache()` (`persisted_cache.dart`, a conditional import like
-`in_browser_api.dart`) is the only platform switch for the cache. On iOS it
+`in_browser_api.dart`) is the only platform switch for the cache. On iOS and Android it
 opens `sling_cache.db` with
 [`sling_gql_sqflite`](/sling_gql/guides/persistence/) before the client
 exists, so a relaunch paints the last session's launches at once; restored
@@ -86,6 +87,21 @@ On the web it returns the in-memory `Cache(normalization: Normalization(keyField
 'id'))` that `schema: slingSchema` would build anyway, and no sqflite code is
 compiled in. The widget tests build their own client and never call
 `openCache()`, so no state survives from one test run to the next.
+
+### On Android
+
+The Android emulator reaches the host machine at `10.0.2.2`, so there the app's
+`endpoint` is `http://10.0.2.2:4000/graphql` (`mockApiHost` in
+`in_browser_api.dart`); the manifest's network security config allows
+cleartext HTTP to `10.0.2.2` and `localhost` only. Same `npm start`, same
+SQLite cache as on iOS:
+
+```sh
+cd example && flutter run -d emulator-5554
+# the end-to-end flows of test/app_test.dart, on the emulator (a slower
+# launch sequence, so each status is on screen long enough):
+SEQUENCE_MS=2000 node ../scripts/with-mock-api.mjs flutter test integration_test -d emulator-5554
+```
 
 ### On the web
 

@@ -71,7 +71,7 @@ packages/sling_gql_hooks/ flutter_hooks adapter: useSlingQuery, useSlingMutation
 packages/sling_gql_link/ gql_link adapter: a Link chain as the client's transport
 packages/sling_gql_sqflite/ sqflite adapter: the cache persisted in SQLite
 mock-api/                graphql-yoga server, space theme, ~180 launches, cursor + offset pagination
-example/                 Flutter app (iOS + web) talking to the mock API
+example/                 Flutter app (iOS + Android + web) talking to the mock API
 ```
 
 ## Setup
@@ -81,11 +81,11 @@ asdf install                                   # flutter + nodejs from .tool-ver
 dart pub global activate melos
 melos bootstrap                                # pub workspace: one `pub get` for all packages
 
-melos run test                                 # runtime + generator + example (mock server auto-started) + website
+melos run test                                 # runtime + generator + example (yoga, then graphql-http; servers auto-started) + website
 melos run test:runtime                         # or one gate at a time
 
 cd mock-api && npm install && npm start        # http://localhost:4000/graphql (GraphiQL), for `flutter run`
-cd example && flutter run -d <ios-simulator>
+cd example && flutter run -d <ios-simulator>    # or an Android emulator (10.0.2.2:4000)
 
 # Web: the mock API runs in the page, no server needed
 cd mock-api && npm run build:browser && cd ../example && flutter run -d chrome

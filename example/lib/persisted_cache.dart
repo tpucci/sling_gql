@@ -1,6 +1,6 @@
 /// The cache the app starts with.
 ///
-/// On iOS: the previous run's cache, loaded from SQLite by
+/// On iOS and Android: the previous run's cache, loaded from SQLite by
 /// `sling_gql_sqflite` before the client exists and saved back as deltas
 /// while the app runs. On the web: a fresh in-memory cache — every tab has
 /// its own in-page mock API, so there is nothing worth keeping.

@@ -27,6 +27,14 @@ on the code.
   `globalThis.slingMockApi` and `npm run build:browser` bundles that to
   `example/web/mock-api.js` (gitignored) for the example's web build. Keep
   `resolvers.mjs` / `data.mjs` free of `Buffer`/`process`/`fs`.
+  `graphql-http-server.mjs` is a **second server implementation** over the
+  same schema + resolvers (graphql-http for queries/mutations, graphql-sse
+  distinct connections for subscriptions, on `node:http`, port 4001; only
+  yoga's `createSchema`/`createPubSub` utilities are shared). `melos run
+  test:example:graphql-http` runs `app_test.dart` + `graphql_server_test.dart`
+  against it (`with-mock-api.mjs --server <file> --port <n>`, the tests read
+  `--dart-define=SLING_API=<url>`). It runs on its own port, so it never
+  clashes with an `npm start` on :4000.
 - `website/` — Astro + Starlight docs site, deployed to GitHub Pages by
   `.github/workflows/website.yml`. Landing page is `src/content/docs/index.mdx`;
   internal links must include the `/sling_gql/` base path. `npm run build` must
@@ -36,11 +44,24 @@ on the code.
   `pubspec.lock` exists (per-package lockfiles are gitignored). Run
   `melos bootstrap` once (`dart pub global activate melos` if missing). Melos
   config and scripts live in the root `pubspec.yaml` under `melos:`.
-  Gates: `melos run test` (all four: runtime + test helpers + hooks + link
+  Gates: `melos run test` (all of them: runtime + test helpers + hooks + link
   and sqflite adapters, generator, example with the mock server auto-started by
-  `scripts/with-mock-api.mjs`, website build), or `test:runtime` / `test:gen` / `test:example` /
-  `test:website` individually; `melos run analyze`, `melos run format`,
-  `melos run generate`. Add `--no-select` when running non-interactively.
+  `scripts/with-mock-api.mjs`, the example again on the graphql-http server,
+  website build), or `test:runtime` / `test:gen` / `test:example` /
+  `test:example:graphql-http` / `test:website` individually; `melos run
+  analyze`, `melos run format`, `melos run generate`, `melos run
+  generate:soak`. Add `--no-select` when running non-interactively.
+  **Soak:** `sling_gql_gen/test/soak/soak_introspection.dart` builds a large
+  synthetic schema (~200 types, ~2 000 fields); `melos run generate:soak`
+  writes its generated code to
+  `sling_gql_sqflite/test/soak/soak_schema.dart` (committed;
+  `sling_gql_gen/test/soak_test.dart` fails when it is stale).
+  `sling_gql_sqflite/test/soak_test.dart` runs `soak/soak_workload.dart` on
+  it — scopes, rows, batching, mutations, subscriptions, `gc`, SQLite —
+  checking after every iteration that cache and store stay bounded, that a
+  root-only `cache.gc()` finds nothing a disposed scope/row pinned, and that
+  no disposed scope is notified; `benchmark/soak_bench_test.dart` is the
+  2 000-iteration run with RSS, by hand.
   - `packages/sling_gql` — the runtime (Flutter package). Tests: `flutter test`.
   - `packages/sling_gql_gen` — pure Dart CLI generator. Tests: `dart test`.
   - `packages/sling_gql_test` — test helpers (Flutter package, depends on
@@ -98,17 +119,30 @@ on the code.
     Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
     files; `tester.runAsync` in `testWidgets`); `benchmark/` is run by
     hand (`flutter test benchmark/persistence_bench_test.dart`).
-  - `example` — Flutter app, **iOS and web** (no other platforms). On the web
+  - `example` — Flutter app, **iOS, Android and web** (no other platforms).
+    Android: application id `com.sling.slingGqlExample` like the iOS bundle,
+    the emulator reaches the host at `10.0.2.2` (`mockApiHost` in
+    `in_browser_api_io.dart`, the one `dart:io` import: `Platform.isAndroid`,
+    since `defaultTargetPlatform` is `android` under `flutter test`), and
+    `res/xml/network_security_config.xml` allows cleartext HTTP to
+    `10.0.2.2`/`localhost` only. `integration_test/app_test.dart` runs
+    `test/app_test.dart`'s `appFlows` on a device (`SEQUENCE_MS=2000 node
+    ../scripts/with-mock-api.mjs flutter test integration_test -d
+    <device>`: on the emulator the mission-control flow misses a 700 ms
+    `IN_FLIGHT` step; add `--port 4002` and
+    `--dart-define=SLING_API=http://10.0.2.2:4002/graphql` for a private
+    server when :4000 is shared). On the web
     `lib/in_browser_api.dart` (conditional import) swaps the `http.Client`
     for one answering from the in-page mock API, so the site's "Try it
     live" page needs no server; `lib/persisted_cache.dart` (the other
     platform switch) opens the cache from SQLite (`sling_gql_sqflite`) on
-    iOS and keeps it in memory on the web. The widget tests build their own
+    iOS and Android and keeps it in memory on the web. The widget tests build their own
     client and never call `openCache()`, so no state survives a run. `melos run build:web`
     (`scripts/build-web-demo.mjs`) bundles the mock API, runs `flutter build
     web --base-href /sling_gql/demo/` and copies it to `website/public/demo/`
     (gitignored; `website.yml` does it before `astro build`). Keep
-    `dart:io` out of the runtime and the example.
+    `dart:io` out of the runtime and the example (in the example, only
+    behind the native side of a conditional import).
     `lib/demos/` holds the small demos the guides embed (`?demo=<name>`,
     `demos.dart`); the guides show their `// #region` blocks through
     `website/src/components/DemoSource.astro`, so renaming or removing a
@@ -161,10 +195,13 @@ on the code.
 - **CI.** `.github/workflows/ci.yml` runs on push/PR: analyze, format,
   runtime + generator tests, a check that `melos run generate` leaves
   `example/lib/generated/schema.dart` unchanged, example tests against the
-  mock API, the example's web build, website build. `website.yml` builds the
+  mock API and against the graphql-http server, the example's web build,
+  the example's Android debug APK (`android` job), website build. The
+  Android integration test is not run in CI (no emulator job).
+  `website.yml` builds the
   web demo and deploys the docs on push to `main`.
 - The example talks to `http://localhost:4000/graphql` (iOS simulator shares
-  the host network). Its introspection is snapshotted in
+  the host network; `http://10.0.2.2:4000/graphql` on the Android emulator). Its introspection is snapshotted in
   `example/graphql/schema.json`.
 
 ## Architecture (runtime, `packages/sling_gql/lib/src`)
@@ -324,7 +361,12 @@ Design decisions worth knowing before changing things:
   same selection tree, misses/writes forwarded to the parent `QueryScope`
   (which fetches and holds loading/error); only `deps` are the row's, and
   `_notify` probes rows after scopes. `_allDeps` (scope + rows) feeds
-  `maxAge`/`revalidate`.
+  `maxAge`/`revalidate`, so every whole-selection fetch (stale,
+  `cacheAndNetwork`, `refetch`) must carry the rows' fields too: it is
+  merged at flush (`_fetchWhole` → `_enqueueWhole`: `_root` plus each
+  row's `_bound` selection nodes, which may sit in an older tree when the
+  row did not re-run). Otherwise a row's stale field is never re-stamped
+  and the scope revalidates forever (found on a restored cache, #71).
 
 ## Generator (`packages/sling_gql_gen`)
 

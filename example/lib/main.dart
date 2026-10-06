@@ -13,9 +13,10 @@ import 'persisted_cache.dart';
 import 'type_policies.dart';
 
 /// The mock API in `../mock-api` (`npm start`). The iOS simulator shares the
-/// host network, so `localhost` works as-is. On the web the same URL is
+/// host network, so `localhost` works as-is; the Android emulator reaches
+/// the host at `10.0.2.2` ([mockApiHost]). On the web the same URL is
 /// answered by the mock API bundled into the page (`in_browser_api.dart`).
-const endpoint = 'http://localhost:4000/graphql';
+final endpoint = 'http://$mockApiHost:4000/graphql';
 
 Future<void> main() async {
   // Embedded in a docs page (multi-view): one view per demo, one engine
@@ -26,9 +27,9 @@ Future<void> main() async {
   final demo = demoFor(Uri.base.queryParameters['demo'] ?? '');
   if (demo != null) return runApp(DemoApp(demo: demo));
 
-  // iOS: the previous run's cache, from SQLite (`sling_gql_sqflite`), loaded
-  // before the client exists so the first frame paints it. The web keeps it
-  // in memory. See `persisted_cache.dart`.
+  // iOS and Android: the previous run's cache, from SQLite
+  // (`sling_gql_sqflite`), loaded before the client exists so the first
+  // frame paints it. The web keeps it in memory. See `persisted_cache.dart`.
   WidgetsFlutterBinding.ensureInitialized();
   final cache = await openCache();
 
@@ -44,7 +45,8 @@ Future<void> main() async {
     // (`PageInfo`, `Stats`) stay inline in their parent.
     cache: cache,
     // Restored data has no fetch time: shown at once, then revalidated in
-    // the background (iOS; `null` on the web, where nothing is restored).
+    // the background (iOS and Android; `null` on the web, where nothing is
+    // restored).
     maxAge: restoredCacheMaxAge,
     // Requests (not subscriptions) carry the latency picked in the network
     // log screen; subscriptions share the same `http.Client`.

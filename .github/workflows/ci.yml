@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Gates 1–3: runtime, generator, example (against the mock API), plus
-  # analyze + format. Runs on Linux; the example's widget tests do not need
-  # an iOS toolchain.
+  # Gates 1–3: runtime, generator, example (against the mock API, then
+  # against the graphql-http server), plus analyze + format. Runs on Linux;
+  # the example's widget tests do not need an iOS toolchain.
   dart:
     name: analyze · format · runtime · generator · example
     runs-on: ubuntu-latest
@@ -65,10 +65,43 @@ jobs:
       - name: Example tests (mock API)
         run: melos run test:example --no-select
 
+      # The same flows against a second server implementation running the
+      # mock API's schema and resolvers: graphql-http + graphql-sse.
+      - name: Example tests (graphql-http server)
+        run: melos run test:example:graphql-http --no-select
+
       # The example also targets the web (with the mock API bundled into the
       # page); the docs site's Try-it page ships this build.
       - name: Example web build
         run: node scripts/build-web-demo.mjs --no-copy
+
+  # The example's Android app builds (debug APK). Its end-to-end flows run on
+  # an emulator by hand: integration_test/app_test.dart (see example/README).
+  android:
+    name: example android build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          echo "flutter=$(awk '/^flutter/ {print $2}' .tool-versions | sed 's/-stable$//')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.versions.outputs.flutter }}
+          channel: stable
+          cache: true
+
+      - name: Build debug APK
+        working-directory: example
+        run: flutter build apk --debug
 
   # Gate 4: the docs site builds. Deploy stays in website.yml.
   website:

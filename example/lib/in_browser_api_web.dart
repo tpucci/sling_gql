@@ -11,6 +11,9 @@ http.Client mockApiHttpClient() => InBrowserMockApiClient();
 /// Whether requests are answered in-process rather than by `npm start`.
 const bool mockApiInBrowser = true;
 
+/// Nominal: the in-page mock API answers whatever host the URL names.
+const String mockApiHost = 'localhost';
+
 /// `globalThis.slingMockApi`, set by `web/mock-api.js` (`mock-api/browser.mjs`).
 @JS('slingMockApi')
 external _MockApi? get _mockApi;

@@ -1,6 +1,6 @@
 # sling_gql example
 
-A Cupertino app (Launches, Search and Me tabs) for iOS and web, against the
+A Cupertino app (Launches, Search and Me tabs) for iOS, Android and web, against the
 mock API in `../mock-api`. The full tour is on the website:
 [Example app](https://tpucci.github.io/sling_gql/tooling/example-app/); the
 web build runs there: [Try it live](https://tpucci.github.io/sling_gql/guides/try-it/).
@@ -10,13 +10,20 @@ web build runs there: [Try it live](https://tpucci.github.io/sling_gql/guides/tr
 cd ../mock-api && npm install && npm start   # http://localhost:4000/graphql
 cd ../example && flutter run -d <ios-simulator>
 
+# Android emulator: the same server, reached at 10.0.2.2:4000
+cd ../example && flutter run -d emulator-5554
+
 # Web: the mock API is bundled into the page (web/mock-api.js, not committed)
 cd ../mock-api && npm install && npm run build:browser
 cd ../example && flutter run -d chrome
 ```
 
-`lib/in_browser_api.dart` is the only platform switch: a plain `http.Client`
-on iOS, one that answers from the in-page mock API on the web.
+`lib/in_browser_api.dart` is the only platform switch for requests: a plain
+`http.Client` on iOS and Android (to `localhost` from the iOS simulator,
+`10.0.2.2` — the host — from the Android emulator; the Android manifest allows
+cleartext HTTP to those two hosts only), one that answers from the in-page mock
+API on the web. `lib/persisted_cache.dart` keeps the cache in SQLite
+(`sling_gql_sqflite`) on iOS and Android, in memory on the web.
 
 Worth a look:
 
@@ -40,4 +47,14 @@ with `?demo=<name>` on the web build; the names are in `lib/demos/demos.dart`).
 
 Tests (`test/app_test.dart`) run against the real mock API and assert request
 counts: `melos run test:example --no-select` from the repo root starts the
-server for the run.
+server for the run. `melos run test:example:graphql-http --no-select` runs
+them (and `test/graphql_server_test.dart`) against the same schema and
+resolvers behind graphql-http + graphql-sse instead of yoga.
+
+The same flows run on a device or emulator as an integration test (the app's
+own endpoint: `10.0.2.2` on the Android emulator). A slower launch sequence
+gives the emulator time to show each status of the mission-control flow:
+
+```sh
+SEQUENCE_MS=2000 node ../scripts/with-mock-api.mjs flutter test integration_test -d emulator-5554
+```

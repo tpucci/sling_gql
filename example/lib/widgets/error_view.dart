@@ -32,8 +32,8 @@ class ErrorView extends StatelessWidget {
           const Icon(CupertinoIcons.exclamationmark_triangle, size: 40),
           const SizedBox(height: 8),
           Text(_summary, textAlign: TextAlign.center),
-          // On iOS the API is `npm start` on the Mac; on the web it runs in
-          // the page, so there is nothing to start.
+          // On iOS and Android the API is `npm start` on the host; on the
+          // web it runs in the page, so there is nothing to start.
           if (!mockApiInBrowser) ...[
             const SizedBox(height: 8),
             const Text(
