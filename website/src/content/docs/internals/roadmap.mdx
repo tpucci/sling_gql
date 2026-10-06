@@ -38,8 +38,8 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    stream (`SlingClient(subscriptionTransport:)` to swap the protocol), and write each
    event through the same `writeResponse` as a query — see
    [Subscriptions](/sling_gql/guides/subscriptions/). `MockGraphQLServer(subscription:)`
-   takes `Stream`s. Reconnection (`subscriptionRetryAfter`, `reconnect()`) is done. Left for
-   later: a `graphql-ws` transport.
+   takes `Stream`s. Reconnection (`subscriptionRetryAfter`, `reconnect()`) is done. SSE is
+   the only built-in transport; a `graphql-ws` adapter may come later as its own package.
 
 4. **Unions and interfaces** — done
 
@@ -112,11 +112,20 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
     changes — see [Persistence](/sling_gql/guides/persistence/). Hive and file adapters are
     not planned until someone needs them.
 
+11. **Production readiness** — next
+
+    In order: type policies and connection merging (one growing cache list for cursor
+    pages); a typed error model with `errorPolicy`, timeouts, query retry with backoff and a
+    token-refresh hook; Android and second-backend test coverage; persistence migration
+    across schema changes and an offline mutation queue; then an API audit and 1.0.
+
 </Steps>
 
 ## Explicitly not planned
 
 - **SSR hydration.** Not applicable.
+- **`graphql-ws` in the core.** Subscriptions stay on SSE; a WebSocket transport would be a
+  separate package plugged into `SlingClient(subscriptionTransport:)`.
 - **Lazy / transaction / paginated query variants.** `resolve()` plus widget state cover
   the same ground.
 
