@@ -63,12 +63,14 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
     (sqflite persistence included) and run the e2e suite on it; a soak test
     (memory, batching, GC) on a large generated schema; run the runtime
     against a second real GraphQL server besides yoga.
-72. **Runtime — Persistence migration + offline mutation queue**: migrate
+72. **Runtime — Persistence migration + offline mutation queue**: ~~migrate
     the `sling_gql_sqflite` store across schema-hash changes instead of
     always wiping (keep entities whose type/fields still exist), corruption
-    recovery, multi-isolate access, encryption option; a persisted mutation
+    recovery, multi-isolate access, encryption option~~ (done 2026-10:
+    `slingSchema.fields` + `_Migration`, recover by recreating the file,
+    one writer per file, `SqfliteCodec`); still open: a persisted mutation
     queue replayed on reconnect, and defined behaviour for optimistic writes
-    when the app is killed mid-flight.
+    when the app is killed mid-flight (after #70).
 73. **Repo — API audit + 1.0**: decide the public surface (what leaves
     `internal.dart`, what gets hidden), semver + deprecation policy,
     migration guide, security policy, benchmarks tracked in CI; then release

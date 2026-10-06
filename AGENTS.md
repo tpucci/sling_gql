@@ -79,8 +79,22 @@ on the code.
     entity, one per `ROOT_QUERY` field (`delta.changedFields` says which;
     for a whole-root copy in a full delta, the touched `ROOT_QUERY.<alias>`
     keys; `ROOT_MUTATION`/`ROOT_SUBSCRIPTION` never stored). A
-    `sling_meta` mismatch (format version, key field, `slingSchema.hash`)
-    wipes the store. Bump `sqfliteFormatVersion` when the tables change.
+    `sling_meta` mismatch on format version, key field or codec id wipes
+    the store; another `slingSchema.hash` *migrates* it when the store and
+    the schema both carry `slingSchema.fields` (`load.dart`'s `_Migration`,
+    run on each decoded row: a field is kept only with the same signature
+    in both — alias → field by exact name, else `<field>_<args hash>` —
+    inline objects pruned by their `__typename`, entities of gone types
+    and root fields holding inline objects of gone types dropped; pruned
+    rows rewritten, `updated_at` kept), else wipes. An unreadable file or
+    row (codec included) → `onError`, file deleted and recreated
+    (`loaded.recovered`). One writer per file: a second `open` of a path
+    open in this isolate throws (sqflite shares the connection); across
+    isolates the last `open` writes its token to `sling_meta.owner` and
+    every save checks it inside its transaction (`superseded`,
+    `SqfliteSupersededException`). `SqfliteCodec` (`codec:`) transforms
+    row values (JSON text without one, blobs with). Bump
+    `sqfliteFormatVersion` when the tables change.
     Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
     files; `tester.runAsync` in `testWidgets`); `benchmark/` is run by
     hand (`flutter test benchmark/persistence_bench_test.dart`).
@@ -298,7 +312,11 @@ the `--key-field`, so `SlingClient(schema: slingSchema)` needs no other wiring
 (64-bit FNV-1a) of the generated file with the `hash:` argument left out
 (a placeholder), so it moves with the introspection, `--key-field`,
 `--scalar` and the generator's output; the runtime never reads it,
-`sling_gql_sqflite` wipes its store when it changes.
+`sling_gql_sqflite` migrates (or wipes) its store when it changes. And
+`fields` (`const _slingFields` at the end of the file): type name → field
+name → signature (`'(id: ID!, first: Int = 10) [Launch!]!'`), every object
+type, the query root as `ROOT_QUERY` (and under its name only when a field
+returns it), interfaces/unions as `{}`; what the sqflite migration compares.
 
 The generator decides which types are *keyed* (have a scalar `--key-field`,
 default `id`) and which fields are *lookups* (single `id` argument returning a

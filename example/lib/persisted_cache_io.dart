@@ -8,9 +8,9 @@ import 'generated/schema.dart';
 const _path = 'sling_cache.db'; // in sqflite's getDatabasesPath()
 
 /// iOS: the cache persisted in `sling_cache.db`, bounded by the defaults
-/// (7 days per root field, 10 000 entities) and wiped when the generated
-/// code's `slingSchema.hash` changes. Call after
-/// `WidgetsFlutterBinding.ensureInitialized()`.
+/// (7 days per root field, 10 000 entities) and migrated along
+/// `slingSchema.fields` when the generated code's `slingSchema.hash`
+/// changes. Call after `WidgetsFlutterBinding.ensureInitialized()`.
 ///
 /// The store is only a cache: when it cannot be opened (a damaged file),
 /// it is deleted and opened again, and the app starts with an empty

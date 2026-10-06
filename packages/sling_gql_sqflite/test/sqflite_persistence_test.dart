@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sling_gql/sling_gql.dart';
@@ -55,6 +58,7 @@ void main() {
     bool flushOnLifecycle = false,
     bool compact = true,
     SlingSchema<Accessor, Accessor> schema = slingSchema,
+    SqfliteCodec? codec,
     void Function(Object error, StackTrace stack)? onError,
     DateTime Function()? now,
   }) async {
@@ -68,6 +72,7 @@ void main() {
       hydrateInIsolate: hydrateInIsolate,
       flushOnLifecycle: flushOnLifecycle,
       compact: compact,
+      codec: codec,
       onError: onError,
       now: now,
     );
@@ -632,7 +637,7 @@ void main() {
       return path;
     }
 
-    test('another schema hash wipes the database', () async {
+    test('another schema hash without fields wipes the database', () async {
       final path = await stored();
       final again = await open(
         path,
@@ -685,13 +690,14 @@ void main() {
       final path = await stored();
       final db = await databaseFactoryFfi.openDatabase(path);
       await db.update('sling_root_fields', {
-        'json': '{not json',
+        'data': '{not json',
       }, where: "field = 'me'");
       await db.close();
       final errors = <Object>[];
       final again = await open(path, onError: (e, _) => errors.add(e));
       expect(errors, [isA<FormatException>()]);
       expect(again.loaded.wiped, isTrue);
+      expect(again.loaded.recovered, isTrue);
       expect(again.cache.entityKeys, isEmpty);
       expect(await entityRows(again), isEmpty);
       expect(await rootRows(again), isEmpty);
@@ -710,4 +716,334 @@ void main() {
       expect(again.cache.entityKeys, isNotEmpty);
     });
   });
+
+  group('migration (another schema hash, both with fields)', () {
+    test('keeps the fields whose signature did not change; a changed type '
+        'reads as missing, not as the old value', () async {
+      final path = tempDatabasePath();
+      final first = await open(path);
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.flush();
+      final meBefore = (await rootRows(first))['me']!;
+      await first.close();
+
+      final again = await open(path, schema: v2Schema);
+      expect(again.loaded.migrated, isTrue);
+      expect(again.loaded.wiped, isFalse);
+      // `greeting` is gone, `users` gained an argument.
+      expect(again.loaded.incompatibleRootFields, 2);
+      expect(again.loaded.rootFields, 2);
+      expect(
+        again.cache.entity('ROOT_QUERY')!.keys,
+        unorderedEquals(['me', 'tags']),
+      );
+      // Users 2 and 3 were only reachable through `users`.
+      expect(again.loaded.unreachableEntities, 2);
+      expect(again.loaded.entities, 1);
+      // `User.age` became a String: the Int values are dropped.
+      const migratedUser = {'__typename': 'User', 'id': '1', 'name': 'User 1'};
+      expect(again.cache.entity('User:1'), migratedUser);
+      // The database holds the migrated rows; the root field keeps its age.
+      expect(await entityRows(again), {'User:1': migratedUser});
+      final roots = await rootRows(again);
+      expect(roots.keys, unorderedEquals(['me', 'tags']));
+      expect(roots['me']!.$2, meBefore.$2);
+      expect(
+        await again.database.query('sling_meta', where: "key = 'schema_hash'"),
+        [
+          {'key': 'schema_hash', 'value': 'test-schema-2'},
+        ],
+      );
+
+      // The new code reads `age` as a String: a miss, fetched, no StateError.
+      final v2Server = MockGraphQLServer(
+        query: {
+          'me': {...user('1'), 'age': 'thirty'},
+        },
+      );
+      final client = v2Server.client(QueryV2.root, cache: again.cache);
+      expect(await client.resolve((q) => (q.me?.name, q.me?.age)), (
+        'User 1',
+        'thirty',
+      ));
+      expect(v2Server.requests, hasLength(1));
+      expect(v2Server.requests.single.document, contains('age'));
+      await again.close();
+
+      final third = await open(path, schema: v2Schema);
+      expect(third.loaded.migrated, isFalse);
+      expect(third.loaded.wiped, isFalse);
+      expect(third.cache.entity('User:1')?['age'], 'thirty');
+    });
+
+    test(
+      'a store written without fields, or opened without them, is wiped',
+      () async {
+        final path = tempDatabasePath();
+        final first = await open(
+          path,
+          schema: const SlingSchema<Query, Mutation>(
+            query: Query.root,
+            hash: 'no-fields',
+          ),
+        );
+        await fetchAll(server.client(Query.root, cache: first.cache));
+        await first.close();
+        final again = await open(path, schema: v2Schema);
+        expect(again.loaded.wiped, isTrue);
+        expect(again.loaded.migrated, isFalse);
+        expect(again.cache.entityKeys, isEmpty);
+      },
+    );
+
+    test('migrates in the background isolate too', () async {
+      final path = tempDatabasePath();
+      final first = await open(path);
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.close();
+      final again = await open(path, schema: v2Schema, hydrateInIsolate: true);
+      expect(again.loaded.migrated, isTrue);
+      expect(again.cache.entity('User:1'), {
+        '__typename': 'User',
+        'id': '1',
+        'name': 'User 1',
+      });
+      expect(await entityRows(again), {'User:1': again.cache.entity('User:1')});
+    });
+  });
+
+  group('corruption', () {
+    test('a file that is not a database is deleted and recreated, reported '
+        'to onError', () async {
+      final path = tempDatabasePath();
+      File(path).writeAsStringSync('not a database ' * 512);
+      final errors = <Object>[];
+      final p = await open(path, onError: (e, _) => errors.add(e));
+      expect(errors, hasLength(1));
+      expect(p.loaded.recovered, isTrue);
+      expect(p.loaded.wiped, isTrue);
+      expect(p.cache.entityKeys, isEmpty);
+      // And it persists again.
+      await fetchAll(server.client(Query.root, cache: p.cache));
+      await p.close();
+      final again = await open(path);
+      expect(again.loaded.recovered, isFalse);
+      expect(again.cache.entityKeys, isNotEmpty);
+    });
+
+    test('a row that decodes to the wrong shape recovers too', () async {
+      final path = tempDatabasePath();
+      final first = await open(path);
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.close();
+      final db = await databaseFactoryFfi.openDatabase(path);
+      await db.update('sling_entities', {
+        'data': '[1, 2]',
+      }, where: "key = 'User:1'");
+      await db.close();
+      final errors = <Object>[];
+      final again = await open(path, onError: (e, _) => errors.add(e));
+      expect(errors, [isA<TypeError>()]);
+      expect(again.loaded.recovered, isTrue);
+      expect(await entityRows(again), isEmpty);
+    });
+
+    test('a database another connection keeps locked is not corruption: '
+        'open throws and the file is kept', () async {
+      final path = tempDatabasePath();
+      final first = await open(path);
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.close();
+      final holder = await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(singleInstance: false),
+      );
+      await holder.execute('BEGIN EXCLUSIVE');
+      final errors = <Object>[];
+      await expectLater(
+        openStore(path, onError: (e, _) => errors.add(e)),
+        throwsA(isA<DatabaseException>()),
+      );
+      expect(errors, isEmpty);
+      await holder.execute('ROLLBACK');
+      await holder.close();
+      final again = await open(path);
+      expect(again.loaded.recovered, isFalse);
+      expect(again.cache.entityKeys, isNotEmpty);
+    });
+
+    test('a codec that cannot decode recovers', () async {
+      final path = tempDatabasePath();
+      final first = await open(path, codec: const XorCodec());
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.close();
+      final errors = <Object>[];
+      final again = await open(
+        path,
+        codec: const _ThrowingCodec('xor:42'),
+        onError: (e, _) => errors.add(e),
+      );
+      expect(errors, [isA<StateError>()]);
+      expect(again.loaded.recovered, isTrue);
+      expect(again.cache.entityKeys, isEmpty);
+    });
+  });
+
+  group('one writer per file', () {
+    test('a second open of a path this isolate has open throws; after '
+        'close it opens', () async {
+      final path = tempDatabasePath();
+      final first = await open(path);
+      await expectLater(openStore(path), throwsStateError);
+      // The first instance's connection is untouched.
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.flush();
+      expect(await entityRows(first), isNotEmpty);
+      await first.close();
+      final again = await open(path);
+      expect(again.cache.entityKeys, isNotEmpty);
+    });
+
+    test('an open in another isolate takes over: the previous instance stops '
+        'saving and reports it once', () async {
+      final path = tempDatabasePath();
+      final errors = <Object>[];
+      final first = await open(path, onError: (e, _) => errors.add(e));
+      final client = server.client(Query.root, cache: first.cache);
+      await client.resolve((q) => q.me?.name);
+      await first.flush();
+      expect(first.superseded, isFalse);
+
+      await compute(_openAndSaveGreeting, path);
+
+      await client.resolve((q) => q.users(first: 2)?.map((u) => u.name));
+      await first.flush();
+      expect(first.superseded, isTrue);
+      expect(errors, [isA<SqfliteSupersededException>()]);
+      await client.resolve((q) => q.greeting(name: 'Ada'));
+      await first.flush();
+      expect(errors, hasLength(1), reason: 'reported once');
+      await first.close();
+
+      // The database is what the other isolate left.
+      final again = await open(path);
+      expect(
+        (await rootRows(again)).keys,
+        unorderedEquals(['me', startsWith('greeting_')]),
+      );
+    });
+  });
+
+  group('codec', () {
+    test('rows are stored encoded and read back', () async {
+      final path = tempDatabasePath();
+      final first = await open(path, codec: const XorCodec());
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.flush();
+      final snapshot = first.cache.snapshot..remove('ROOT_MUTATION');
+      final raw = await first.database.query('sling_entities');
+      expect(raw, isNotEmpty);
+      for (final row in raw) {
+        final data = row['data'];
+        expect(data, isA<Uint8List>());
+        expect(
+          utf8.decode(data! as Uint8List, allowMalformed: true),
+          isNot(contains('User')),
+        );
+      }
+      await first.close();
+
+      for (final inIsolate in [false, true]) {
+        final again = await open(
+          path,
+          codec: const XorCodec(),
+          hydrateInIsolate: inIsolate,
+        );
+        expect(again.loaded.wiped, isFalse);
+        expect(again.cache.snapshot, snapshot);
+        await again.close();
+      }
+    });
+
+    test('another codec id, or none, wipes the store (no error)', () async {
+      final path = tempDatabasePath();
+      final first = await open(path, codec: const XorCodec());
+      await fetchAll(server.client(Query.root, cache: first.cache));
+      await first.close();
+      final errors = <Object>[];
+      final rotated = await open(
+        path,
+        codec: const XorCodec(key: 7, id: 'xor:7'),
+        onError: (e, _) => errors.add(e),
+      );
+      expect(rotated.loaded.wiped, isTrue);
+      expect(rotated.loaded.recovered, isFalse);
+      await fetchAll(server.client(Query.root, cache: rotated.cache));
+      await rotated.close();
+      final plain = await open(path, onError: (e, _) => errors.add(e));
+      expect(plain.loaded.wiped, isTrue);
+      expect(errors, isEmpty);
+    });
+  });
+}
+
+/// Another isolate opening the same file (its own connection): reads what
+/// is stored, adds `greeting(name: "Bob")` and saves.
+Future<void> _openAndSaveGreeting(String path) async {
+  final other = await openStore(path);
+  // No test here: `MockGraphQLServer.client` would register a tear-down.
+  final client = SlingClient<Query>(
+    endpoint: Uri.parse('http://mock/graphql'),
+    schema: slingSchema,
+    cache: other.cache,
+    httpClient: testServer().httpClient,
+  );
+  await client.resolve((q) => q.greeting(name: 'Bob'));
+  client.dispose();
+  await other.close();
+}
+
+final class _ThrowingCodec implements SqfliteCodec {
+  const _ThrowingCodec(this.id);
+
+  @override
+  final String id;
+
+  @override
+  Uint8List encode(Uint8List bytes) => bytes;
+
+  @override
+  Uint8List decode(Uint8List bytes) => throw StateError('wrong key');
+}
+
+/// The test schema after a change: `greeting` removed, `users` gained an
+/// argument, `User.age` became a String.
+const v2Schema = SlingSchema<QueryV2, Accessor>(
+  query: QueryV2.root,
+  hash: 'test-schema-2',
+  fields: {
+    'ROOT_QUERY': {
+      'me': 'User',
+      'user': '(id: ID!) User',
+      'users': '(first: Int!, after: String) [User!]!',
+      'tags': '[Tag!]!',
+    },
+    'User': {'id': 'ID!', 'name': 'String', 'age': 'String', 'best': 'User'},
+    'Tag': {'label': 'String'},
+  },
+);
+
+class QueryV2 extends Accessor {
+  QueryV2(super.recorder, super.selection, super.path);
+  QueryV2.root(Recorder r) : super(r, r.root, const []);
+
+  UserV2? get me => object('me', UserV2.new, keyed: true);
+  List<Tag>? get tags => list('tags', Tag.new);
+}
+
+class UserV2 extends Accessor {
+  UserV2(super.recorder, super.selection, super.path);
+
+  String? get name => scalar<String>('name');
+  String? get age => scalar<String>('age');
 }

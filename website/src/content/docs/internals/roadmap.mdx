@@ -108,16 +108,18 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
 
     `sling_gql_sqflite` keeps a durable copy of the normalized cache: deltas saved in the
     background (`changesSince`, debounced, flushed when the app pauses), restored before the
-    client starts, bounded by age and entity count, wiped when the generated schema's `hash`
-    changes — see [Persistence](/sling_gql/guides/persistence/). Hive and file adapters are
-    not planned until someone needs them.
+    client starts, bounded by age and entity count, migrated along the generated
+    `slingSchema.fields` when the schema's `hash` changes (what the new code can still read
+    is kept), recreated when the file is corrupt, one writer per file, with an optional row
+    codec for encryption — see [Persistence](/sling_gql/guides/persistence/). Hive and file
+    adapters are not planned until someone needs them.
 
 11. **Production readiness** — next
 
     In order: type policies and connection merging (one growing cache list for cursor
     pages); a typed error model with `errorPolicy`, timeouts, query retry with backoff and a
-    token-refresh hook; Android and second-backend test coverage; persistence migration
-    across schema changes and an offline mutation queue; then an API audit and 1.0.
+    token-refresh hook; Android and second-backend test coverage; an offline mutation queue
+    (persistence migration across schema changes is done); then an API audit and 1.0.
 
 </Steps>
 

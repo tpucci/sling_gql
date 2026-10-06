@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart' show addTearDown;
 import 'package:sling_gql/sling_gql.dart';
@@ -57,10 +58,25 @@ class Mutation extends Accessor {
   );
 }
 
+/// What `sling_gql_gen` would emit as `slingSchema.fields` for the schema
+/// above.
+const testFields = <String, Map<String, String>>{
+  'ROOT_QUERY': {
+    'me': 'User',
+    'user': '(id: ID!) User',
+    'users': '(first: Int!) [User!]!',
+    'greeting': '(name: String!) String',
+    'tags': '[Tag!]!',
+  },
+  'User': {'id': 'ID!', 'name': 'String', 'age': 'Int', 'best': 'User'},
+  'Tag': {'label': 'String'},
+};
+
 const slingSchema = SlingSchema<Query, Mutation>(
   query: Query.root,
   mutation: Mutation.root,
   hash: 'test-schema-1',
+  fields: testFields,
 );
 
 Map<String, Object?> user(String id, {String? name, int? age, Object? best}) =>
@@ -114,6 +130,7 @@ Future<SqflitePersistence> openStore(
   bool hydrateInIsolate = false,
   bool flushOnLifecycle = false,
   bool compact = true,
+  SqfliteCodec? codec,
   void Function(Object error, StackTrace stack)? onError,
   DateTime Function()? now,
 }) => SqflitePersistence.open(
@@ -127,6 +144,7 @@ Future<SqflitePersistence> openStore(
   hydrateInIsolate: hydrateInIsolate,
   flushOnLifecycle: flushOnLifecycle,
   compact: compact,
+  codec: codec,
   onError: onError,
   now: now ?? DateTime.now,
 );
@@ -134,14 +152,14 @@ Future<SqflitePersistence> openStore(
 /// `sling_entities` as `{key: entity json}`.
 Future<Map<String, Object?>> entityRows(SqflitePersistence p) async => {
   for (final row in await p.database.query('sling_entities'))
-    row['key']! as String: jsonDecode(row['json']! as String),
+    row['key']! as String: jsonDecode(row['data']! as String),
 };
 
 /// `sling_root_fields` as `{field: (value, updated_at)}`.
 Future<Map<String, (Object?, int)>> rootRows(SqflitePersistence p) async => {
   for (final row in await p.database.query('sling_root_fields'))
     row['field']! as String: (
-      jsonDecode(row['json']! as String),
+      jsonDecode(row['data']! as String),
       row['updated_at']! as int,
     ),
 };
@@ -154,4 +172,21 @@ Future<Map<String, Object?>> storedSnapshot(SqflitePersistence p) async {
     if (roots.isNotEmpty)
       'ROOT_QUERY': {for (final e in roots.entries) e.key: e.value.$1},
   };
+}
+
+/// A stand-in cipher: XORs every byte with [key].
+final class XorCodec implements SqfliteCodec {
+  const XorCodec({this.key = 42, this.id = 'xor:42'});
+
+  final int key;
+
+  @override
+  final String id;
+
+  @override
+  Uint8List encode(Uint8List bytes) =>
+      Uint8List.fromList([for (final b in bytes) b ^ key]);
+
+  @override
+  Uint8List decode(Uint8List bytes) => encode(bytes);
 }

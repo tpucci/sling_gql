@@ -6,5 +6,10 @@
 /// synchronous and in memory; the database is a bounded write-behind copy.
 library;
 
+export 'src/codec.dart' show SqfliteCodec;
 export 'src/sqflite_persistence.dart'
-    show SqflitePersistence, SqfliteLoadReport, sqfliteFormatVersion;
+    show
+        SqflitePersistence,
+        SqfliteLoadReport,
+        SqfliteSupersededException,
+        sqfliteFormatVersion;

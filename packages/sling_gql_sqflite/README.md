@@ -53,8 +53,9 @@ await persistence.clear();
   (`AppLifecycleListener`), and on `flush()`. They run one after another, so
   an older delta never lands after a newer one; a failed save (reported to
   `onError`) leaves its changes pending for the next one.
-- One row per entity (`sling_entities`: `key`, `json`, `updated_at`), one row
-  per `ROOT_QUERY` field (`sling_root_fields`: `field`, `json`, `updated_at`):
+- One row per entity (`sling_entities`: `key`, `data`, `updated_at`), one row
+  per `ROOT_QUERY` field (`sling_root_fields`: `field`, `data`, `updated_at`;
+  `data` is the JSON, or the codec's bytes):
   a response rewrites the root fields it touched, not the whole root.
   `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
 
@@ -70,27 +71,66 @@ Applied when the store is opened (`null` disables one):
 
 Dropped rows are deleted before `open` returns; `persistence.loaded` reports
 the counts and timings. `maxEntities` counts entities only: inline data under
-root fields is bounded by `maxAge` alone. A store whose rows cannot be decoded
-is wiped at open (reported to `onError`).
+root fields is bounded by `maxAge` alone.
 
-## Invalidation
+## Corruption
 
-The database stores a format version, the key field and `slingSchema.hash`
-(a fingerprint `sling_gql_gen` emits of the generated file). When any of them
-differs at open — the schema, `--key-field`, a `--scalar` mapping or the
-generator changed — the store is wiped and the app starts cold.
+A file that is not a database, or a row that cannot be decoded (a damaged
+page, a hand edit, a codec that throws), never fails the launch: the error
+goes to `onError`, the file is deleted and recreated, and the app starts cold
+(`loaded.recovered`). Only a failure to create that fresh database
+(permissions, a full disk) makes `open` throw, and a database another
+connection keeps locked (`SQLITE_BUSY` / `SQLITE_LOCKED`), which is left
+alone.
+
+## Schema changes
+
+The database stores a format version, the key field, the codec id,
+`slingSchema.hash` (a fingerprint `sling_gql_gen` emits of the generated file)
+and `slingSchema.fields` (every field of every object type with its
+signature: arguments, defaults, type). When the hash differs at open — the
+schema, `--key-field`, a `--scalar` mapping or the generator changed — the
+store is **migrated**: a cached field is kept only when its field has the same
+signature in both schemas; entities of a gone type, root fields whose field is
+gone or changed, and fields holding inline objects of a gone type are dropped
+(they read as missing and are fetched again). `loaded.migrated`,
+`incompatibleRootFields` and `incompatibleEntities` report it.
+
+Another key field, format version or codec id, or a hash change with no
+`fields` on either side (a hand-written schema, a store written by an older
+version), wipes the store and the app starts cold.
+
+## One writer per file
+
+Opening a path this isolate already has open throws a `StateError` (sqflite
+shares one connection per path). Across isolates and processes the last
+`open` wins: it records itself as the writer, and the previous instance's
+next save notices inside its transaction, stores nothing, reports a
+`SqfliteSupersededException` to `onError` once and sets `superseded`; its
+cache stays usable, unpersisted.
+
+## Encryption
+
+`codec:` takes an `SqfliteCodec` (`id`, synchronous `encode` / `decode` of
+each row's UTF-8 JSON bytes): plug in the cipher your app already uses — this
+package ships none. Rows are then blobs. A store written under another codec
+id (a rotated key) or none is wiped at open; a `decode` that throws counts as
+corruption. With `hydrateInIsolate` the codec must be sendable to the
+background isolate. For whole-file encryption pass an SQLCipher
+`databaseFactory` instead.
 
 ## Options
 
 | Option | Default | |
 | --- | --- | --- |
-| `databaseFactory` | sqflite's | `sqflite_common_ffi` for desktop/tests, `sqflite_common_ffi_web`, an SQLCipher factory for encryption |
+| `databaseFactory` | sqflite's | `sqflite_common_ffi` for desktop/tests, `sqflite_common_ffi_web`, an SQLCipher factory for whole-file encryption |
+| `codec` | none | row-value transform (encryption), see above |
 | `maxAge` / `maxEntities` | 7 days / 10 000 | bounds applied at open |
 | `debounce` / `maxWait` | 1 s / 5 s | save timing |
 | `hydrateInIsolate` | `false` | decode and build the cache in a background isolate (`compute`) |
 | `flushOnLifecycle` | `true` | save when the app goes to the background |
 | `compact` | `true` | `cache.compact` after each save; off if something else reads `changesSince` |
-| `onError` | `FlutterError.reportError` | background save failures, undecodable stores (wiped) |
+| `onError` | `FlutterError.reportError` | background save failures, recovered stores, `SqfliteSupersededException` |
 
 ## Numbers
 

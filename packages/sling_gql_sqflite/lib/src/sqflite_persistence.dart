@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -7,11 +8,14 @@ import 'package:sling_gql/sling_gql.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:sqflite_common/sqlite_api.dart';
 
+import 'codec.dart';
 import 'load.dart';
 
 /// Layout of the tables below. Bump it when they change: a database in
-/// another format is wiped at open.
-const sqfliteFormatVersion = 1;
+/// another format is wiped at open. 2: row values in a `data` column (text,
+/// or the codec's blob), `schema_fields`, `codec` and `owner` in the meta
+/// table.
+const sqfliteFormatVersion = 2;
 
 const _meta = 'sling_meta';
 const _entities = 'sling_entities';
@@ -21,18 +25,33 @@ const _rootFields = 'sling_root_fields';
 final class SqfliteLoadReport {
   const SqfliteLoadReport({
     required this.wiped,
+    required this.migrated,
+    required this.recovered,
     required this.entities,
     required this.rootFields,
     required this.expiredRootFields,
     required this.cappedRootFields,
     required this.unreachableEntities,
+    required this.incompatibleRootFields,
+    required this.incompatibleEntities,
     required this.readTime,
     required this.hydrateTime,
   });
 
-  /// The database was emptied first: new, or written under another format
-  /// version, key field or schema hash.
+  /// The database was emptied first: new, written under another format
+  /// version, key field or codec, under another schema hash without the
+  /// fields to migrate it, or [recovered].
   final bool wiped;
+
+  /// The database was written under another schema hash and migrated:
+  /// what the current schema can still read was kept (see
+  /// [incompatibleRootFields], [incompatibleEntities]).
+  final bool migrated;
+
+  /// The database could not be opened or read (a corrupt file, rows that do
+  /// not decode): the error went to `onError`, the file was deleted and a
+  /// new, empty one created.
+  final bool recovered;
 
   /// Entities hydrated into [SqflitePersistence.cache] (roots excluded).
   final int entities;
@@ -49,6 +68,13 @@ final class SqfliteLoadReport {
   /// Entities dropped because no kept root field reaches them.
   final int unreachableEntities;
 
+  /// Migration: root fields dropped because their field is gone or changed
+  /// signature (or holds an object of a gone type).
+  final int incompatibleRootFields;
+
+  /// Migration: entities dropped because their type is gone.
+  final int incompatibleEntities;
+
   /// Opening the database and reading every row.
   final Duration readTime;
 
@@ -58,10 +84,13 @@ final class SqfliteLoadReport {
 
   @override
   String toString() =>
-      'SqfliteLoadReport(${wiped ? 'wiped, ' : ''}$entities entities, '
-      '$rootFields root fields; dropped $expiredRootFields expired + '
-      '$cappedRootFields capped root fields, $unreachableEntities '
-      'unreachable entities; read ${readTime.inMilliseconds} ms, hydrate '
+      'SqfliteLoadReport(${recovered ? 'recovered, ' : ''}'
+      '${wiped ? 'wiped, ' : ''}${migrated ? 'migrated, ' : ''}'
+      '$entities entities, $rootFields root fields; dropped '
+      '$expiredRootFields expired + $cappedRootFields capped + '
+      '$incompatibleRootFields incompatible root fields, '
+      '$unreachableEntities unreachable + $incompatibleEntities incompatible '
+      'entities; read ${readTime.inMilliseconds} ms, hydrate '
       '${hydrateTime.inMilliseconds} ms)';
 }
 
@@ -96,9 +125,15 @@ final class SqfliteLoadReport {
 /// - **Bounds** apply at open: root fields older than `maxAge` are dropped,
 ///   then the oldest ones until the entities they reach fit in
 ///   `maxEntities`; unreachable entities go with them.
+/// - **Schema changes** migrate the store when the generated code carries
+///   `slingSchema.fields`: cached fields whose signature did not change are
+///   kept, the rest is dropped (see [open]).
+/// - **One writer per database file**: the last [open] wins (see
+///   [superseded]).
 final class SqflitePersistence {
   SqflitePersistence._(
     this._db,
+    this._owner,
     this.cache,
     this.loaded,
     this._now,
@@ -106,6 +141,7 @@ final class SqflitePersistence {
     required this.debounce,
     required this.maxWait,
     required this.compact,
+    required this.codec,
     required bool flushOnLifecycle,
   }) : _storedRootFields = {...?cache.entity(queryRoot)?.keys} {
     if (flushOnLifecycle) {
@@ -122,12 +158,32 @@ final class SqflitePersistence {
   /// the web (`sqflite_common_ffi_web`) or tests (`sqflite_common_ffi`).
   ///
   /// The database is wiped first when it was written under another
-  /// [sqfliteFormatVersion], `schema.keyField` or `schema.hash` (the
-  /// generated code changed: aliases and keyed types may have too), and
-  /// when its rows cannot be decoded (reported to [onError]): the store is a
-  /// cache, starting cold beats failing every launch. A file that is not a
-  /// database at all fails [open]; delete it (`deleteDatabase(path)`) and
-  /// open again.
+  /// [sqfliteFormatVersion], `schema.keyField` or [codec] id. Under another
+  /// `schema.hash` (the generated code changed: aliases and keyed types may
+  /// have too) it is **migrated** when both the store and [schema] carry
+  /// `SlingSchema.fields`: a cached field is kept only when its field (name,
+  /// arguments with their defaults, type) is the same in both schemas;
+  /// entities of a type that is gone and root fields whose field is gone,
+  /// changed, or holds an inline object of a gone type are dropped. Without
+  /// fields on either side it is wiped. Kept data is revalidated like any
+  /// restored data (`maxAge`).
+  ///
+  /// **Corruption**: when the file cannot be opened as a database or a row
+  /// cannot be decoded (a corrupted page, a hand edit, a [codec] that
+  /// throws), the error goes to [onError], the file is deleted and a new one
+  /// created ([SqfliteLoadReport.recovered]): the store is a cache, starting
+  /// cold beats failing every launch. Only a failure to create that new
+  /// database (permissions, a full disk) makes [open] throw, and a database
+  /// another connection keeps locked (`SQLITE_BUSY` / `SQLITE_LOCKED`):
+  /// that file is healthy, so it is left alone.
+  ///
+  /// **One instance per file**: opening a path this isolate already has open
+  /// (and not [close]d) throws a [StateError]. Across isolates and processes
+  /// the last [open] takes the database over: the previous instance notices
+  /// at its next save, stores nothing more and reports
+  /// [SqfliteSupersededException] to its [onError] ([superseded]).
+  ///
+  /// [codec] transforms every row value (encryption, see [SqfliteCodec]).
   ///
   /// Bounds (`null` disables one): root fields last written more than
   /// [maxAge] ago are dropped; then, while the entities the remaining root
@@ -138,13 +194,13 @@ final class SqflitePersistence {
   /// [hydrateInIsolate] decodes the rows and builds the cache in a
   /// background isolate (`compute`), keeping a large store's decode off the
   /// UI thread; the default builds it on the calling isolate, which is
-  /// faster for small stores.
+  /// faster for small stores. The [codec] then runs in that isolate too.
   ///
   /// With [flushOnLifecycle] (default) an [AppLifecycleListener] flushes when
   /// the app is hidden, paused or detached: the binding must be initialized
   /// (`WidgetsFlutterBinding.ensureInitialized()`, which sqflite needs
-  /// anyway). Background save failures and undecodable stores go to
-  /// [onError] (default: `FlutterError.reportError`); [now] is the clock
+  /// anyway). Background save failures, recovered stores and supersession go
+  /// to [onError] (default: `FlutterError.reportError`); [now] is the clock
   /// behind `updated_at` and [maxAge], only worth overriding in tests.
   ///
   /// With [compact] (default) every stored save calls `Cache.compact` with
@@ -164,66 +220,129 @@ final class SqflitePersistence {
     bool hydrateInIsolate = false,
     bool flushOnLifecycle = true,
     bool compact = true,
+    SqfliteCodec? codec,
     void Function(Object error, StackTrace stack)? onError,
     DateTime Function() now = DateTime.now,
   }) async {
     final reportError = onError ?? _reportError;
     assert(maxEntities == null || maxEntities >= 0);
     final factory = databaseFactory ?? sqflite.databaseFactory;
+    final owner = _newOwnerToken();
     final watch = Stopwatch()..start();
-    final db = await factory.openDatabase(path);
-    try {
-      var wiped = await _prepare(db, schema);
-      var rows = await _readRows(db);
-      final readTime = watch.elapsed;
-      final options = LoadOptions(
-        keyField: schema.keyField,
-        nowMs: now().millisecondsSinceEpoch,
-        maxAgeMs: maxAge?.inMilliseconds,
-        maxEntities: maxEntities,
-      );
-      LoadedCache loaded;
+    var recovered = false;
+    // Not a database, or rows this package cannot read: report, delete the
+    // file and start cold rather than fail every launch.
+    Future<void> recover(Object error, StackTrace stack) async {
+      reportError(error, stack);
+      recovered = true;
       try {
-        loaded = hydrateInIsolate
+        await factory.deleteDatabase(path);
+      } catch (_) {} // the next attempt reports what is wrong
+    }
+
+    while (true) {
+      final Database db;
+      try {
+        db = await factory.openDatabase(path);
+      } catch (error, stack) {
+        if (recovered) rethrow; // already a fresh file
+        await recover(error, stack);
+        continue;
+      }
+      if (!_openDatabases.add(db)) {
+        // sqflite's shared instance: the other persistence's, not ours to
+        // close.
+        throw StateError(
+          'SqflitePersistence: ${db.path} is already open in this isolate; '
+          'close() the other instance first.',
+        );
+      }
+      try {
+        final prepared = await _prepare(db, schema, codec, owner);
+        final rows = await _readRows(db);
+        final readTime = watch.elapsed;
+        final options = LoadOptions(
+          keyField: schema.keyField,
+          nowMs: now().millisecondsSinceEpoch,
+          maxAgeMs: maxAge?.inMilliseconds,
+          maxEntities: maxEntities,
+          codec: codec,
+          migrateFrom: prepared.migrateFrom,
+          migrateTo: prepared.migrateFrom == null ? null : schema.fields,
+        );
+        final loaded = hydrateInIsolate
             ? await compute(loadCache, (rows, options))
             : loadCache((rows, options));
+        final hydrateTime = watch.elapsed - readTime;
+        await _storeLoad(
+          db,
+          loaded,
+          migratedTo: prepared.migrateFrom == null ? null : schema,
+        );
+        return SqflitePersistence._(
+          db,
+          owner,
+          loaded.cache,
+          SqfliteLoadReport(
+            wiped: prepared.wiped || recovered,
+            migrated: prepared.migrateFrom != null,
+            recovered: recovered,
+            entities:
+                rows.entityKeys.length -
+                loaded.unreachableEntities.length -
+                loaded.incompatibleEntities.length,
+            rootFields:
+                rows.rootFields.length -
+                loaded.expiredRootFields.length -
+                loaded.cappedRootFields.length -
+                loaded.incompatibleRootFields.length,
+            expiredRootFields: loaded.expiredRootFields.length,
+            cappedRootFields: loaded.cappedRootFields.length,
+            unreachableEntities: loaded.unreachableEntities.length,
+            incompatibleRootFields: loaded.incompatibleRootFields.length,
+            incompatibleEntities: loaded.incompatibleEntities.length,
+            readTime: readTime,
+            hydrateTime: hydrateTime,
+          ),
+          now,
+          reportError,
+          debounce: debounce,
+          maxWait: maxWait,
+          compact: compact,
+          codec: codec,
+          flushOnLifecycle: flushOnLifecycle,
+        );
       } catch (error, stack) {
-        // A row that is not the JSON this package wrote (a corrupted page,
-        // a hand edit): drop the store rather than fail every launch.
-        reportError(error, stack);
-        wiped = await _prepare(db, schema, force: true);
-        rows = await _readRows(db);
-        loaded = loadCache((rows, options));
+        _openDatabases.remove(db);
+        try {
+          await db.close();
+        } catch (_) {}
+        // Already a fresh file, or a healthy one another connection holds.
+        if (recovered || _isBusy(error)) rethrow;
+        await recover(error, stack);
       }
-      final hydrateTime = watch.elapsed - readTime;
-      await _deleteDropped(db, loaded);
-      return SqflitePersistence._(
-        db,
-        loaded.cache,
-        SqfliteLoadReport(
-          wiped: wiped,
-          entities: rows.entityKeys.length - loaded.unreachableEntities.length,
-          rootFields:
-              rows.rootFields.length -
-              loaded.expiredRootFields.length -
-              loaded.cappedRootFields.length,
-          expiredRootFields: loaded.expiredRootFields.length,
-          cappedRootFields: loaded.cappedRootFields.length,
-          unreachableEntities: loaded.unreachableEntities.length,
-          readTime: readTime,
-          hydrateTime: hydrateTime,
-        ),
-        now,
-        reportError,
-        debounce: debounce,
-        maxWait: maxWait,
-        compact: compact,
-        flushOnLifecycle: flushOnLifecycle,
-      );
-    } catch (_) {
-      await db.close();
-      rethrow;
     }
+  }
+
+  /// The databases open in this isolate by a live instance. sqflite hands
+  /// out one shared [Database] per path, so a second instance on the same
+  /// path would share (and close) the first one's connection.
+  static final _openDatabases = Set<Database>.identity();
+
+  /// `SQLITE_BUSY` / `SQLITE_LOCKED` (primary or extended code): another
+  /// connection holds the file, which says nothing about its contents.
+  static bool _isBusy(Object error) {
+    if (error is! DatabaseException) return false;
+    final code = error.getResultCode();
+    return code != null && (code & 0xff == 5 || code & 0xff == 6);
+  }
+
+  static String _newOwnerToken() {
+    final random = Random.secure();
+    return [
+      DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+      for (var i = 0; i < 4; i++) random.nextInt(1 << 32).toRadixString(36),
+    ].join('-');
   }
 
   /// The hydrated cache: pass it to `SlingClient(cache:)`.
@@ -241,7 +360,21 @@ final class SqflitePersistence {
   /// Each stored save compacts the cache up to its version (see [open]).
   final bool compact;
 
+  /// Transforms row values (see [SqfliteCodec]); `null` stores plain JSON.
+  final SqfliteCodec? codec;
+
+  /// True once another [open] of this database file (from another isolate
+  /// or process) took it over: this instance stores nothing more — its
+  /// cache stays usable, unpersisted. Noticed at the first save after the
+  /// takeover, which reports a [SqfliteSupersededException] to `onError`.
+  bool get superseded => _superseded;
+  bool _superseded = false;
+
   final Database _db;
+
+  /// Written to `sling_meta.owner` by [open]: a save stores only while the
+  /// database still names this instance.
+  final String _owner;
   final DateTime Function() _now;
   final void Function(Object error, StackTrace stack) _onError;
   late final StreamSubscription<Set<String>> _subscription;
@@ -335,7 +468,7 @@ final class SqflitePersistence {
   }
 
   Future<void> _save() async {
-    if (!_db.isOpen) return;
+    if (_superseded || !_db.isOpen) return;
     // Taken together, synchronously: the touched root fields are exactly
     // those of the changes up to `delta.version`.
     final delta = cache.changesSince(_savedVersion);
@@ -343,9 +476,17 @@ final class SqflitePersistence {
     _dirtyRootFields = {};
     if (delta.isEmpty) return;
     final now = _now().millisecondsSinceEpoch;
-    final Set<String> storedRootFields;
+    final Set<String>? storedRootFields;
     try {
       storedRootFields = await _db.transaction((txn) async {
+        // In the write transaction: no other instance can take the database
+        // over between this check and the commit.
+        final owner = await txn.query(
+          _meta,
+          columns: ['value'],
+          where: "key = 'owner'",
+        );
+        if (owner.singleOrNull?['value'] != _owner) return null;
         final batch = txn.batch();
         final stored = _writeDelta(batch, delta, rootFields, now);
         await batch.commit(noResult: true);
@@ -355,6 +496,12 @@ final class SqflitePersistence {
       // Not stored: the next save starts from the same version again.
       _dirtyRootFields.addAll(rootFields);
       rethrow;
+    }
+    if (storedRootFields == null) {
+      _superseded = true;
+      _cancelTimers();
+      _onError(SqfliteSupersededException(_db.path), StackTrace.current);
+      return;
     }
     _storedRootFields = storedRootFields;
     _savedVersion = delta.version;
@@ -380,7 +527,7 @@ final class SqflitePersistence {
       if (_isRoot(key)) continue;
       batch.insert(_entities, {
         'key': key,
-        'json': jsonEncode(entity),
+        'data': encodeRow(entity, codec),
         'updated_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -394,7 +541,7 @@ final class SqflitePersistence {
           in (changedFields ?? const {}).entries) {
         batch.insert(_rootFields, {
           'field': field,
-          'json': jsonEncode(value),
+          'data': encodeRow(value, codec),
           'updated_at': now,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
         stored.add(field);
@@ -425,7 +572,7 @@ final class SqflitePersistence {
       }
       batch.insert(_rootFields, {
         'field': field,
-        'json': jsonEncode(value),
+        'data': encodeRow(value, codec),
         'updated_at': now,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -476,6 +623,7 @@ final class SqflitePersistence {
     try {
       await flush();
     } finally {
+      _openDatabases.remove(_db);
       await _db.close();
     }
   }
@@ -492,18 +640,22 @@ final class SqflitePersistence {
   }
 
   /// Creates the tables, or recreates them when the stored format version,
-  /// key field or schema hash differ (or when [force]d). True when the
-  /// database was (re)made.
-  static Future<bool> _prepare(
+  /// key field or codec differ, or the schema hash with no fields to migrate
+  /// along; then makes [owner] the database's writer. `migrateFrom` is the
+  /// fields the rows were written under when they are to be migrated.
+  static Future<({bool wiped, SchemaFields? migrateFrom})> _prepare(
     Database db,
-    SlingSchema<Accessor, Accessor> schema, {
-    bool force = false,
-  }) async {
+    SlingSchema<Accessor, Accessor> schema,
+    SqfliteCodec? codec,
+    String owner,
+  ) async {
+    final fields = schema.fields;
     final expected = {
       'format_version': '$sqfliteFormatVersion',
       'key_field': schema.keyField,
-      'schema_hash': schema.hash ?? '',
+      'codec': codec?.id ?? '',
     };
+    final hash = schema.hash ?? '';
     await db.execute(
       'CREATE TABLE IF NOT EXISTS $_meta '
       '(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
@@ -512,51 +664,135 @@ final class SqflitePersistence {
       for (final row in await db.query(_meta))
         row['key']! as String: row['value']! as String,
     };
-    if (!force && mapEquals(stored, expected)) return false;
+    final compatible = expected.entries.every((e) => stored[e.key] == e.value);
+    final storedFields = stored['schema_fields'];
+    final ({bool wiped, SchemaFields? migrateFrom}) result;
+    if (compatible && stored['schema_hash'] == hash) {
+      result = (wiped: false, migrateFrom: null);
+    } else if (compatible && storedFields != null && fields != null) {
+      // Meta moves to the new schema once the rows are (see _storeLoad).
+      result = (wiped: false, migrateFrom: _decodeFields(storedFields));
+    } else {
+      result = (wiped: true, migrateFrom: null);
+    }
     await db.transaction((txn) async {
-      final batch = txn.batch()
-        ..execute('DROP TABLE IF EXISTS $_entities')
-        ..execute('DROP TABLE IF EXISTS $_rootFields')
-        ..execute(
-          'CREATE TABLE $_entities (key TEXT PRIMARY KEY, '
-          'json TEXT NOT NULL, updated_at INTEGER NOT NULL)',
-        )
-        ..execute(
-          'CREATE TABLE $_rootFields (field TEXT PRIMARY KEY, '
-          'json TEXT NOT NULL, updated_at INTEGER NOT NULL)',
-        )
-        ..delete(_meta);
-      for (final e in expected.entries) {
-        batch.insert(_meta, {'key': e.key, 'value': e.value});
+      final batch = txn.batch();
+      if (result.wiped) {
+        batch
+          ..execute('DROP TABLE IF EXISTS $_entities')
+          ..execute('DROP TABLE IF EXISTS $_rootFields')
+          ..execute(
+            'CREATE TABLE $_entities (key TEXT PRIMARY KEY, '
+            'data BLOB NOT NULL, updated_at INTEGER NOT NULL)',
+          )
+          ..execute(
+            'CREATE TABLE $_rootFields (field TEXT PRIMARY KEY, '
+            'data BLOB NOT NULL, updated_at INTEGER NOT NULL)',
+          )
+          ..delete(_meta);
+        for (final MapEntry(:key, :value) in {
+          ...expected,
+          'schema_hash': hash,
+          if (fields != null) 'schema_fields': jsonEncode(fields),
+        }.entries) {
+          batch.insert(_meta, {'key': key, 'value': value});
+        }
       }
+      batch.insert(_meta, {
+        'key': 'owner',
+        'value': owner,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       await batch.commit(noResult: true);
     });
-    return true;
+    return result;
   }
 
+  static SchemaFields _decodeFields(String json) => {
+    for (final MapEntry(:key, :value)
+        in (jsonDecode(json) as Map<String, Object?>).entries)
+      key: (value! as Map<String, Object?>).cast<String, String>(),
+  };
+
   static Future<StoredRows> _readRows(Database db) async {
-    final entities = await db.query(_entities, columns: ['key', 'json']);
+    final entities = await db.query(_entities, columns: ['key', 'data']);
     final roots = await db.query(
       _rootFields,
-      columns: ['field', 'json', 'updated_at'],
+      columns: ['field', 'data', 'updated_at'],
     );
     return StoredRows(
       entityKeys: [for (final r in entities) r['key']! as String],
-      entityJson: [for (final r in entities) r['json']! as String],
+      entityData: [for (final r in entities) r['data']],
       rootFields: [for (final r in roots) r['field']! as String],
-      rootJson: [for (final r in roots) r['json']! as String],
+      rootData: [for (final r in roots) r['data']],
       rootUpdatedAt: [for (final r in roots) r['updated_at']! as int],
     );
   }
 
-  static Future<void> _deleteDropped(Database db, LoadedCache loaded) async {
-    final fields = [...loaded.expiredRootFields, ...loaded.cappedRootFields];
-    if (fields.isEmpty && loaded.unreachableEntities.isEmpty) return;
+  /// Deletes what [loaded] left out, rewrites the rows the migration pruned
+  /// and, after a migration, records the schema the rows now follow.
+  static Future<void> _storeLoad(
+    Database db,
+    LoadedCache loaded, {
+    required SlingSchema<Accessor, Accessor>? migratedTo,
+  }) async {
+    final fields = [
+      ...loaded.expiredRootFields,
+      ...loaded.cappedRootFields,
+      ...loaded.incompatibleRootFields,
+    ];
+    final entities = [
+      ...loaded.unreachableEntities,
+      ...loaded.incompatibleEntities,
+    ];
+    if (fields.isEmpty && entities.isEmpty && migratedTo == null) return;
     await db.transaction((txn) async {
       final batch = txn.batch();
       _deleteRows(batch, _rootFields, 'field', fields);
-      _deleteRows(batch, _entities, 'key', loaded.unreachableEntities);
+      _deleteRows(batch, _entities, 'key', entities);
+      // `updated_at` stays: the data is as old as it was.
+      for (final MapEntry(:key, :value) in loaded.rewrittenRootFields.entries) {
+        batch.update(
+          _rootFields,
+          {'data': value},
+          where: 'field = ?',
+          whereArgs: [key],
+        );
+      }
+      for (final MapEntry(:key, :value) in loaded.rewrittenEntities.entries) {
+        batch.update(
+          _entities,
+          {'data': value},
+          where: 'key = ?',
+          whereArgs: [key],
+        );
+      }
+      if (migratedTo != null) {
+        for (final MapEntry(:key, :value) in {
+          'schema_hash': migratedTo.hash ?? '',
+          'schema_fields': jsonEncode(migratedTo.fields),
+        }.entries) {
+          batch.insert(_meta, {
+            'key': key,
+            'value': value,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
       await batch.commit(noResult: true);
     });
   }
+}
+
+/// Reported to `onError` by a [SqflitePersistence] whose database was opened
+/// again elsewhere (another isolate or process): the newer instance is the
+/// writer, this one stops saving ([SqflitePersistence.superseded]).
+final class SqfliteSupersededException implements Exception {
+  const SqfliteSupersededException(this.path);
+
+  /// The database file.
+  final String path;
+
+  @override
+  String toString() =>
+      'SqfliteSupersededException: $path was opened by another '
+      'SqflitePersistence; this one no longer saves.';
 }

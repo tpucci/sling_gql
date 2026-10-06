@@ -78,9 +78,11 @@ size. That is why the *store* is bounded, not the reads.
 
 | Table | Row | Columns |
 | --- | --- | --- |
-| `sling_entities` | one per entity (`Launch:launch-181`) | `key`, `json`, `updated_at` (ms) |
-| `sling_root_fields` | one per `ROOT_QUERY` field (`launches_c0y93u18lig6v`) | `field`, `json`, `updated_at` (ms) |
-| `sling_meta` | format version, key field, schema hash | `key`, `value` |
+| `sling_entities` | one per entity (`Launch:launch-181`) | `key`, `data`, `updated_at` (ms) |
+| `sling_root_fields` | one per `ROOT_QUERY` field (`launches_c0y93u18lig6v`) | `field`, `data`, `updated_at` (ms) |
+| `sling_meta` | format version, key field, codec id, schema hash and fields, writer | `key`, `value` |
+
+`data` is the row's JSON as text, or the [codec](#encryption)'s bytes.
 
 The query root is split per field because every response touches it: a page of launches
 rewrites its own root field (and the entities that changed), not every other query the app
@@ -111,10 +113,15 @@ next launch trims it.
 without an id, scalar root fields) and the number of root fields are bounded by `maxAge`
 alone — and not at all when it is `null`.
 
-A store whose rows cannot be decoded (a damaged page, a hand edit) is wiped at open and the
-error reported to `onError`: it is a cache, starting cold beats failing every launch. A file
-that is not a database at all makes `open` throw; the example app then deletes it
-(`deleteDatabase`) and tries once more, falling back to an in-memory cache.
+### Corruption
+
+A file that is not a database (a damaged header, a truncated write) or a row that cannot be
+decoded (a damaged page, a hand edit, a codec that throws) never fails the launch: `open`
+reports the error to `onError`, deletes the file, creates a new one and starts cold
+(`persistence.loaded.recovered`). It is a cache, starting cold beats failing every launch.
+Only a failure to create that fresh database (permissions, a full disk) makes `open` throw,
+and so does a database another connection keeps locked (`SQLITE_BUSY` / `SQLITE_LOCKED`):
+that file is healthy and left alone. The example app then falls back to an in-memory cache.
 
 ## Restored data is stale
 
@@ -129,21 +136,85 @@ cache is never fetched again until something evicts it or calls `refetch()`. Giv
 (or the screens that matter) a `maxAge` when you persist.
 </Aside>
 
-## Invalidation
+## Schema changes: migration
 
 `sling_gql_gen` emits `slingSchema.hash`, a 64-bit FNV-1a of the generated file. It changes
 when the introspection, `--key-field`, a `--scalar` mapping or the generator's output
 changes — any of which can change cache aliases, keyed types and lookups — and is the same
-on every run and platform. The store records it with the key field and its own format
-version; a mismatch at open **wipes the database** and the app starts cold, instead of
-reading entities written by another version of the code.
+on every run and platform. It also emits `slingSchema.fields`: every field of every object
+type with its signature (arguments with their defaults, then the type), the query root as
+`ROOT_QUERY`:
 
-## Logout, encryption, other platforms
+```dart
+'Rocket': {'id': 'ID!', 'name': 'String!', 'launches': '(first: Int = 10, after: String) LaunchConnection!', …},
+```
+
+The store records both. When the app starts with another hash, the store is **migrated**
+rather than wiped: each cached field is kept only when its field has the same signature in
+both schemas, so the new code never reads a value of the wrong shape.
+
+- An entity whose type is gone is dropped (references to it read as missing).
+- An entity or inline object loses the fields that are gone or changed (renamed, another
+  type, other arguments or defaults): those read as missing and are fetched again.
+- A root field whose field is gone or changed is dropped, and so is a field (root or not)
+  holding an inline object whose type is gone.
+- Custom scalars are kept as they are; `--scalar` mappings parse the stored wire value.
+
+Kept rows keep their age (`maxAge`), and restored data is revalidated as usual
+([below](#restored-data-is-stale)). `persistence.loaded` reports `migrated` and the
+`incompatibleRootFields` / `incompatibleEntities` it dropped.
+
+Another key field, another format version (the package's tables changed), another codec id,
+or a hash change where either side has no `fields` (a hand-written schema, a store from an
+older version) still **wipes the database** and the app starts cold.
+
+## One writer per file
+
+A database file has one `SqflitePersistence` writing to it at a time:
+
+- **In one isolate**, opening a path that is already open (and not `close()`d) throws a
+  `StateError`: sqflite shares one connection per path, so a second instance would share
+  (and close) the first one's.
+- **Across isolates and processes** (a background isolate, an app extension), the last
+  `open` wins. It records itself as the writer in `sling_meta`; every save checks that
+  record inside its write transaction, so the previous instance stores nothing more once it
+  is taken over. It notices at its next save, reports a `SqfliteSupersededException` to its
+  `onError` once, and `persistence.superseded` turns true; its cache stays usable,
+  unpersisted. Reopen it (after `close()`) to read what the new writer stored.
+
+## Encryption
+
+Pass a `codec:` to transform every row value: an `SqfliteCodec` has an `id` and synchronous
+`encode` / `decode` of the row's UTF-8 JSON bytes, so any cipher the app already uses fits
+(the package ships none and depends on none). Rows are then stored as blobs.
+
+```dart
+final class AesGcmCodec implements SqfliteCodec {
+  AesGcmCodec(this.key, this.keyId); // key from the platform keystore
+  final Uint8List key;
+  final String keyId;
+
+  @override
+  String get id => 'aes-gcm:$keyId';
+  @override
+  Uint8List encode(Uint8List bytes) => /* nonce + seal(bytes) */;
+  @override
+  Uint8List decode(Uint8List bytes) => /* open(bytes) */;
+}
+```
+
+The `id` is stored: a store written under another id (another cipher, a rotated key) or
+without a codec is wiped at open instead of decoded. A `decode` that throws (a wrong key, a
+tampered row) is [corruption](#corruption): reported, wiped, cold start. With
+`hydrateInIsolate` the codec runs in the background isolate, so it must be sendable there
+(plain Dart fields, no native handles). For whole-file encryption, indexes and metadata
+included, pass an SQLCipher-backed `DatabaseFactory` (`databaseFactory:`) instead; the
+adapter only uses the `sqflite_common` API.
+
+## Logout, other platforms
 
 - **Logout:** `await persistence.clear()` empties the cache (every mounted query refetches)
   and the database.
-- **Encryption:** pass an SQLCipher-backed `DatabaseFactory` (`databaseFactory:`); the
-  adapter only uses the `sqflite_common` API.
 - **Other platforms / tests:** the same parameter takes `databaseFactoryFfi`
   (`sqflite_common_ffi`, desktop and host tests) or `sqflite_common_ffi_web`.
   `inMemoryDatabasePath` gives a store that lasts one run.

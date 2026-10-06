@@ -56,7 +56,7 @@ query {
 | Subscriptions (`client.subscribe((s) => s.launchStatusChanged?..status)`, `SubscriptionBuilder`) | ✅ GraphQL over SSE by default, `subscriptionTransport:` to swap; events normalized into the same entities |
 | List rules (`ListRule`: "`launches(filter:)` holds a launch iff its status matches") | ✅ cached lists gain/lose entities on mutations, subscription events and setters; query responses only remove |
 | Fetch policies (`cacheAndNetwork`, `networkOnly`), `maxAge` stale-while-revalidate | ✅ per widget or client-wide, `state.isStale`, soft `revalidate()` |
-| Persistence (`SqflitePersistence.open(path, schema: slingSchema)`) | ✅ `packages/sling_gql_sqflite`: SQLite write-behind copy saved as `changesSince` deltas, bounded by age and entity count, wiped on a new `slingSchema.hash` |
+| Persistence (`SqflitePersistence.open(path, schema: slingSchema)`) | ✅ `packages/sling_gql_sqflite`: SQLite write-behind copy saved as `changesSince` deltas, bounded by age and entity count, migrated along `slingSchema.fields` on a new `slingSchema.hash`, corruption-safe, optional row codec (encryption) |
 | Unions / interfaces (`hit.asLaunch`, `hit.when(launch: …, rocket: …)`) | ✅ inline fragments, every branch recorded on the skeleton; example Search tab |
 | `flutter_hooks` (`useSlingQuery`, `useSlingMutation`, `useSlingSubscription`) | ✅ `packages/sling_gql_hooks`, same scopes as the builders |
 
