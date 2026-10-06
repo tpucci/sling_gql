@@ -34,7 +34,7 @@ retry, `SlingAuth`) done; #71 (Android, graphql-http backend, soak) done —
 it found and fixed a revalidation loop on a restored cache (rows' fields
 never refetched); follow-ups #74–#76. #72 (persistence migration +
 offline mutation queue) done. #73 (API audit, versioning policy, Upgrading to
-1.0, SECURITY.md, CI benchmarks) done; left: the 1.0.0 release itself.
+1.0, SECURITY.md, CI benchmarks) done. 2026-10-06: all six packages released as 1.0.0 on pub.dev.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -56,10 +56,7 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P1 — production readiness (2026-10 review, in this order)
 
-#50, #70, #71, #72 and #73 done (see Done). Left: release 1.0.0 of all six
-packages (checklist in `doc/api-audit-1.0.md` / the #73 notes: explicit
-`melos version -V <pkg>:1.0.0`, raise internal constraints to `^1.0.0`,
-publish `sling_gql` first). Then:
+#50 and #70–#73 done (see Done); 1.0.0 released 2026-10-06. Next:
 
 74. **Runtime — `accept: application/graphql-response+json`** on queries
     and mutations (found in #71): spec-compliant servers (graphql-http)
