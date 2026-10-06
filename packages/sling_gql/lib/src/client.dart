@@ -44,6 +44,7 @@ class SlingSchema<Q extends Accessor, M extends Accessor> {
     this.subscription,
     this.keyField = 'id',
     this.hash,
+    this.fields,
   });
 
   final RootFactory<Q> query;
@@ -68,10 +69,22 @@ class SlingSchema<Q extends Accessor, M extends Accessor> {
   /// introspection it read, `--key-field`, `--scalar` mappings and the
   /// generator's own version); `null` for a hand-written schema.
   ///
-  /// The runtime never reads it. A persisted cache stores it and drops its
-  /// copy when the app starts with another hash: cache aliases, keyed types
-  /// and lookups may have changed with the code.
+  /// The runtime never reads it. A persisted cache stores it and, when the
+  /// app starts with another hash, migrates its copy along [fields] (or
+  /// drops it without them): cache aliases, keyed types and lookups may
+  /// have changed with the code.
   final String? hash;
+
+  /// The fields of the schema's object, interface and union types, by
+  /// GraphQL type name, each with its signature: `'(id: ID!) Launch'`,
+  /// `'[String!]!'` (arguments with their defaults, then the type). The
+  /// query root is listed as `ROOT_QUERY`, its cache key. The generator
+  /// emits it; `null` for a hand-written schema.
+  ///
+  /// The runtime never reads it. A persisted cache stores it next to [hash]
+  /// and, when the hash changes, keeps the cached fields whose signature did
+  /// not change instead of dropping everything.
+  final Map<String, Map<String, String>>? fields;
 }
 
 /// True when asserts are enabled (debug builds and tests).

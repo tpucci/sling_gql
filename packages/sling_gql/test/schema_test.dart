@@ -73,6 +73,19 @@ void main() {
     },
   );
 
+  test('SlingSchema.fields carries the generated field signatures, null by '
+      'default', () {
+    const schema = SlingSchema<Query, Mutation>(
+      query: Query.root,
+      fields: {
+        'ROOT_QUERY': {'me': 'User'},
+        'User': {'id': 'ID!', 'name': 'String'},
+      },
+    );
+    expect(schema.fields?['User'], {'id': 'ID!', 'name': 'String'});
+    expect(_uuidSchema.fields, isNull);
+  });
+
   test('a cache normalizing on another key field fails an assert', () {
     expect(
       () => SlingClient<Query>(
