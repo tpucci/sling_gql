@@ -40,7 +40,8 @@ Flags:
 | `--schema` | one of | Path to an introspection JSON file (the standard `{"__schema": {...}}` result). |
 | `-H`, `--header` | no | HTTP header for `--endpoint`, repeatable: `-H "Authorization: Bearer …"`. |
 | `--out` | yes | Path of the Dart file to write. Parent directories are created as needed. |
-| `--part-of-import` | no | Overrides the `sling_gql` import. Defaults to `package:sling_gql/sling_gql.dart`. |
+| `--runtime-import` | no | Overrides the `sling_gql` import. Defaults to `package:sling_gql/sling_gql.dart`. |
+| `--key-field` | no | Field that makes an object type a normalized entity (`__typename:<key>`). Defaults to `id`. |
 | `--scalar` | no, repeatable | Custom scalar mapping: `Name=DartType[:converterExpr]`. See [Scalar mapping](#scalar-mapping) below. |
 
 The generator writes the file, then shells out to `dart format`. A

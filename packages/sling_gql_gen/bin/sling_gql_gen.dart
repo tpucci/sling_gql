@@ -23,9 +23,9 @@ Future<void> main(List<String> arguments) async {
       mandatory: true,
     )
     ..addOption(
-      'part-of-import',
+      'runtime-import',
       help:
-          'Override the sling_gql import '
+          'Override the sling_gql import of the generated file '
           '(default: package:sling_gql/sling_gql.dart).',
     )
     ..addOption(
@@ -68,7 +68,7 @@ Future<void> main(List<String> arguments) async {
   final endpoint = results['endpoint'] as String?;
   final outPath = results['out'] as String;
   final importPath =
-      results['part-of-import'] as String? ??
+      results['runtime-import'] as String? ??
       'package:sling_gql/sling_gql.dart';
   final keyField = results['key-field'] as String;
 

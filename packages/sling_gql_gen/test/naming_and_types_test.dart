@@ -1,4 +1,8 @@
 import 'package:sling_gql_gen/sling_gql_gen.dart';
+// The emitter's helpers: not exported by the library.
+import 'package:sling_gql_gen/src/naming.dart';
+import 'package:sling_gql_gen/src/scalars.dart';
+import 'package:sling_gql_gen/src/type_resolver.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -3,9 +3,8 @@
 library;
 
 export 'src/emitter.dart' show generate, generatedCodeHash;
-export 'src/naming.dart';
-export 'src/scalars.dart';
-export 'src/schema.dart';
-export 'src/type_ref.dart';
-export 'src/type_resolver.dart';
-export 'src/introspection_query.dart';
+export 'src/introspection_query.dart' show introspectionQuery;
+export 'src/scalars.dart' show ScalarMapping;
+export 'src/schema.dart'
+    show IntrospectionSchema, GqlType, GqlField, GqlInputValue, GqlEnumValue;
+export 'src/type_ref.dart' show TypeRef;

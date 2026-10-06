@@ -28,12 +28,18 @@ go digging for why an identifier looks the way it does.
 
 Flags:
 
-- `--schema` (required): path to a GraphQL introspection JSON file, i.e. the
-  standard `{"__schema": {...}}` result of the introspection query.
+- `--schema` (one of `--schema` / `--endpoint`): path to a GraphQL
+  introspection JSON file, i.e. the standard `{"__schema": {...}}` result
+  of the introspection query.
+- `--endpoint` (one of `--schema` / `--endpoint`): GraphQL URL to introspect
+  instead; `-H` / `--header` (repeatable) adds HTTP headers to that request
+  (`-H "Authorization: Bearer …"`).
 - `--out` (required): path of the Dart file to generate. Parent directories
   are created as needed.
-- `--part-of-import` (optional): overrides the `sling_gql` import in the
+- `--runtime-import` (optional): overrides the `sling_gql` import in the
   generated file. Defaults to `package:sling_gql/sling_gql.dart`.
+- `--key-field` (optional, default `id`): the field that makes an object
+  type a normalized entity (see below).
 - `--scalar` (optional, repeatable): custom scalar mapping,
   `Name=DartType[:converterExpr]`. `--scalar DateTime=DateTime` uses the
   built-in `DateTime.parse`/`.toIso8601String()` converter; a `DartType`
