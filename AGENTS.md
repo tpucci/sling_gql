@@ -19,6 +19,9 @@ on the code.
   (scheduled launches, favourites), so a long-running server drifts
   (e.g. `totalCount` 187 instead of 181) and `app_test.dart` fails on
   counts. `scripts/with-mock-api.mjs` *reuses* a server already on :4000.
+  The example scripts run test files with `--concurrency=1` (they share
+  that mutable server; concurrent files raced on CI): keep it, and never
+  assert fixed launch names that another test file can change.
   When the example tests fail on data/counts and a server was already
   running, restart it (kill the `npm start` / `node server.mjs` on :4000,
   rerun the tests so the script starts a fresh one, then restart
