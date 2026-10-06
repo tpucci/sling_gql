@@ -89,7 +89,7 @@ SubscriptionBuilder<Subscription>(
   connection dropped, a reopen is scheduled), `state.isActive` (either),
   `state.eventCount` / `hasEvent`, `state.error` (a partial error or the
   failure that dropped the connection, cleared by the next event), and
-  `state.retry()` for a "reconnect now" tap.
+  `state.reconnect()` for a "reconnect now" tap.
 
 The connection opens at the end of the first frame — opening a socket is a
 side effect, not something a `build` should do — and closes in `dispose`.

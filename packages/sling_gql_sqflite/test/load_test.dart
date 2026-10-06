@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sling_gql/sling_gql.dart';
 import 'package:sling_gql_sqflite/src/load.dart';
 
+// The runtime's alias function (`Selection` is `@internal` to sling_gql):
+// first-party test code checking the migration against real aliases.
+// ignore_for_file: invalid_use_of_internal_member
+
 /// The cache alias of [field] called with [args] (as the runtime prints it).
 String alias(String field, Map<String, Object?> args) => Selection.root('query')
     .child(field, {for (final e in args.entries) e.key: Arg('ID!', e.value)})

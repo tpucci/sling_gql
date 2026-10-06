@@ -42,7 +42,7 @@ import 'debug_label.dart';
 ///
 /// `mutate` is the same function across builds (safe as a `useCallback` /
 /// `useEffect` key). The mutation root is [root], or the nearest
-/// [SlingScope]'s (`mutationRoot:` / `schema:`). [debugLabel] names the
+/// [SlingScope]'s (its `schema:`, or its client's). [debugLabel] names the
 /// calls in `SlingRequest.scopes`; it defaults (debug builds) to this
 /// widget's type.
 (Mutate<M>, MutationState) useSlingMutation<M extends Accessor>({

@@ -202,7 +202,7 @@ void main() {
 
     events.addError(StateError('gone again'));
     await tester.pump(Duration.zero);
-    last.retry();
+    last.reconnect();
     await tester.pump();
     expect(connections, 3);
     expect(last.isConnected, isTrue);

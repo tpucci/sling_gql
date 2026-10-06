@@ -2,6 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sling_gql/sling_gql.dart';
 import 'package:sling_gql_test/sling_gql_test.dart';
 
+// Builds a selection tree with the runtime's `@internal` printer: the parser
+// is checked against exactly what the client sends.
+// ignore_for_file: invalid_use_of_internal_member
+
 void main() {
   test('parses what the runtime prints: aliases, variables, nesting', () {
     final root = Selection.root('query');

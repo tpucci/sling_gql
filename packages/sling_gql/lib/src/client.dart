@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
+import 'package:meta/meta.dart';
 
 import 'accessor.dart';
 import 'auth.dart';
@@ -153,6 +154,7 @@ class SlingRequest {
   /// `__typename`/key fields the printer adds.
   final int fieldCount;
 
+  /// When the operation was first sent (the client's clock).
   final DateTime startedAt;
 
   final Stopwatch _stopwatch = Stopwatch()..start();
@@ -187,6 +189,8 @@ class SlingRequest {
   int get attempts => _attempts;
   int _attempts = 0;
 
+  /// The response was processed, the request failed or was abandoned, or
+  /// (a subscription) the connection closed. The record no longer changes.
   bool get isDone => _done.isCompleted;
 
   /// Completes (never with an error) once the request is done.
@@ -292,9 +296,10 @@ enum FetchPolicy {
 ///
 /// The scope owns the selection tree recorded during its last run, so it can
 /// be re-fetched wholesale (`refetch`) and so the client knows which scopes to
-/// notify when data lands.
+/// notify when data lands. Created by [SlingClient.createScope], which
+/// registers it with the client; [dispose] it when its owner goes away.
 class QueryScope<Q extends Accessor> implements Recorder {
-  QueryScope(
+  QueryScope._(
     this.client, {
     required this.onChanged,
     this.scheduler = microtaskScheduler,
@@ -1097,7 +1102,13 @@ class CacheList<R extends Accessor> {
 }
 
 /// Where a [ListRule] inserts an entity that newly belongs to a list.
-enum ListPosition { prepend, append }
+enum ListPosition {
+  /// At the start (newest first lists).
+  prepend,
+
+  /// At the end.
+  append,
+}
 
 /// Keeps cached lists of entities consistent with the entities themselves:
 /// *"`launches(filter:)` contains a launch iff its status matches the
@@ -1175,10 +1186,12 @@ class ListRule<E extends Accessor> {
   /// Whether [entity] belongs in the list selected with [args].
   final bool Function(Map<String, Object?> args, E entity) belongs;
 
+  /// Where an entity that newly belongs to a list is inserted.
   final ListPosition position;
 
   /// [belongs] with the entity typed; called by the client on the accessor
   /// [ctor] built (so the cast always holds).
+  @internal
   bool evaluate(Map<String, Object?> args, Accessor entity) =>
       belongs(args, entity as E);
 }
@@ -1447,6 +1460,10 @@ class SlingSubscription<T> {
 
   /// Called when [isConnected] / [isReconnecting] change (the connection
   /// opened, dropped, or was reopened) — what a widget rebuilds on.
+  ///
+  /// One listener: `SubscriptionBuilder` and `useSlingSubscription` set it
+  /// on the subscription they own. Code that opened the subscription itself
+  /// may set it; nothing else should.
   void Function()? onStatusChanged;
 
   /// Each event's value, computed from the cache (see [SlingSubscription]).
@@ -1744,6 +1761,7 @@ class SlingClient<Q extends Accessor> {
            Cache(normalization: schema?.normalization ?? const Normalization()),
        _listRules = List.of(listRules),
        _http = httpClient ?? http.Client(),
+       _ownsHttp = httpClient == null,
        // ignore: prefer_initializing_formals
        _transport = transport,
        // ignore: prefer_initializing_formals
@@ -1757,7 +1775,12 @@ class SlingClient<Q extends Accessor> {
     _restoreQueue();
   }
 
+  /// The GraphQL endpoint every query, mutation and subscription is POSTed
+  /// to.
   final Uri endpoint;
+
+  /// Builds the typed query root ([Q]) for a recorder: `schema.query`, or
+  /// the `rootFactory:` given for a hand-written schema.
   final RootFactory<Q> rootFactory;
 
   /// The generated `slingSchema`, when the client was built from it.
@@ -1766,6 +1789,9 @@ class SlingClient<Q extends Accessor> {
   /// own `schema:`.
   final SlingSchema<Q, Accessor>? schema;
 
+  /// The normalized store every scope reads from and every response is
+  /// written to: the `cache:` given (a persisted one, say), or a fresh one
+  /// keyed on `schema.keyField`. Typed access goes through [cacheScope].
   final Cache cache;
 
   /// Static headers added to every request (before [transport] sees it).
@@ -2142,6 +2168,10 @@ class SlingClient<Q extends Accessor> {
   int _authGeneration = 0;
   Future<void>? _authRefresh;
   final http.Client _http;
+
+  /// [_http] was created here (no `httpClient:` passed): [dispose] closes
+  /// it. One passed in belongs to the caller.
+  final bool _ownsHttp;
   final Transport? _transport;
 
   /// The [Transport] every request goes through; sends over [httpClient]
@@ -2504,6 +2534,11 @@ class SlingClient<Q extends Accessor> {
   /// has elapsed.
   DateTime? _failedAt;
 
+  /// A new [QueryScope] registered with this client: what `QueryBuilder`
+  /// and `useSlingQuery` run their builds in. [onChanged] is called when
+  /// data the scope read changed (re-run it); [scheduler] decides when its
+  /// misses are flushed. The other arguments default to the client's
+  /// (see [QueryScope]). Dispose the scope when its owner goes away.
   QueryScope<Q> createScope({
     required void Function() onChanged,
     FlushScheduler scheduler = microtaskScheduler,
@@ -2513,7 +2548,7 @@ class SlingClient<Q extends Accessor> {
     ErrorPolicy? errorPolicy,
     Duration? timeout,
   }) {
-    final scope = QueryScope<Q>(
+    final scope = QueryScope<Q>._(
       this,
       onChanged: onChanged,
       scheduler: scheduler,
@@ -3392,8 +3427,9 @@ class SlingClient<Q extends Accessor> {
 
   /// Closes every open subscription, aborts the query batch in flight, stops
   /// replaying the mutation queue (what it holds stays in [mutationQueue];
-  /// the futures of queued calls never complete) and closes the HTTP
-  /// client.
+  /// the futures of queued calls never complete) and closes the HTTP client
+  /// the client created itself. An `httpClient:` passed to the constructor
+  /// is left open: it belongs to the caller.
   void dispose() {
     _disposed = true;
     _queueTimer?.cancel();
@@ -3404,7 +3440,7 @@ class SlingClient<Q extends Accessor> {
     _inflightCancel?.cancel();
     _requests.close();
     _queuedMutationFailed.close();
-    _http.close();
+    if (_ownsHttp) _http.close();
   }
 }
 

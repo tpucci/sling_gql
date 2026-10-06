@@ -2,6 +2,9 @@
 // schema. Not a CI test: run explicitly with
 //   flutter test benchmark/bench_test.dart
 // Numbers are JIT (test VM), not AOT — use them for ratios, not absolutes.
+//
+// Measures the runtime's internals (printer, writeResponse) directly.
+// ignore_for_file: invalid_use_of_internal_member
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -119,7 +122,6 @@ void main() {
       final data =
           (jsonDecode(body) as Map<String, Object?>)['data']
               as Map<String, Object?>;
-      // ignore: invalid_use_of_internal_member
       client.cache.writeResponse('query', data);
     });
 

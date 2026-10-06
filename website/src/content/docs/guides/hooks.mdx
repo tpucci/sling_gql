@@ -149,7 +149,7 @@ class LiveStatus extends HookWidget {
 the selector runs once to record the document, the connection opens at the
 end of the first frame and closes when the widget is disposed, each event is
 normalized into the cache before `onEvent` runs and the widget rebuilds.
-`retryAfter:` reopens a dropped connection; `state.retry()` does it now.
+`retryAfter:` reopens a dropped connection; `state.reconnect()` does it now.
 
 <Aside>
 Give the subscription's type argument explicitly (`useSlingSubscription<Subscription>`):

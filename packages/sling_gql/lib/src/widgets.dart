@@ -46,32 +46,25 @@ String? debugOwnerLabel(BuildContext context) {
 /// Provides a [SlingClient] to the widget tree.
 ///
 /// [MutationBuilder] and [SubscriptionBuilder] resolve their roots from here
-/// when they aren't given an explicit `root:` — pass either [mutationRoot]
-/// directly (the generated `Mutation.root` constructor) or [schema] (the
-/// generated `slingSchema` constant, which also carries the query and
-/// subscription roots); passing both is an error. With neither, the roots
-/// come from the client's own `SlingClient.schema`, if it was built from one.
+/// when they aren't given an explicit `root:`: from [schema] (the generated
+/// `slingSchema` constant) or, without one, from the client's own
+/// `SlingClient.schema`, if it was built from one.
 class SlingScope<Q extends Accessor> extends StatelessWidget {
   const SlingScope({
     super.key,
     required this.client,
     required this.child,
-    this.mutationRoot,
     this.schema,
-  }) : assert(
-         mutationRoot == null || schema == null,
-         'SlingScope: pass either mutationRoot: or schema:, not both.',
-       );
+  });
 
+  /// The client every sling widget below uses.
   final SlingClient<Q> client;
+
   final Widget child;
 
-  /// The generated `Mutation.root` constructor, for [MutationBuilder]s below
-  /// that don't set `root:` themselves. Mutually exclusive with [schema].
-  final RootFactory<Accessor>? mutationRoot;
-
-  /// The generated `slingSchema` constant. Equivalent to passing its
-  /// `.mutation` as [mutationRoot]. Mutually exclusive with [mutationRoot].
+  /// The generated `slingSchema` constant, for the mutation and
+  /// subscription roots of the builders below that don't set `root:`
+  /// themselves. Defaults to `client.schema`.
   final SlingSchema<Q, Accessor>? schema;
 
   /// The client, typed with its query root.
@@ -92,8 +85,8 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
     return scope!.client;
   }
 
-  /// The mutation root provided by the nearest [SlingScope], via either
-  /// [mutationRoot] or [schema]. Used by [MutationBuilder] when it isn't
+  /// The mutation root provided by the nearest [SlingScope]'s [schema] (or
+  /// its client's). Used by [MutationBuilder] when it isn't
   /// given an explicit `root:`.
   static RootFactory<M> mutationRootOf<M extends Accessor>(
     BuildContext context,
@@ -105,10 +98,10 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
     assert(
       root != null && root is RootFactory<M>,
       root == null
-          ? 'MutationBuilder<$M> has no root: and the nearest SlingScope was '
-                'not given mutationRoot: or schema: — pass one of the three.'
+          ? 'MutationBuilder<$M> has no root: and the nearest SlingScope has '
+                'no schema: (nor a client built with one) — pass one of them.'
           : 'SlingScope above provides a mutation root for a different type '
-                'than $M — check schema:/mutationRoot: matches MutationBuilder<$M>.',
+                'than $M — check schema: matches MutationBuilder<$M>.',
     );
     return root as RootFactory<M>;
   }
@@ -137,7 +130,7 @@ class SlingScope<Q extends Accessor> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _InheritedClient(
     client: client,
-    mutationRoot: mutationRoot ?? (schema ?? client.schema)?.mutation,
+    mutationRoot: (schema ?? client.schema)?.mutation,
     subscriptionRoot: (schema ?? client.schema)?.subscription,
     child: child,
   );
@@ -522,7 +515,7 @@ typedef MutationWidgetBuilder<M extends Accessor> = Widget Function(
 /// ```
 ///
 /// The mutation root is resolved from the nearest [SlingScope] (its
-/// `mutationRoot:` or `schema:`) unless [root] is given explicitly, which
+/// `schema:`, or its client's) unless [root] is given explicitly, which
 /// always wins.
 ///
 /// The response is normalized into the shared cache, so the widgets reading
@@ -664,7 +657,7 @@ class SubscriptionState {
     required this.isReconnecting,
     required this.eventCount,
     required this.error,
-    required this.retry,
+    required this.reconnect,
   });
 
   /// The subscription is alive: connected, or waiting to reconnect. False
@@ -685,9 +678,9 @@ class SubscriptionState {
   /// failure that dropped the connection; cleared by the next event.
   final SlingException? error;
 
-  /// Reopens a dropped connection now (a retry button). A no-op while
+  /// Reopens a dropped connection now (a "reconnect" button). A no-op while
   /// connected.
-  final void Function() retry;
+  final void Function() reconnect;
 
   /// At least one event has been written to the cache.
   bool get hasEvent => eventCount > 0;
@@ -728,7 +721,7 @@ typedef SubscriptionWidgetBuilder<S extends Accessor> = Widget Function(
 /// The connection opens at the end of the first frame (like a query's
 /// flush), so [SubscriptionState.isActive] is false during that build. A
 /// dropped connection is reopened after [retryAfter] (default:
-/// `SlingClient.subscriptionRetryAfter`) — [SubscriptionState.retry] does
+/// `SlingClient.subscriptionRetryAfter`) — [SubscriptionState.reconnect] does
 /// it at once — or ends the subscription when there is none.
 ///
 /// The root is resolved from the nearest [SlingScope]'s `schema:` unless
@@ -851,7 +844,7 @@ class _SubscriptionBuilderState<S extends Accessor>
       isReconnecting: _subscription?.isReconnecting ?? false,
       eventCount: _subscription?.eventCount ?? 0,
       error: _error,
-      retry: () {
+      reconnect: () {
         _subscription?.reconnect();
         if (mounted) setState(() {});
       },

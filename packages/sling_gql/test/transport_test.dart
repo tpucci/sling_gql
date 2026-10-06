@@ -20,6 +20,21 @@ MockClient _recording(List<http.Request> seen, {int failFirst = 0}) {
   });
 }
 
+/// A client that counts [close] calls; requests answer `me`.
+class _ClosingClient extends http.BaseClient {
+  int closed = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(
+        Stream.value(utf8.encode(jsonEncode({'data': meWithFriends()}))),
+        200,
+      );
+
+  @override
+  void close() => closed++;
+}
+
 /// Copies a finalized request so it can be sent again (the retry recipe).
 http.Request _copy(http.Request r) => http.Request(r.method, r.url)
   ..headers.addAll(r.headers)
@@ -122,6 +137,28 @@ void main() {
       jsonDecode(seen.single.body),
       containsPair('query', startsWith('mutation')),
     );
+  });
+
+  test('dispose leaves an httpClient it was given open', () async {
+    final owned = _ClosingClient();
+    final client = SlingClient<Query>(
+      endpoint: testEndpoint,
+      rootFactory: Query.root,
+      httpClient: owned,
+    );
+    expect(await client.resolve((q) => q.me.name), 'Ada');
+
+    client.dispose();
+
+    expect(owned.closed, 0, reason: 'the caller owns it');
+    // Still usable by its owner, e.g. for the next client.
+    final next = SlingClient<Query>(
+      endpoint: testEndpoint,
+      rootFactory: Query.root,
+      httpClient: owned,
+    );
+    expect(await next.resolve((q) => q.me.name), 'Ada');
+    next.dispose();
   });
 
   test('transport errors surface as the scope error', () async {

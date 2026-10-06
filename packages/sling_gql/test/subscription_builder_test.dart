@@ -174,7 +174,7 @@ void main() {
     expect(last!.isActive, isFalse);
   });
 
-  testWidgets('a dropped connection reconnects after retryAfter; retry() '
+  testWidgets('a dropped connection reconnects after retryAfter; reconnect() '
       'does it now', (tester) async {
     final c = client();
     SubscriptionState? last;
@@ -216,7 +216,7 @@ void main() {
 
     events.addError(StateError('gone again'));
     await tester.pump(Duration.zero);
-    last!.retry();
+    last!.reconnect();
     await tester.pump();
     expect(opened, 3);
     expect(last!.isConnected, isTrue);

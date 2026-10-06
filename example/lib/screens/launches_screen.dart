@@ -254,8 +254,8 @@ class _LiveStatusState extends State<_LiveStatus> {
             behavior: HitTestBehavior.opaque,
             onTap: reconnecting
                 ? () {
-                    state.retry();
-                    scheduled.retry();
+                    state.reconnect();
+                    scheduled.reconnect();
                   }
                 : null,
             child: Container(

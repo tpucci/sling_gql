@@ -9,9 +9,11 @@ import 'package:sling_gql/sling_gql.dart';
 import 'support/test_schema.dart';
 
 /// A root list field with arguments, as the generator would emit it on
-/// `Query` for `users(limit: Int): [User!]!`.
+/// `Query` for `users(limit: Int): [User!]!` (inside the class; an
+/// extension is outside the `@protected` helpers' reach).
 extension on Query {
   List<User>? users({int? limit}) =>
+      // ignore: invalid_use_of_protected_member
       list('users', User.new, args: {'limit': Arg('Int', limit)}, keyed: true);
 }
 

@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import 'cache/cache.dart';
 import 'selection.dart';
 
@@ -81,6 +83,10 @@ abstract class Accessor {
 
   // ---------------------------------------------------------------------------
   // Read helpers used by generated code
+  //
+  // `@protected`: generated getters call them from the subclass; app code
+  // reads through those typed getters (which carry the generator's keyed /
+  // lookup flags), never through the helpers.
   // ---------------------------------------------------------------------------
 
   Selection _select(String field, Map<String, Arg>? args) {
@@ -149,6 +155,7 @@ abstract class Accessor {
   }
 
   /// Reads a scalar field. Returns `null` (and records a miss) when not cached.
+  @protected
   T? scalar<T>(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
     final value = _read(sel);
@@ -160,6 +167,7 @@ abstract class Accessor {
   }
 
   /// Reads a list of scalars. Skeleton lists contain a single `null`.
+  @protected
   List<T?>? scalarList<T>(String field, {Map<String, Arg>? args}) {
     final sel = _select(field, args);
     final value = _read(sel);
@@ -180,6 +188,7 @@ abstract class Accessor {
   /// not re-run `DateTime.parse` for every row (it cost more than all other
   /// reads of a list row together): [parse] must be pure and its results
   /// should be immutable, since equal wire values share one instance.
+  @protected
   T? scalarAs<T, W>(
     String field,
     T Function(W) parse, {
@@ -208,6 +217,7 @@ abstract class Accessor {
 
   /// Reads a list of such values (see [scalarAs]). Same miss/skeleton
   /// semantics as [scalarList].
+  @protected
   List<T?>? scalarListAs<T, W>(
     String field,
     T Function(W) parse, {
@@ -221,6 +231,7 @@ abstract class Accessor {
 
   /// Reads an enum field: the cached wire `String` mapped through [parse]
   /// (the generated `fromGraphQL`). Same miss/skeleton semantics as [scalar].
+  @protected
   T? enumValue<T>(
     String field,
     T Function(String) parse, {
@@ -234,6 +245,7 @@ abstract class Accessor {
 
   /// Reads a list of enums, mapping each wire `String` through [parse].
   /// Same miss/skeleton semantics as [scalarList].
+  @protected
   List<T?>? enumList<T>(
     String field,
     T Function(String) parse, {
@@ -248,6 +260,7 @@ abstract class Accessor {
   /// resolves to (`launch(id:)` → `Launch`): when the field itself is not
   /// cached but the entity is, the accessor is redirected to the entity so no
   /// request is made for data already fetched through another path.
+  @protected
   R? object<R extends Accessor>(
     String field,
     R Function(Recorder, Selection, List<Object>) ctor, {
@@ -275,6 +288,7 @@ abstract class Accessor {
 
   /// Reads a list of objects. Skeleton lists contain a single skeleton element
   /// so `list.map((e) => e.name)` still records the element selection.
+  @protected
   List<R>? list<R extends Accessor>(
     String field,
     R Function(Recorder, Selection, List<Object>) ctor, {
@@ -338,6 +352,7 @@ abstract class Accessor {
   /// each branch's fields and one request fetches whichever type comes back
   /// (the same reason skeleton lists have one element). [keyed] as for
   /// [object]: the member type is an entity whose key must be selected.
+  @protected
   R? on<R extends Accessor>(
     String typename,
     R Function(Recorder, Selection, List<Object>) ctor, {
@@ -359,6 +374,7 @@ abstract class Accessor {
   /// On a skeleton *every* branch runs, so all of them record their fields
   /// in the first build; the first branch's result is returned (it renders
   /// from skeleton accessors, i.e. nulls, like any other skeleton UI).
+  @protected
   T? whenType<T>(Map<String, T Function()> cases, {T Function()? orElse}) {
     final actual = _cachedTypename();
     if (actual == missing) {
@@ -381,6 +397,7 @@ abstract class Accessor {
   // Write helpers (optimistic updates) used by generated setters
   // ---------------------------------------------------------------------------
 
+  @protected
   void write(String field, Object? value) {
     final target = [...path, field];
     final cache = recorder.cache;

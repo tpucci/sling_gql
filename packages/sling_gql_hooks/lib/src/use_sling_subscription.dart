@@ -156,7 +156,7 @@ class _SlingSubscriptionHookState<S extends Accessor>
         isReconnecting: sub?.isReconnecting ?? false,
         eventCount: sub?.eventCount ?? 0,
         error: _error,
-        retry: () {
+        reconnect: () {
           _subscription?.reconnect();
           _rebuild();
         },

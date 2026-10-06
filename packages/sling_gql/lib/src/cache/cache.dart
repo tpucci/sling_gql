@@ -160,7 +160,9 @@ final class CacheDelta {
 /// [read] / [write] / [remove] / [writeResponse] are the accessors' and the
 /// client's business (`@internal`).
 ///
-/// The only implementation today is [NormalizedCache]; `Cache()` returns one.
+/// The only implementation is [NormalizedCache]; `Cache()` returns one.
+/// Implementing [Cache] outside sling_gql is not supported: members can be
+/// added in a minor release.
 abstract class Cache {
   factory Cache({Normalization normalization, Map<String, Object?>? initial}) =
       NormalizedCache;
@@ -237,7 +239,11 @@ abstract class Cache {
   /// reports the removed entities' fields (a persistence layer drops them).
   Set<String> gc({Iterable<String> retain = const []});
 
+  /// True when the store holds the entity (or operation root) [key]
+  /// (`Launch:launch-181`, `ROOT_QUERY`).
   bool hasEntity(String key);
+
+  /// Keys of every stored entity, operation roots included.
   Iterable<String> get entityKeys;
 
   /// Read-only view of one entity (`ROOT_QUERY`, `Launch:launch-181`, …).
@@ -293,6 +299,9 @@ abstract class Cache {
   /// view; [changesSince] copies only what changed.
   Map<String, Object?> get snapshot;
 
+  /// Removes everything (sign-out): every scope's data reads as missing
+  /// again and is refetched on its next run; [onChange] reports every key
+  /// and the next [changesSince] is a [CacheDelta.full] delta.
   void clear();
 }
 

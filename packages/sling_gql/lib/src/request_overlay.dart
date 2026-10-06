@@ -38,11 +38,14 @@ class SlingRequestOverlay extends StatefulWidget {
     this.margin = const EdgeInsets.fromLTRB(8, 8, 8, 96),
   });
 
+  /// The app, drawn under the chip.
   final Widget child;
 
   /// The client to watch; defaults to the nearest [SlingScope]'s.
   final SlingClient<Accessor>? client;
 
+  /// Shows the chip and records requests; `kDebugMode` by default. When
+  /// false the overlay is [child] alone.
   final bool enabled;
 
   /// Requests kept, newest first; older ones are dropped.

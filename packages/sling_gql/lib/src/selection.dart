@@ -9,9 +9,14 @@ import 'cache/field_policy.dart';
 /// operation document. Values are always sent as JSON variables, so enums and
 /// input objects need no special serialization on the client side.
 class Arg {
+  /// An argument of GraphQL type [graphqlType] with JSON [value].
   const Arg(this.graphqlType, this.value);
 
+  /// The GraphQL type literal the variable is declared with (`ID!`).
   final String graphqlType;
+
+  /// The JSON value sent as the variable; `null` arguments are left out of
+  /// the document (and of the alias).
   final Object? value;
 }
 
@@ -27,6 +32,11 @@ class Arg {
 /// several argument sets share one cache entry: the [cacheKey] then hashes
 /// only its key arguments, while each argument set keeps its own [alias] in
 /// documents (see [PrintedOperation.toCacheKeys]).
+///
+/// Public because generated accessor constructors pass it through
+/// (`Accessor.selection`); app code reads at most [field], [alias], [args],
+/// [parent], [children] (debugging). Building and merging trees is the
+/// runtime's business: those members are `@internal`.
 class Selection {
   Selection._(this.field, this.args, this.parent, this.alias)
     : cacheKey = alias,
@@ -41,6 +51,7 @@ class Selection {
     isObject = true;
   }
 
+  @internal
   Selection.root(String operation)
     : this._(operation, const {}, null, operation);
 
@@ -59,15 +70,18 @@ class Selection {
   /// arguments only (`launches(first: 20, after: c, filter: f)` and
   /// `launches(first: 20, filter: f)` both live at the cache key of
   /// `launches(filter: f)`).
+  @internal
   String cacheKey;
 
   FieldPolicy? _policy;
   bool _policyBound = false;
 
   /// The policy of this field (see `SlingClient.typePolicies`), once bound.
+  @internal
   FieldPolicy? get policy => _policy;
 
   /// [bindPolicy] ran (with or without a policy).
+  @internal
   bool get policyBound => _policyBound;
 
   /// Sibling fields sharing a [cacheKey], per cache key (several argument
@@ -83,6 +97,7 @@ class Selection {
   Map<String, Object?>? _argValues;
 
   /// The non-null argument values (JSON), as a policy sees them.
+  @internal
   Map<String, Object?> get argValues => _argValues ??= {
     for (final e in args.entries)
       if (e.value.value != null) e.key: e.value.value,
@@ -104,10 +119,12 @@ class Selection {
 
   /// Set when the field was accessed as an object or list of objects. Such a
   /// node must be printed with braces even if no sub-field was read yet.
+  @internal
   bool isObject = false;
 
   /// Set when the object type is normalizable: this field (`id`) is always
   /// printed alongside `__typename` so the response can be keyed.
+  @internal
   String? keyField;
 
   Iterable<Selection> get children => _children.values;
@@ -138,6 +155,7 @@ class Selection {
     return out;
   }
 
+  @internal
   Selection child(String field, [Map<String, Arg> args = const {}]) {
     if (args.isEmpty) {
       return _children[field] ??= Selection._(field, args, this, field);
@@ -155,6 +173,7 @@ class Selection {
 
   /// Like [child], flagged as an object selection. [keyField] marks the
   /// object as an entity whose key field must always be fetched.
+  @internal
   Selection objectChild(
     String field, [
     Map<String, Arg> args = const {},
@@ -167,6 +186,7 @@ class Selection {
 
   /// The inline fragment `... on [typename]` under this (abstract-typed)
   /// object node. [keyField] as in [objectChild], for keyed member types.
+  @internal
   Selection fragment(String typename, [String? keyField]) {
     final node = _children.putIfAbsent(
       '... on $typename',
@@ -176,6 +196,7 @@ class Selection {
     return node;
   }
 
+  @internal
   Selection? childByAlias(String alias) => _children[alias];
 
   /// Gives this field its [policy] (`null`: none), deciding its [cacheKey].
@@ -201,6 +222,7 @@ class Selection {
 
   /// The fields under this node's parent stored at the same [cacheKey]
   /// (this one included): the argument sets of one policy entry.
+  @internal
   Iterable<Selection> get sameEntry => parent?._entries?[cacheKey] ?? [this];
 
   /// [args] with the policy's page arguments set to [page]'s values
@@ -238,6 +260,7 @@ class Selection {
   /// root, and returns the corresponding node in this tree. With
   /// [firstPages], a policy field on the path asking for a later page is
   /// mapped to its entry's first page, as in [mergeFrom].
+  @internal
   Selection ensurePath(Selection other, {bool firstPages = false}) {
     final chain = <Selection>[];
     Selection? node = other;
@@ -258,6 +281,7 @@ class Selection {
   /// policy field asking for a later page (`after: c`) is merged as its
   /// entry's first page instead: what a fetch of a whole selection sends,
   /// so a refresh starts a paged entry over (see [FieldPolicy.pageArgs]).
+  @internal
   void mergeFrom(Selection other, {bool firstPages = false}) {
     for (final c in other.children) {
       final mine = firstPages && c._isLaterPage
@@ -319,6 +343,7 @@ class Selection {
   }
 
   /// True if every leaf of [other] is present in this tree.
+  @internal
   bool covers(Selection other) {
     for (final c in other.children) {
       final mine = _children[c.alias];
@@ -328,6 +353,7 @@ class Selection {
   }
 
   /// Aliases of the direct children (top-level fields for a root).
+  @internal
   Set<String> get childAliases => _children.keys.toSet();
 
   static String _aliasFor(String field, Map<String, Arg> args) {
@@ -348,7 +374,7 @@ class Selection {
   /// Computed on two 32-bit halves with arithmetic that stays below 2^53, so
   /// it gives the same result on the web (JS numbers, 32-bit bitwise ops) as
   /// on native.
-  @visibleForTesting
+  @internal
   static String fnv1a64(String s) {
     const two32 = 0x100000000;
     // Offset basis 0xcbf29ce484222325, prime 0x100000001b3 = 2^40 + 0x1b3.
@@ -474,12 +500,14 @@ class PrintedOperation {
 
   /// True when some field is printed under a response key other than its
   /// cache alias (see the class comment).
+  @internal
   bool get renamesFields => _keys != null;
 
   /// [data] (a response's `data`, with the document's response keys) with
   /// every renamed key mapped back to its cache alias. Returns [data] itself
   /// when nothing was renamed. Values selected both directly and through a
   /// renamed fragment field are merged.
+  @internal
   Map<String, Object?> toCacheKeys(Map<String, Object?> data) {
     final keys = _keys;
     return keys == null ? data : _remapObject(data, keys);
@@ -569,6 +597,7 @@ class PrintedOperation {
     };
   }
 
+  @internal
   static PrintedOperation from(Selection root) {
     final variables = <String, Object?>{};
     final varDefs = <String>[];
