@@ -189,4 +189,25 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('offline: a call the server cannot be reached for is queued '
+      '(isQueued), then resolves when replayed', (tester) async {
+    await pumpApp(tester);
+    server.failNext(const MockFailure.network());
+    final result = mutate<String?>(
+      (m) => m.rename(id: '1', name: 'Bea')?.name,
+      offline: true,
+    );
+    await tester.pump();
+    expect(state.isQueued, isTrue);
+    expect(state.isLoading, isFalse);
+    expect(state.error, isNull);
+
+    unawaited(client.replayQueue());
+    await tester.pumpUntilSettled(client);
+    expect(await result, 'Bea');
+    expect(state.isQueued, isFalse);
+    expect(state.data, 'Bea');
+    expect(find.text('query:Bea'), findsOneWidget);
+  });
 }

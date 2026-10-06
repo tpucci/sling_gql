@@ -36,7 +36,8 @@ import 'debug_label.dart';
 /// cache, or to `null` on failure (it never throws a [SlingException]; it is
 /// on [MutationState.error], optimistic writes are rolled back; under
 /// [ErrorPolicy.all] a partial response sets both [MutationState.data] and
-/// the error). Its named arguments are `SlingClient.mutateWith`'s. The state
+/// the error). Its named arguments are `SlingClient.mutateWith`'s (with
+/// `offline: true`, a queued call shows as [MutationState.isQueued]). The state
 /// describes the latest call only; this widget rebuilds when it changes.
 ///
 /// `mutate` is the same function across builds (safe as a `useCallback` /
@@ -77,6 +78,7 @@ class _SlingMutationHook<M extends Accessor>
 class _SlingMutationHookState<M extends Accessor>
     extends HookState<_SlingMutationValue<M>, _SlingMutationHook<M>> {
   bool _loading = false;
+  bool _queued = false;
   SlingException? _error;
   Object? _data;
   // Incremented per `mutate` call; only the latest call updates the state.
@@ -95,10 +97,12 @@ class _SlingMutationHookState<M extends Accessor>
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
+    bool offline = false,
   }) async {
     final call = ++_call;
     setState(() {
       _loading = true;
+      _queued = false;
       _error = null;
     });
     void settle(void Function() update) {
@@ -106,6 +110,7 @@ class _SlingMutationHookState<M extends Accessor>
       setState(() {
         update();
         _loading = false;
+        _queued = false;
       });
     }
 
@@ -119,6 +124,14 @@ class _SlingMutationHookState<M extends Accessor>
         errorPolicy: errorPolicy,
         timeout: timeout,
         retry: retry,
+        offline: offline,
+        onQueued: () {
+          if (_disposed || call != _call) return;
+          setState(() {
+            _loading = false;
+            _queued = true;
+          });
+        },
       );
       settle(() => _data = result);
       return result;
@@ -144,7 +157,12 @@ class _SlingMutationHookState<M extends Accessor>
     _label = hook.debugLabel ?? debugHookOwnerLabel(context);
     return _SlingMutationValue<M>(
       _mutate,
-      MutationState(isLoading: _loading, error: _error, data: _data),
+      MutationState(
+        isLoading: _loading,
+        isQueued: _queued,
+        error: _error,
+        data: _data,
+      ),
     );
   }
 
