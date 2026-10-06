@@ -49,6 +49,7 @@ query {
 | Partial responses merging into one cache tree | ✅ per entity |
 | Optimistic writes (`launch.favorite = true`) | ✅ setters on scalar fields; journaled + rolled back when a mutation fails |
 | Mutations (`client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)`, `MutationBuilder`) | ✅ response normalized into the same entities → every widget showing the launch rebuilds |
+| Offline mutations (`client.mutate(..., offline: true)`) | ✅ queued while the server is unreachable (optimistic writes kept, `state.isQueued`), replayed in order; persisted with `persistence.mutationQueue`, rolled back from the stored log after a restart |
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
 | `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ typed, sealed `SlingException`s; `errorPolicy` none / all / ignore |
 | Auth, retry, timeouts (`SlingClient(auth:, retry:, timeout:)`) | ✅ single-flight token refresh on 401 / `UNAUTHENTICATED` (SSE too), backoff + jitter for queries, aborted requests when the widget is gone |

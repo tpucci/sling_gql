@@ -115,7 +115,14 @@ on the code.
     every save checks it inside its transaction (`superseded`,
     `SqfliteSupersededException`). `SqfliteCodec` (`codec:`) transforms
     row values (JSON text without one, blobs with). Bump
-    `sqfliteFormatVersion` when the tables change.
+    `sqfliteFormatVersion` when the tables change. `persistence
+    .mutationQueue` (the client's `MutationQueueStore`) is a separate
+    `sling_mutation_queue` table, outside the format version: created if
+    missing, read at `open` (a row that does not decode → `onError` +
+    deleted), kept through a wipe minus its rollback logs, dropped on a
+    codec id change; its writes go on the save chain (`_enqueueWrite`,
+    owner-checked) so an entry lands before the save holding its
+    optimistic values.
     Tests: `flutter test` on the host through `sqflite_common_ffi` (temp
     files; `tester.runAsync` in `testWidgets`); `benchmark/` is run by
     hand (`flutter test benchmark/persistence_bench_test.dart`).
@@ -215,6 +222,7 @@ on the code.
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
 | `errors.dart` | Sealed `SlingException` (network / timeout / HTTP / GraphQL (`isPartial`) / auth / cancelled / transport), `SlingGraphQLError`, `ErrorPolicy`, `SlingException.from` (classifies what a transport threw). Only `http` imported. |
+| `mutation_queue.dart` | `QueuedMutation` (JSON: document, variables, `rollback` = the optimistic journal encoded by `encodeRollback`), `MutationQueueStore` / `InMemoryMutationQueueStore`, `QueuedMutationFailure`. The client's queue (`_QueuedCall`, `_sendQueue`) lives in `client.dart`. |
 | `retry.dart` / `auth.dart` | `RetryPolicy` (attempts, backoff, jitter, `retryIf`) and `SlingAuth` (headers per attempt, `refresh`, `isUnauthenticated`); the client runs them. |
 | `client.dart` | `SlingClient` (batching, HTTP, partial-error pruning, notify, `mutateWith` + optimistic journal/rollback, `subscribeWith`, list rules), `QueryScope` (one per widget: runs a build, tracks misses/loading/error, `refetch`, owns its `FlushScheduler`), `MutationScope` (recorder for one mutate call; misses never fetch), `RowScope` (`QueryScope.row`: own deps, everything else forwarded to the parent). |
 | `widgets.dart` | `SlingScope` (provides the client; `of<Q>` typed, `clientOf` untyped), `QueryBuilder` (the `useQuery` equivalent), `QueryState`, `MutationBuilder` (`useMutation`: `mutate` + `MutationState`), `SubscriptionBuilder` (`select` records once, opens on the first post-frame callback, closes in `dispose`), `SlingRow` (rebinds an accessor to a `RowScope`), `frameEndScheduler`. |
@@ -292,6 +300,20 @@ Design decisions worth knowing before changing things:
   `insert: false` for query responses — pages must not absorb each other —
   so responses only remove. The example's `lib/list_rules.dart` replaces
   hand-written membership edits.
+- **Offline mutations are a queue on the client** (`mutateWith(offline:
+  true)`): every offline call goes through `_queue` (head sent, one at a
+  time, by `_sendQueue`); only `isNetworkUnreachable` keeps it there
+  (`_queueWaiting`, backoff `_queueTimer` along `mutationQueueBackoff`,
+  `onQueued`/`MutationState.isQueued`), anything else lands through the
+  same `_landMutation` as a plain mutation. The entry is in
+  `mutationQueue` (store) from the send until it lands — at least once
+  across a kill. Replays: `replayQueue()`, `_serverReached()` (every
+  successful `_execute`, subscription data events), the timer, and a
+  microtask after the constructor when the store held entries. The
+  caller's future stays pending while queued; restored calls run no body,
+  roll back from the decoded journal and report through
+  `onQueuedMutationFailed`. Not part of `isIdle` while waiting; `gc`
+  retains the entities queued journals point to.
 - **Optimistic writes are journaled.** `Accessor.write` reports a `CacheWrite`
   (path, previous value, touched keys) via `Recorder.onWrite`; while a
   mutation's `optimistic` callback runs, the client collects them and undoes
