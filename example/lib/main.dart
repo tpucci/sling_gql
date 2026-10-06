@@ -10,6 +10,7 @@ import 'list_rules.dart';
 import 'mock_latency.dart';
 import 'network_log.dart';
 import 'persisted_cache.dart';
+import 'type_policies.dart';
 
 /// The mock API in `../mock-api` (`npm start`). The iOS simulator shares the
 /// host network, so `localhost` works as-is. On the web the same URL is
@@ -55,6 +56,8 @@ Future<void> main() async {
     // and the request overlay).
     logRequests: true,
     listRules: listRules,
+    // Pages of `launches` merge into one list per filter (see the file).
+    typePolicies: typePolicies,
     // A dropped subscription (server restarted) reopens itself.
     subscriptionRetryAfter: const Duration(seconds: 3),
   );

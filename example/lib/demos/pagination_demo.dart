@@ -7,8 +7,9 @@ import '../theme.dart';
 import '../widgets/skeleton.dart';
 import 'demo_harness.dart';
 
-/// Guide: Pagination. Pages of five launches: "Load more" fetches the next
-/// page only; "Refresh" refetches every loaded page in one request.
+/// Guide: Pagination. Pages of five launches merged into one cached list
+/// (`RelayStylePagination`, see `type_policies.dart`): "Load more" fetches
+/// the next page only; "Refresh" refetches page one and starts over.
 class PaginationDemo extends StatelessWidget {
   const PaginationDemo({super.key});
 
@@ -23,7 +24,7 @@ class LaunchPages extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PaginatedQueryBuilder<Query, Launch>(
-      // Runs for every loaded page, in the same build: one selection.
+      // Runs for the merged list (and the page loading), in one build.
       page: (query, after) {
         final page = query.launches(first: 5, after: after);
         return ConnectionPage(

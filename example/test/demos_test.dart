@@ -177,7 +177,7 @@ void main() {
     expect(find.text('2 requests'), findsOneWidget);
   });
 
-  testWidgets('pagination: load more fetches one page, refresh all of them', (
+  testWidgets('pagination: load more fetches one page, refresh starts over', (
     tester,
   ) async {
     await open(tester, 'pagination');
@@ -200,9 +200,11 @@ void main() {
     final refresh = harness(tester).requests.first.document;
     expect(
       RegExp(r'launches\(').allMatches(refresh),
-      hasLength(2),
-      reason: 'both loaded pages, one request',
+      hasLength(1),
+      reason: 'the first page only',
     );
+    expect(refresh, isNot(contains('after')));
+    expect(find.textContaining('Load more (5 /'), findsOneWidget);
   });
 
   testWidgets(

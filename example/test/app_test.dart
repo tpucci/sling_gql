@@ -10,6 +10,7 @@ import 'package:sling_gql_example/list_rules.dart';
 import 'package:sling_gql_example/mock_latency.dart';
 import 'package:sling_gql_example/network_log.dart';
 import 'package:sling_gql_example/screens/launch_screen.dart';
+import 'package:sling_gql_example/type_policies.dart';
 import 'package:sling_gql_example/widgets/launch_row.dart';
 import 'package:sling_gql_test/sling_gql_test.dart';
 
@@ -36,6 +37,7 @@ void main() {
         httpClient: httpClient,
         transport: log.transport(latency.transport(httpClient)),
         listRules: listRules,
+        typePolicies: typePolicies,
         subscriptionRetryAfter: const Duration(seconds: 3),
       ),
     );

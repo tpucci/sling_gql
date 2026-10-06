@@ -9,6 +9,7 @@ import '../in_browser_api.dart';
 import '../main.dart' show endpoint;
 import '../mock_latency.dart';
 import '../theme.dart';
+import '../type_policies.dart';
 
 /// Frame of one concept demo (the website embeds them after each guide):
 /// the demo's own [SlingClient] — a fresh, empty cache every time it
@@ -113,6 +114,7 @@ class DemoHarnessState extends State<DemoHarness> {
     return SlingClient<Query>(
       endpoint: Uri.parse(endpoint),
       schema: slingSchema,
+      typePolicies: typePolicies,
       httpClient: httpClient,
       transport: (request) async {
         if (widget.failRequests ||
