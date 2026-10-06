@@ -307,6 +307,10 @@ void main() {
     );
     expect(code, contains('extension SlingMutations on SlingClient<Query> {'));
     expect(code, contains('refetchQueries: refetchQueries,'));
+    expect(code, contains('ErrorPolicy? errorPolicy,'));
+    expect(code, contains('errorPolicy: errorPolicy,'));
+    expect(code, contains('timeout: timeout,'));
+    expect(code, contains('retry: retry,'));
     expect(code, contains('mutateWith('));
     // Mutation is not emitted twice (once as root, once as plain object).
     expect(

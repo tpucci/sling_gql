@@ -430,12 +430,18 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('    T Function(Mutation mutation) body, {')
     ..writeln('    void Function()? optimistic,')
     ..writeln('    Iterable<String>? refetchQueries,')
+    ..writeln('    ErrorPolicy? errorPolicy,')
+    ..writeln('    Duration? timeout,')
+    ..writeln('    RetryPolicy? retry,')
     ..writeln('  }) =>')
     ..writeln('      mutateWith(')
     ..writeln('        Mutation.root,')
     ..writeln('        body,')
     ..writeln('        optimistic: optimistic,')
     ..writeln('        refetchQueries: refetchQueries,')
+    ..writeln('        errorPolicy: errorPolicy,')
+    ..writeln('        timeout: timeout,')
+    ..writeln('        retry: retry,')
     ..writeln('      );')
     ..writeln('}');
 }
