@@ -59,6 +59,18 @@ await persistence.clear();
   a response rewrites the root fields it touched, not the whole root.
   `ROOT_MUTATION` and `ROOT_SUBSCRIPTION` are never stored.
 
+## Offline mutations
+
+`persistence.mutationQueue` is a `MutationQueueStore` for
+`SlingClient(mutationQueue:)`: the calls made with
+`mutateWith(offline: true)` that could not reach the server are kept in a
+`sling_mutation_queue` table (document, variables, the undo log of their
+optimistic writes; through the codec), read at `open` and replayed by the
+next client — whose rollback still works if the server rejects them. The
+table is not part of the format version: a wiped cache keeps the entries
+(without their rollback logs); another codec id drops them. See
+https://tpucci.github.io/sling_gql/guides/mutations/#offline-mutations.
+
 ## Bounds
 
 Applied when the store is opened (`null` disables one):

@@ -21,6 +21,11 @@ const _meta = 'sling_meta';
 const _entities = 'sling_entities';
 const _rootFields = 'sling_root_fields';
 
+/// The client's offline mutations (`SqflitePersistence.mutationQueue`): one
+/// row per `QueuedMutation`, in insertion (`rowid`) order. Not part of the
+/// [sqfliteFormatVersion]: wiping the cache keeps it.
+const _mutationQueue = 'sling_mutation_queue';
+
 /// What [SqflitePersistence.open] found and left out.
 final class SqfliteLoadReport {
   const SqfliteLoadReport({
@@ -143,7 +148,9 @@ final class SqflitePersistence {
     required this.compact,
     required this.codec,
     required bool flushOnLifecycle,
+    required List<QueuedMutation> queuedMutations,
   }) : _storedRootFields = {...?cache.entity(queryRoot)?.keys} {
+    mutationQueue = _SqfliteMutationQueue(this, queuedMutations);
     if (flushOnLifecycle) {
       _lifecycle = AppLifecycleListener(onStateChange: _lifecycleChanged);
     }
@@ -259,6 +266,12 @@ final class SqflitePersistence {
       }
       try {
         final prepared = await _prepare(db, schema, codec, owner);
+        final queued = await _loadQueue(
+          db,
+          codec,
+          rollbackStale: prepared.wiped,
+          onError: reportError,
+        );
         final rows = await _readRows(db);
         final readTime = watch.elapsed;
         final options = LoadOptions(
@@ -311,6 +324,7 @@ final class SqflitePersistence {
           compact: compact,
           codec: codec,
           flushOnLifecycle: flushOnLifecycle,
+          queuedMutations: queued,
         );
       } catch (error, stack) {
         _openDatabases.remove(db);
@@ -347,6 +361,22 @@ final class SqflitePersistence {
 
   /// The hydrated cache: pass it to `SlingClient(cache:)`.
   final Cache cache;
+
+  /// The client's offline mutations, kept in this database: pass it to
+  /// `SlingClient(mutationQueue:)` so the calls queued by
+  /// `mutateWith(offline: true)` survive the app being killed. Its `load`
+  /// returns what [open] read (oldest first); entries are written at once,
+  /// in order with the cache saves (an entry lands before the save holding
+  /// its optimistic writes), and only while this instance owns the
+  /// database ([superseded]). Write failures go to `onError`.
+  ///
+  /// When [open] wipes the cache (another format, key field or schema
+  /// without fields to migrate along) the queued mutations are kept but
+  /// their rollback logs are dropped: the optimistic values they would
+  /// undo are gone with the cache. Under another [codec] id they cannot be
+  /// decoded and are dropped; a row that does not decode is reported to
+  /// `onError` and deleted. A recovered (deleted) file loses them.
+  late final MutationQueueStore mutationQueue;
 
   /// What [open] loaded and dropped, with timings.
   final SqfliteLoadReport loaded;
@@ -481,12 +511,7 @@ final class SqflitePersistence {
       storedRootFields = await _db.transaction((txn) async {
         // In the write transaction: no other instance can take the database
         // over between this check and the commit.
-        final owner = await txn.query(
-          _meta,
-          columns: ['value'],
-          where: "key = 'owner'",
-        );
-        if (owner.singleOrNull?['value'] != _owner) return null;
+        if (!await _owns(txn)) return null;
         final batch = txn.batch();
         final stored = _writeDelta(batch, delta, rootFields, now);
         await batch.commit(noResult: true);
@@ -498,14 +523,49 @@ final class SqflitePersistence {
       rethrow;
     }
     if (storedRootFields == null) {
-      _superseded = true;
-      _cancelTimers();
-      _onError(SqfliteSupersededException(_db.path), StackTrace.current);
+      _supersede();
       return;
     }
     _storedRootFields = storedRootFields;
     _savedVersion = delta.version;
     if (compact) cache.compact(upTo: delta.version);
+  }
+
+  void _supersede() {
+    _superseded = true;
+    _cancelTimers();
+    _onError(SqfliteSupersededException(_db.path), StackTrace.current);
+  }
+
+  /// Runs [write] in a transaction after the saves already queued (the
+  /// mutation queue's writes share the save chain, so they are ordered with
+  /// the cache saves). Reports failures to `onError` instead of throwing.
+  Future<void> _enqueueWrite(void Function(Batch batch) write) {
+    Future<void> run() async {
+      if (_superseded || !_db.isOpen) return;
+      final stored = await _db.transaction((txn) async {
+        if (!await _owns(txn)) return false;
+        final batch = txn.batch();
+        write(batch);
+        await batch.commit(noResult: true);
+        return true;
+      });
+      if (!stored) _supersede();
+    }
+
+    final done = _saving.then((_) => run());
+    _saving = done.then<void>((_) {}, onError: (Object _) {});
+    return done.catchError(_onError);
+  }
+
+  /// Whether the database still names this instance as its writer.
+  Future<bool> _owns(Transaction txn) async {
+    final owner = await txn.query(
+      _meta,
+      columns: ['value'],
+      where: "key = 'owner'",
+    );
+    return owner.singleOrNull?['value'] == _owner;
   }
 
   /// Adds [delta] to [batch]; returns the root fields stored once it is
@@ -675,8 +735,16 @@ final class SqflitePersistence {
     } else {
       result = (wiped: true, migrateFrom: null);
     }
+    final codecChanged =
+        stored['codec'] != null && stored['codec'] != expected['codec'];
     await db.transaction((txn) async {
       final batch = txn.batch();
+      // Rows written under another codec cannot be decoded.
+      if (codecChanged) batch.execute('DROP TABLE IF EXISTS $_mutationQueue');
+      batch.execute(
+        'CREATE TABLE IF NOT EXISTS $_mutationQueue (id TEXT PRIMARY KEY, '
+        'data BLOB NOT NULL, created_at INTEGER NOT NULL)',
+      );
       if (result.wiped) {
         batch
           ..execute('DROP TABLE IF EXISTS $_entities')
@@ -705,6 +773,57 @@ final class SqflitePersistence {
       await batch.commit(noResult: true);
     });
     return result;
+  }
+
+  /// The queued mutations, oldest first. A row that does not decode is
+  /// reported and deleted; with [rollbackStale] (the cache was wiped) the
+  /// rollback logs are dropped from the rows.
+  static Future<List<QueuedMutation>> _loadQueue(
+    Database db,
+    SqfliteCodec? codec, {
+    required bool rollbackStale,
+    required void Function(Object error, StackTrace stack) onError,
+  }) async {
+    final rows = await db.query(
+      _mutationQueue,
+      columns: ['id', 'data'],
+      orderBy: 'rowid',
+    );
+    final entries = <QueuedMutation>[];
+    final unreadable = <String>[];
+    final stripped = <QueuedMutation>[];
+    for (final row in rows) {
+      final id = row['id']! as String;
+      try {
+        var entry = QueuedMutation.fromJson(
+          (decodeRow(row['data'], codec)! as Map).cast<String, Object?>(),
+        );
+        if (rollbackStale && entry.rollback.isNotEmpty) {
+          entry = QueuedMutation.fromJson(
+            {...entry.toJson()}..remove('rollback'),
+          );
+          stripped.add(entry);
+        }
+        entries.add(entry);
+      } catch (error, stack) {
+        onError(error, stack);
+        unreadable.add(id);
+      }
+    }
+    if (unreadable.isNotEmpty || stripped.isNotEmpty) {
+      final batch = db.batch();
+      _deleteRows(batch, _mutationQueue, 'id', unreadable);
+      for (final entry in stripped) {
+        batch.update(
+          _mutationQueue,
+          {'data': encodeRow(entry.toJson(), codec)},
+          where: 'id = ?',
+          whereArgs: [entry.id],
+        );
+      }
+      await batch.commit(noResult: true);
+    }
+    return entries;
   }
 
   static SchemaFields _decodeFields(String json) => {
@@ -779,6 +898,39 @@ final class SqflitePersistence {
       }
       await batch.commit(noResult: true);
     });
+  }
+}
+
+/// [SqflitePersistence.mutationQueue].
+final class _SqfliteMutationQueue implements MutationQueueStore {
+  _SqfliteMutationQueue(this._persistence, this._entries);
+
+  final SqflitePersistence _persistence;
+
+  /// What the table holds once the queued writes land, oldest first.
+  final List<QueuedMutation> _entries;
+
+  @override
+  List<QueuedMutation> load() => List.of(_entries);
+
+  @override
+  Future<void> add(QueuedMutation entry) {
+    _entries.add(entry);
+    return _persistence._enqueueWrite(
+      (batch) => batch.insert(_mutationQueue, {
+        'id': entry.id,
+        'data': encodeRow(entry.toJson(), _persistence.codec),
+        'created_at': entry.createdAt.millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace),
+    );
+  }
+
+  @override
+  Future<void> remove(String id) {
+    _entries.removeWhere((e) => e.id == id);
+    return _persistence._enqueueWrite(
+      (batch) => batch.delete(_mutationQueue, where: 'id = ?', whereArgs: [id]),
+    );
   }
 }
 
