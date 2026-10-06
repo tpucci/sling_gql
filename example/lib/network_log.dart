@@ -44,11 +44,7 @@ class LogEntry {
   bool get isDone => request.isDone;
 
   /// HTTP error, transport failure or GraphQL `errors`.
-  String? get problem => switch (request.error) {
-    null => null,
-    SlingException(:final message) => message,
-    final e => '$e',
-  };
+  String? get problem => request.error?.message;
 }
 
 /// Keeps every GraphQL operation the client sent, newest first. The whole

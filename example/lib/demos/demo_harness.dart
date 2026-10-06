@@ -116,6 +116,9 @@ class DemoHarnessState extends State<DemoHarness> {
       schema: slingSchema,
       typePolicies: typePolicies,
       httpClient: httpClient,
+      // A failing server fails at once: the guides show the sticky error
+      // (and the optimistic rollback) without the default retries' backoff.
+      retry: RetryPolicy.none,
       transport: (request) async {
         if (widget.failRequests ||
             (widget.failMutations && _isMutation(request))) {
