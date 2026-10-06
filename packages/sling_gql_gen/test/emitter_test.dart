@@ -307,6 +307,11 @@ void main() {
     );
     expect(code, contains('extension SlingMutations on SlingClient<Query> {'));
     expect(code, contains('refetchQueries: refetchQueries,'));
+    final mutate = code.substring(code.indexOf('extension SlingMutations'));
+    expect(
+      mutate.substring(0, mutate.indexOf('\n}')),
+      stringContainsInOrder(['String? debugLabel,', 'debugLabel: debugLabel,']),
+    );
     expect(code, contains('ErrorPolicy? errorPolicy,'));
     expect(code, contains('errorPolicy: errorPolicy,'));
     expect(code, contains('timeout: timeout,'));
@@ -343,11 +348,19 @@ void main() {
       code,
       contains('extension SlingSubscriptions on SlingClient<Query> {'),
     );
+    final subscribe = code.substring(
+      code.indexOf('extension SlingSubscriptions'),
+    );
     expect(
-      code,
-      contains(
-        'subscribeWith(Subscription.root, body, retryAfter: retryAfter);',
-      ),
+      subscribe,
+      stringContainsInOrder([
+        'Duration? retryAfter,',
+        'String? debugLabel,',
+        'subscribeWith(',
+        'Subscription.root,',
+        'retryAfter: retryAfter,',
+        'debugLabel: debugLabel,',
+      ]),
     );
     expect(
       RegExp('class Subscription extends Accessor').allMatches(code),

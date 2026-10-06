@@ -3227,6 +3227,7 @@ extension SlingMutations on SlingClient<Query> {
     T Function(Mutation mutation) body, {
     void Function()? optimistic,
     Iterable<String>? refetchQueries,
+    String? debugLabel,
     ErrorPolicy? errorPolicy,
     Duration? timeout,
     RetryPolicy? retry,
@@ -3237,6 +3238,7 @@ extension SlingMutations on SlingClient<Query> {
     body,
     optimistic: optimistic,
     refetchQueries: refetchQueries,
+    debugLabel: debugLabel,
     errorPolicy: errorPolicy,
     timeout: timeout,
     retry: retry,
@@ -3257,7 +3259,13 @@ extension SlingSubscriptions on SlingClient<Query> {
   SlingSubscription<T> subscribe<T>(
     T Function(Subscription subscription) body, {
     Duration? retryAfter,
-  }) => subscribeWith(Subscription.root, body, retryAfter: retryAfter);
+    String? debugLabel,
+  }) => subscribeWith(
+    Subscription.root,
+    body,
+    retryAfter: retryAfter,
+    debugLabel: debugLabel,
+  );
 }
 
 /// Pass to `SlingClient(schema: slingSchema)`: query/mutation/subscription
@@ -3268,7 +3276,7 @@ const slingSchema = SlingSchema<Query, Mutation>(
   subscription: Subscription.root,
   keyField: 'id',
   fields: _slingFields,
-  hash: 'rf9kyu0qbrg95',
+  hash: 'tobany0v6q8qz',
 );
 
 /// Typed, non-fetching cache access for this schema's keyed types:

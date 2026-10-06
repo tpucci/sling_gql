@@ -411,10 +411,14 @@ void _emitSubscribeExtension(StringBuffer out) {
     ..writeln('  SlingSubscription<T> subscribe<T>(')
     ..writeln('    T Function(Subscription subscription) body, {')
     ..writeln('    Duration? retryAfter,')
+    ..writeln('    String? debugLabel,')
     ..writeln('  }) =>')
-    ..writeln(
-      '      subscribeWith(Subscription.root, body, retryAfter: retryAfter);',
-    )
+    ..writeln('      subscribeWith(')
+    ..writeln('        Subscription.root,')
+    ..writeln('        body,')
+    ..writeln('        retryAfter: retryAfter,')
+    ..writeln('        debugLabel: debugLabel,')
+    ..writeln('      );')
     ..writeln('}');
 }
 
@@ -430,6 +434,7 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('    T Function(Mutation mutation) body, {')
     ..writeln('    void Function()? optimistic,')
     ..writeln('    Iterable<String>? refetchQueries,')
+    ..writeln('    String? debugLabel,')
     ..writeln('    ErrorPolicy? errorPolicy,')
     ..writeln('    Duration? timeout,')
     ..writeln('    RetryPolicy? retry,')
@@ -441,6 +446,7 @@ void _emitMutateExtension(StringBuffer out) {
     ..writeln('        body,')
     ..writeln('        optimistic: optimistic,')
     ..writeln('        refetchQueries: refetchQueries,')
+    ..writeln('        debugLabel: debugLabel,')
     ..writeln('        errorPolicy: errorPolicy,')
     ..writeln('        timeout: timeout,')
     ..writeln('        retry: retry,')
