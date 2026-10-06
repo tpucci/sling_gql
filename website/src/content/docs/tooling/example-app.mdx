@@ -123,14 +123,17 @@ look at:
 > What to look at (open the network log, top right):
 > - the header and the list are two independent `QueryBuilder`s, yet the
 >   first frame produces ONE request;
-> - each page is `launches(first: 20, after: <cursor>)` — a distinct
->   argument set, hence a distinct alias and cache entry. "Load more" adds a
->   cursor and only the new page is fetched; pull-to-refresh refetches all
->   pages in one request.
-> - the status segments pass `filter: LaunchFilter(status: ...)` — a
->   different argument set → different alias → different cache entry. Coming
->   back to a segment you already visited is instant: its pages are cached.
->   The rows themselves are the same `Launch:<id>` entities in every segment.
+> - each page is `launches(first: 20, after: <cursor>)`, merged by
+>   `RelayStylePagination` (see `type_policies.dart`) into ONE cached list
+>   per filter. "Load more" fetches only the next page (the
+>   `PaginationController` holds its cursor while it loads);
+>   pull-to-refresh refetches the first page, which starts the list over.
+>   `PaginatedQueryBuilder` reads the merged list in one build.
+> - the status segments pass `filter: LaunchFilter(status: ...)` — a key
+>   argument of the policy → a different merged list. Coming back to a
+>   segment you already visited is instant: its list is cached with every
+>   page it had. The rows themselves are the same `Launch:<id>` entities in
+>   every segment.
 
 ### Status segments
 
@@ -142,26 +145,24 @@ status next to the date, so the icons need no legend. A status segment queries:
 query.launches(first: pageSize, filter: LaunchFilter(status: LaunchStatus.success))
 ```
 
-This is a **different argument set** from the All query, so the selection
-tree gives it a different alias (`launches_<hash-of-args>`) and a different
-cache entry. That means:
+`filter` is a key argument of the `launches` [type
+policy](/sling_gql/guides/caching/#type-policies), so the segment gets its own merged list
+(`launches_<hash-of-filter>`). That means:
 
 1. The first switch to a segment sends one new request.
-2. Coming back to a segment you already visited serves its cached pages — **zero
-   requests**.
+2. Coming back to a segment you already visited serves its cached list, every page
+   loaded included — **zero requests**.
 3. The lists are independent, but the *rows* are not: every segment's `nodes` are
    references to the same `Launch:<id>` entities, so a heart toggled on the
    detail screen shows in every segment.
 
 Switching the segment also calls `_pagination.reset()` on the screen's
-`PaginationController`, so only the first page is read — from cache, or
-fetched fresh if absent. See [Pagination](/sling_gql/guides/pagination/).
+`PaginationController`, so a page still loading for the previous filter is
+forgotten. See [Pagination](/sling_gql/guides/pagination/).
 
-**Known limitation:** the *membership* of a filtered list is fixed at fetch
-time. After `updateLaunchStatus` or `toggleFavorite`, the entity's fields
-update everywhere, but adding or removing an entry from a paginated list
-requires a write policy — see the [roadmap](/sling_gql/internals/roadmap/).
-Pull-to-refresh always reflects the current server state.
+The *membership* of the cached lists follows the entities through the list
+rules (`list_rules.dart`, see [mission control](#mission-control)); a
+pull-to-refresh starts the list over from the server's first page.
 
 ## Launch detail screen
 
@@ -403,9 +404,10 @@ Taps through the full Launches → Detail → mutation flow and asserts exact
   list body (`launches(first: 20)`) are separate widgets, separate
   `QueryBuilder`s, but they build in the same frame and end-of-frame
   batching merges them into one document.
-- **1 more request for "Load more".** Tapping the button appends a cursor
-  and rebuilds only the list body; only `launches(first: 20, after: <new
-  cursor>)` is new, so only that page is fetched.
+- **1 more request for "Load more".** Tapping the button asks for the page
+  after the merged list's `endCursor` and rebuilds only the list body; only
+  `launches(first: 20, after: <cursor>)` is fetched (with every field the
+  rows read) and merged into the cached list: "Load more (40 / 181)".
 - **1 more request for the detail screen.** Opening a launch triggers
   `prepare`, which selects everything the screen needs in one shot. The
   request is already in the log right after the tap, before the route is

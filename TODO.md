@@ -28,7 +28,8 @@ guides and the example (2026-09-29): #61–#66 done. 2026-09-30: #21 (coalesced
 (`sling_gql_link`), #54 (per-element inline list deps) done. 2026-10-01: #49
 (`sling_gql_sqflite`) done; open follow-ups #68, #69. 2026-10-02: #68, #69 done.
 Production-readiness review (2026-10): next are #50, #70, #71, #72, #73 in
-that order; `graphql-ws` dropped from the core.
+that order; `graphql-ws` dropped from the core. #50 (type policies,
+connection merging) done.
 
 Legend: **DX** developer experience · **Perf** runtime performance ·
 **Runtime** features/config · **Gen** generator · **Example** · **Test** ·
@@ -50,7 +51,7 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## P1 — production readiness (2026-10 review, in this order)
 
-50 first (below), then:
+50 done (see Done), then:
 
 70. **Runtime — Error model + auth/retry**: typed errors (network /
     HTTP status / GraphQL / partial) with `extensions` and error codes
@@ -78,10 +79,6 @@ Legend: **DX** developer experience · **Perf** runtime performance ·
 
 ## Roadmap items not covered above
 
-50. **Runtime — Type policies**: custom merge per field and connection
-    merging (Apollo `relayStylePagination`-style) so pages can live in one
-    growing cache list instead of one entry per cursor (pairs with #5).
-    Membership half done: `ListRule` (#55). Left: merge policies / position.
 51. **Runtime — Weakly held stale entries** (`WeakReference`/`Finalizer`) as
     an eviction mechanism for data past `maxAge` (#23 only revalidates, never
     drops).
@@ -163,6 +160,7 @@ Tour follow-ups done (2026-09-29): the detail screen's "Show payloads — no req
 49. Runtime — `packages/sling_gql_sqflite`: `SqflitePersistence.open(path, schema:)` restores the cache before the client starts (optionally in an isolate), saves `changesSince` deltas in one transaction (debounced 1 s / max 5 s, flushed on app pause, serialized, retried after failure), one row per entity and per `ROOT_QUERY` field with `updated_at`; bounds `maxAge` 7 d + `maxEntities` 10k pruned on the stored JSON at open; wipes on format / key field / `slingSchema.hash` mismatch (new generated FNV fingerprint of the generated code). Example persists on iOS, web stays in memory. Guide: guides/persistence. Hive/file adapters dropped until needed.
 68. Perf — Roots in `CacheDelta` field by field (`changedFields` / `removedFields`, per-field stamps on the operation roots, a root copied whole only for versions before its removal or a stamp purge; `applyTo` merges): `changesSince` at 10k entities 0.8 → 0.1 ms, a delta save 4 → 2–3 ms; `sling_gql_sqflite` writes exactly those root rows. `NormalizedCache.adopt` hydrates decoded JSON in place (no second copy): open at 10k 57 → 46–57 ms — `jsonDecode` is ~30 ms of it, the copy was less than estimated.
 69. Perf — `Cache.compact(upTo:)`: a store acknowledges what it saved, the change records up to it go (older versions get `full`); a compacted cache only forgets its removals past 100 000. `SqflitePersistence(compact: true)` compacts after each save (the example turns it off: `CacheStats` reads its own deltas) and deletes rows in chunked `IN (…)` statements. Save after a `gc` of 60% at 10k: ~90 → 37–44 ms (70–92 ms without compact); `changesSince` 0.03 ms.
+50. Runtime — Type policies: `SlingClient(typePolicies: {Query: TypePolicy(fields: {...})})` keyed by the generated accessor class (exact `runtimeType`, bound once per selection node); `FieldPolicy(keyArgs:, merge:)` (+ overridable `covers` / `pageArgs` / `pages` / `fill`), `RelayStylePagination` (pages merged into one list: `nodes`/`edges` spliced, `pageInfo` ends, `__pages` record; unmerged page = skeleton miss; first page resets). `Selection.cacheKey` (key args only) vs `alias` (response name), `PrintedOperation.toCacheKeys` → `PolicyWrite`, merged in `NormalizedCache` before the structural merge. Whole-selection fetches send first pages only (refresh resets); a field read inside a merged entry fetches every held page as a fill (no re-merge; entities no page returns leave). `PaginationController` holds the pending cursor, `PaginatedQueryBuilder` reads the merged list; example `type_policies.dart`. Guides: pagination, caching (type policies).
 
 ## Explicitly not planned
 

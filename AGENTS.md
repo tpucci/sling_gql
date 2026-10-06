@@ -171,8 +171,9 @@ on the code.
 
 | File | Role |
 | --- | --- |
-| `selection.dart` | `Selection` tree (field + args → alias), `Arg`, `PrintedOperation` (tree → document + variables). Alias = `field_<fnv1a64(json(args))>` (64-bit, web-safe); the alias is **also the cache key**. |
-| `cache/cache.dart` | `Cache` interface + `NormalizedCache`: flat entity map (`ROOT_QUERY`, `Launch:launch-181`), `Ref` values, `read` follows refs and fills the caller's `deps` with `entity.field` keys, returns the `missing` sentinel on miss (distinct from a server `null`); `readField(path, field)` is the allocation-free variant getters use, dep keys are interned. `writeResponse` normalizes + merges and returns touched keys. `evict`, `gc`, `snapshot`/`initial`, `onChange` (once per change: a write outside `batch`, or a whole `batch` — the client batches every response/mutation/subscription event/optimistic callback), `version`/`changesSince` → `CacheDelta` (entities stamped per change, tombstones for removals; operation roots stamped per field and reported as `changedFields`/`removedFields`, copied whole only before a root removal / stamp purge; `compact(upTo:)` drops the records a store holds, after which older versions get `full`); `NormalizedCache.adopt` hydrates decoded JSON without copying. Imports only its siblings in `cache/` (`normalization.dart` imports `selection.dart`) — keep it that way. |
+| `selection.dart` | `Selection` tree (field + args → alias), `Arg`, `PrintedOperation` (tree → document + variables). Alias = `field_<fnv1a64(json(args))>` (64-bit, web-safe); the alias is **also the cache key**, unless a type policy narrows it to `cacheKey` (key args only; `toCacheKeys` maps the response back). |
+| `cache/cache.dart` | `Cache` interface + `NormalizedCache`: flat entity map (`ROOT_QUERY`, `Launch:launch-181`), `Ref` values, `read` follows refs and fills the caller's `deps` with `entity.field` keys, returns the `missing` sentinel on miss (distinct from a server `null`); `readField(path, field)` is the allocation-free variant getters use, dep keys are interned. `writeResponse` normalizes + merges and returns touched keys. `evict`, `gc`, `snapshot`/`initial`, `onChange` (once per change: a write outside `batch`, or a whole `batch` — the client batches every response/mutation/subscription event/optimistic callback), `version`/`changesSince` → `CacheDelta` (entities stamped per change, tombstones for removals; operation roots stamped per field and reported as `changedFields`/`removedFields`, copied whole only before a root removal / stamp purge; `compact(upTo:)` drops the records a store holds, after which older versions get `full`); `NormalizedCache.adopt` hydrates decoded JSON without copying. Imports only its siblings in `cache/` (`normalization.dart` imports `selection.dart`; `selection.dart` imports `field_policy.dart`) — keep it that way. |
+| `cache/field_policy.dart` | `FieldPolicy` (`keyArgs`, `merge`, overridable `covers`/`pageArgs`/`pages`/`fill`), `TypePolicy`, `RelayStylePagination` (pages of a connection in one list, `__pages` record), `PolicyWrite` (a response value to merge, built by `toCacheKeys`). Imports only `ref.dart`. |
 | `cache/normalization.dart` | `Normalization`: `keyField` (`id`), `identify(obj)` → entity key or null (inline), `lookup(type, args)` for by-id root fields. `Normalization.none` = old path-addressed behaviour. |
 | `cache/ref.dart` | `Ref`, `missing`. |
 | `accessor.dart` | `Accessor` base class for generated types + `Recorder` interface. Helpers `scalar/scalarList/object/list/write`. Skeleton semantics live here. |
@@ -201,6 +202,23 @@ Design decisions worth knowing before changing things:
   is printed `<alias>__<Type>: field` per fragment (GraphQL requires one
   shape per response name); `PrintedOperation.toCacheKeys` maps the response
   back to aliases after error pruning, before `writeResponse` (#57).
+- **Type policies are app config** (`SlingClient(typePolicies:)`, keyed by
+  the generated accessor class — exact `runtimeType` — and field name;
+  `Recorder.typePolicies`). `Accessor._select` binds a node's policy once
+  (`Selection.bindPolicy`): the node keeps its `alias` (response name, all
+  args) and gets a `cacheKey` (key args only) that accessor paths,
+  `cachePath` and list rules use; siblings sharing it are `sameEntry`.
+  A merging policy's responses reach the cache as `PolicyWrite`s
+  (`toCacheKeys`), merged per page in `NormalizedCache._applyPolicy` (on a
+  copy, normalized) and then merged structurally like any value — so dep
+  keys, no-op writes, deltas, `fetchedAt`, rollback and persistence are
+  unchanged. Client side: `covers` false → the accessor reads under the
+  alias (a skeleton miss, fetched with those args); a missed policy node
+  carries its siblings' subtrees at flush (`_entryFetches`); whole-selection
+  enqueues (`refetch`, `cacheAndNetwork`, `maxAge`) collapse later pages to
+  the first (`mergeFrom(firstPages:)`, refresh resets); a leaf under a
+  merged entry is fetched for every held page as `fillOnly`
+  (`ensureFillPath`) and written with `FieldPolicy.fill`, never merged.
 - **Normalization is driven by codegen flags.** `object(..., keyed: true)` /
   `list(..., keyed: true)` make the printer add `id` next to `__typename`;
   `object(..., lookup: 'Launch')` lets `launch(id:)` resolve to `Launch:<id>`

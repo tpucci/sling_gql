@@ -279,8 +279,8 @@ the natural thing to hook to pull-to-refresh:
 CupertinoSliverRefreshControl(onRefresh: state.refetch)
 ```
 
-Because all pages of a paginated list live in the same widget's selection, one pull
-refetches all loaded pages in **one** request.
+A connection merged by [`RelayStylePagination`](/sling_gql/guides/pagination/) is refetched
+from its first page: a refresh starts the list over.
 
 To refresh on open, or automatically after a while, see
 [Fetch policies & freshness](/sling_gql/guides/fetch-policies/) (`fetchPolicy:`, `maxAge`,

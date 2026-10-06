@@ -17,8 +17,9 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    Objects with `__typename` + `id` are stored once, referenced from the tree, and scopes
    are notified per entity field. `launch(id:)` is served from the entity the list wrote.
    See [Caching](/sling_gql/guides/caching/). Unreachable entities are swept automatically
-   (`SlingClient(gcAfterWrites:)`). Left for later: type policies (custom merge per field,
-   connection merging).
+   (`SlingClient(gcAfterWrites:)`). Type policies (`SlingClient(typePolicies:)`): key
+   arguments and a custom merge per field, and `RelayStylePagination` keeping a cursor
+   connection in one growing list — see [Pagination](/sling_gql/guides/pagination/).
 
 2. **Mutations** — done
 
@@ -28,8 +29,8 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
    access (`client.cacheScope`), and list membership after a mutation
    (`cacheScope.list((q) => q.me?.favorites).append/remove`, `evict`) — see
    [Caching](/sling_gql/guides/caching/). Partial errors fail the call but keep what the
-   server resolved, over the rolled-back optimistic writes. Left for later: connection-aware type policies so
-   paginated/filtered lists update without `refetchQueries`.
+   server resolved, over the rolled-back optimistic writes. List rules keep filtered lists
+   and merged connections in sync with their entities.
 
 3. **Subscriptions** — done
 
@@ -116,10 +117,11 @@ from the example app) is `TODO.md` at the repository root; this page is the summ
 
 11. **Production readiness** — next
 
-    In order: type policies and connection merging (one growing cache list for cursor
-    pages); a typed error model with `errorPolicy`, timeouts, query retry with backoff and a
-    token-refresh hook; Android and second-backend test coverage; an offline mutation queue
-    (persistence migration across schema changes is done); then an API audit and 1.0.
+    Done: type policies and connection merging (one growing cache list for cursor pages,
+    `RelayStylePagination`) and persistence migration across schema changes. Next, in order:
+    a typed error model with `errorPolicy`, timeouts, query retry with backoff and a
+    token-refresh hook; Android and second-backend test coverage; an offline mutation queue;
+    then an API audit and 1.0.
 
 </Steps>
 

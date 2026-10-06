@@ -198,8 +198,9 @@ cache.evict(cache.launch('launch-180')!);                // gone from every list
 Edits write the whole new list back (`Viewer:viewer-1.favorites` is the touched key, exactly as
 if a response had replaced it), are journaled like any `CacheWrite` inside a mutation's
 `optimistic` callback, and are set-like no-ops on a list that is not cached. Each argument
-set is its own entry: `launches(first: 20)` and its next page are separate lists, and the edit
-applies to the one you name. See [Updating lists after a
+set is its own entry — `launches(filter: …)` lists are separate — and the edit applies to the
+one you name; with [`RelayStylePagination`](#type-policies) the pages of one connection are
+one list, edited as a whole. See [Updating lists after a
 mutation](/sling_gql/guides/mutations/#updating-lists-after-a-mutation) for the full rules.
 
 `cache.evict(entity)` (or the untyped `client.cache.evict('Launch:launch-181')`) removes the
@@ -244,9 +245,9 @@ are journaled and rolled back with the mutation.
 
 Two rules of the rules:
 
-- **Query responses only remove.** With pagination each page is one list, and the launches
-  of page two "belong" to `launches(first: 20)` as much as page one's do — yet must not be
-  added to it. So a response can make an entity *leave* lists it no longer belongs to
+- **Query responses only remove.** Without a merging policy each page is its own list, and
+  the launches of page two "belong" to `launches(first: 20)` as much as page one's do — yet
+  must not be added to it. So a response can make an entity *leave* lists it no longer belongs to
   (the cached "Scheduled" segment loses a launch a fresh response shows as `SUCCESS`), but
   entities only *join* lists on what the app or the server pushes: mutation responses,
   subscription events, setters. A response's own lists are the server's word.
@@ -340,6 +341,69 @@ Five launches, each row counting its builds, and a detail card for the first one
 - With **SlingRow**, only the renamed row's count goes up. Switch to **Plain rows** and
   rename again: every row is rebuilt, because their reads belong to the list's scope.
 
+## Type policies
+
+By default every argument set of a field is its own cache entry and a response replaces
+it. `SlingClient(typePolicies:)` changes that per field — app configuration, not generated
+code — keyed by the **generated accessor class** the field is read through and the field
+name:
+
+```dart
+SlingClient<Query>(
+  typePolicies: {
+    Query: TypePolicy(fields: {
+      'launches': RelayStylePagination(),                // pages → one growing list
+      'search': FieldPolicy(keyArgs: ['text']),          // `limit` shares the entry
+    }),
+    Rocket: TypePolicy(fields: {'launches': RelayStylePagination()}),
+  },
+)
+```
+
+- **`keyArgs`** are the arguments that identify the entry; the others do not. Each request
+  still prints the field under an alias of *all* its arguments (two pages in one document
+  never clash) and the response is mapped back to the entry, as for
+  [fragment fields](/sling_gql/guides/querying/).
+- **`RelayStylePagination`** merges cursor pages into one list (`nodes`, `edges`,
+  `pageInfo`), with `first`/`after`/`last`/`before` out of the key; a page not merged yet
+  reads as a miss, a refresh starts the list over. The
+  [pagination guide](/sling_gql/guides/pagination/) has the details.
+- **The key is the exact class.** A field read through an interface accessor (`Node`) and
+  through a member's `asTeam` are two lookups: register the policy under each class the
+  field is read through.
+
+The merged value is an ordinary cache value: the merge runs per page, then the result is
+merged into the field like any response, so only what changed touches its readers (an
+identical refresh rebuilds nothing), `fetchedAt`, `changesSince` / `compact`, `gc`,
+optimistic rollbacks, list rules and [SQLite persistence](/sling_gql/guides/persistence/)
+see one field. A relay entry also records which pages it holds (`__pages`, a key no
+GraphQL field can have), which is how it tells a merged page from one to fetch, after a
+restart too.
+
+### A custom merge
+
+`FieldPolicy(merge:)` gets the cached value (`null` when absent), one page of the response
+and the arguments it was sent with — in the cache's own format: entities are refs
+(`Ref` from `package:sling_gql/internal.dart`, equal when their keys are), inline objects
+maps. Return a new value; do not mutate `existing`:
+
+```dart
+'tags': FieldPolicy(
+  keyArgs: const [],                       // every page in one entry
+  merge: (existing, incoming, context) => [
+    ...?existing as List?,
+    ...incoming! as List,
+  ],
+),
+```
+
+A merge alone never fetches a page: with every argument set sharing the entry, any read is
+served from it. For pages of your own (offsets, say), subclass `FieldPolicy` and override
+`covers(existing, args)` (does the entry hold what these arguments ask for? `false` is a
+miss, fetched with them), `pageArgs` (dropped by a refresh, so it starts over) and
+`pages(existing)` (what to refetch when a row reads a new field) — `RelayStylePagination`
+is that class for cursors.
+
 ## Persistence hooks
 
 Reads are synchronous — they happen inside `build()` — so the store is in memory and stays
@@ -418,5 +482,5 @@ lists), so neither `snapshot` nor a delta can share maps with the store. `snapsh
   [Fetch policies & freshness](/sling_gql/guides/fetch-policies/)) but never drops it;
   Dart has `WeakReference` and `Finalizer`, so stale entries could be held weakly and
   evicted by the GC rather than by timers.
-- **Type policies** beyond identity (custom merge functions per field, pagination merging
-  à la Apollo `relayStylePagination`).
+- **`read` functions** (Apollo's computed fields / redirects) and `possibleTypes`
+  inheritance for [type policies](#type-policies): a policy keys on one accessor class.

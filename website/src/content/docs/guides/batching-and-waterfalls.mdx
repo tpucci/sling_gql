@@ -117,7 +117,7 @@ CupertinoButton(
       setState(() => _cursors.add(page!.pageInfo!.endCursor)),
 )
 
-// ✅ let PaginatedQueryBuilder own the cursor list; it reads endCursor
+// ✅ let PaginatedQueryBuilder own the next cursor; it reads endCursor
 // during its own build, so a tap never has to read it for the first time.
 CupertinoButton(onPressed: state.loadMore)
 ```

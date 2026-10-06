@@ -51,7 +51,7 @@ query {
 | Mutations (`client.mutate((m) => m.toggleFavorite(launchId: id)?.favorite)`, `MutationBuilder`) | ✅ response normalized into the same entities → every widget showing the launch rebuilds |
 | `prepare` to avoid waterfalls on conditional reads | ✅ |
 | `refetch`, sticky errors (no retry loops), partial `errors[]` handling | ✅ |
-| Cursor pagination (one cache entry per `after`) | ✅ example |
+| Cursor pagination (`RelayStylePagination`: pages merged into one cached list) and type policies (`keyArgs`, custom `merge`) | ✅ `PaginatedQueryBuilder`, example |
 | Test helpers (`MockGraphQLServer`, `pumpUntilSettled`) | ✅ `packages/sling_gql_test` |
 | Subscriptions (`client.subscribe((s) => s.launchStatusChanged?..status)`, `SubscriptionBuilder`) | ✅ GraphQL over SSE by default, `subscriptionTransport:` to swap; events normalized into the same entities |
 | List rules (`ListRule`: "`launches(filter:)` holds a launch iff its status matches") | ✅ cached lists gain/lose entities on mutations, subscription events and setters; query responses only remove |

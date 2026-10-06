@@ -217,10 +217,10 @@ every scope that read any of those fields. Evictions are **not** journaled — e
 mutation succeeded, not in `optimistic`.
 
 <Aside type="caution" title="Paginated and filtered lists">
-Each argument set is its own cache entry. `launches(first: 20)` and
-`launches(first: 20, after: "…")` are two pages, and `launches(filter: {favorite: true})` is
-yet another list — an edit applies to exactly the one you name, and a sibling `totalCount` is
-not adjusted. When membership is a function of the entity (`favorites` ⇔ `launch.favorite`,
+Each argument set is its own cache entry (the pages of a connection are one list with
+[`RelayStylePagination`](/sling_gql/guides/pagination/)), and `launches(filter: {favorite: true})`
+is yet another list — an edit applies to exactly the one you name, and a sibling
+`totalCount` is not adjusted. When membership is a function of the entity (`favorites` ⇔ `launch.favorite`,
 `launches(filter:)` ⇔ `launch.status`), a [list rule](/sling_gql/guides/caching/#list-rules-lists-that-follow-their-entities)
 does this for every cached instance, for mutations and subscriptions alike. For paginated
 lists where the row's *position* is the server's call, [`refetchQueries`](#refetchqueries)

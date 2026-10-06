@@ -1,36 +1,74 @@
 ---
 title: Pagination
-description: Cursor and offset pagination with per-argument cache entries — a small helper on top of plain state.
+description: Cursor connections merged into one growing cache list (RelayStylePagination), PaginatedQueryBuilder on top, and offset pagination.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 import DemoSource from '../../../components/DemoSource.astro';
 import LiveApp from '../../../components/LiveApp.astro';
 
-sling_gql needs no pagination *machinery*: a field called with different arguments is a
-**different cache entry**, and a widget's selection can include as many of them as it
-likes. Pagination is then just state — which pages to read. `PaginatedQueryBuilder` owns
-that state for cursor connections; the manual recipe below shows what it does.
+A field called with different arguments is a different cache entry — unless a
+[type policy](/sling_gql/guides/caching/#type-policies) says otherwise. For a cursor
+connection, `RelayStylePagination` does: every page of `launches(first: 20, after: …)` is
+merged into **one growing list** in the cache (Apollo's `relayStylePagination`), and
+`PaginatedQueryBuilder` reads that list and asks for the next page.
 
-## Cursor pagination with `PaginatedQueryBuilder`
+## One list per connection: `RelayStylePagination`
 
-The mock API exposes `launches(first, after): LaunchConnection!`. The example's list body
-is a `PaginatedQueryBuilder<Query, Launch>`:
+Register the policy once, on the client, under the generated class the field is read
+through:
+
+```dart title="type_policies.dart (example app)"
+const Map<Type, TypePolicy> typePolicies = {
+  Query: TypePolicy(fields: {'launches': RelayStylePagination()}),
+};
+
+SlingClient<Query>(schema: slingSchema, typePolicies: typePolicies, /* … */);
+```
+
+What changes in the cache:
+
+- **One entry per key arguments.** `first`, `after`, `last` and `before` are not part of the
+  cache key; every other argument is (`filter`, `orderBy`). `launches(first: 20)` and
+  `launches(first: 20, after: "…")` are stored together at `ROOT_QUERY.launches`;
+  `launches(first: 20, filter: {status: SUCCESS})` is another merged list. Pass
+  `RelayStylePagination(keyArgs: ['filter'])` to choose them yourself.
+- **Pages append.** A page `after` a cursor is appended to `nodes` / `edges` (prepended for
+  `before`); `pageInfo.endCursor` / `hasNextPage` come from the last page, `startCursor` /
+  `hasPreviousPage` from the first, `totalCount` from the latest. Each page still goes out
+  under its own alias, so two pages in one request never clash.
+- **A page not merged yet is a miss.** The entry remembers which pages it holds, so reading
+  `launches(first: 20, after: c)` renders a skeleton and fetches exactly that page until it
+  has been merged; the pages already there stay on screen.
+- **A refresh starts over.** A fetch of a whole selection — `refetch()`, pull to refresh,
+  `cacheAndNetwork`, a stale `maxAge` — sends the connection's **first page only**, and a
+  first page replaces the merged list. After a refresh the list is back to page one.
+- **New fields fill, they do not re-merge.** A row reading a field the entry's entities lack
+  fetches it for every page held, in one request, and only writes the entities: the list
+  keeps its pages (entities no page returns any more leave it).
+
+Everything else is the ordinary cache: the merged list is one root field, so it persists
+with [SQLite](/sling_gql/guides/persistence/) (and the next page continues it after a
+restart), `ListRule`s and `cacheScope.list` edit it, `gc` and `changesSince` see it.
+
+## `PaginatedQueryBuilder`
+
+The example's list body is a `PaginatedQueryBuilder<Query, Launch>`:
 
 ```dart title="launches_screen.dart (excerpt)"
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
-  final _pagination = PaginationController(); // cursors: [null] = first page
+  final _pagination = PaginationController(); // the page being loaded, if any
 
-  void _onSegmentChanged(String? status) {
+  void _onSegmentChanged(LaunchStatus? status) {
     setState(() => _status = status);
-    _pagination.reset(); // new filter → back to page one
+    _pagination.reset(); // forget a page loading for the previous filter
   }
 
   @override
   Widget build(BuildContext context) => PaginatedQueryBuilder<Query, Launch>(
     controller: _pagination,
-    // Runs once per loaded page, every build. Read every field here.
+    // Runs for the merged list (and the page loading), every build. Read every field here.
     page: (query, after) {
       final page = query.launches(first: pageSize, after: after, filter: filter);
       return ConnectionPage(
@@ -62,23 +100,27 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
 ```
 
 - **`page`** maps the query root and a cursor to a `ConnectionPage` — the generated
-  connection types are plain classes, so you name the four fields once. The widget calls
-  it for every cursor in the controller during a single build.
-- **`PaginatedState`** hands the builder `items` (all pages flattened), `hasMore`,
-  `totalCount`, `loadMore()`, `refetch()`, plus `isLoading` / `hasMissingData` / `error`
-  from the underlying `QueryBuilder`.
-- **`PaginationController`** is optional. Pass your own when something outside the
-  builder must `reset()` it (a filter or sort change); otherwise the widget keeps a private
-  one.
+  connection types are plain classes, so you name the four fields once. The widget calls it
+  with `null` (the first page, i.e. the merged list) and, while a page is loading, with
+  that page's cursor.
+- **`PaginatedState`** hands the builder `items` (the merged list, then the skeleton of the
+  page loading), `hasMore`, `totalCount`, `loadMore()`, `refetch()`, plus `isLoading` /
+  `hasMissingData` / `error` from the underlying `QueryBuilder`.
+- **`PaginationController`** holds the cursor of the page being loaded. It is optional:
+  pass your own when something outside the builder must `reset()` it (a filter or sort
+  change); otherwise the widget keeps a private one.
+
+The field needs the policy: without it the next page would land in an entry of its own and
+the list would not grow (`PaginatedQueryBuilder` asserts in debug builds).
 
 What happens on the wire:
 
 | Interaction | Request |
 | --- | --- |
 | First frame | `launches_a: launches(first: 20)` — plus the header's `company` and `stats`, batched |
-| `state.loadMore()` | `launches_b: launches(first: 20, after: "…")` — **only** the new page; page 1 is served from cache |
-| `state.refetch()` (pull to refresh) | `launches_a` **and** `launches_b` in one document — `refetch()` replays the whole last selection, cursors are kept |
-| `controller.reset()` | back to `launches_a`, from cache; the other pages stay cached too |
+| `state.loadMore()` | `launches_b: launches(first: 20, after: "…")` — **only** the next page, with every field the rows read; it is merged into `ROOT_QUERY.launches` |
+| `state.refetch()` (pull to refresh) | `launches_a` again — **the first page only**: the list starts over from page one |
+| Another segment, then back | the other filter is another merged list; coming back shows this one, every loaded page included, from the cache |
 
 ```graphql title="request after one "Load more""
 query ($first: Int, $after: String) {
@@ -93,8 +135,9 @@ query ($first: Int, $after: String) {
 
 <Aside type="note" title="Skeleton lists have one element">
 While the first page is loading, `state.items` holds one skeleton node (so `.map` still
-records the row selection). Rows render as placeholders on their own; for counts or empty
-states check `state.isLoading` / `state.hasMissingData` first, as the example does.
+records the row selection); while the next page loads, its skeleton follows the loaded
+items. Rows render as placeholders on their own; for counts or empty states check
+`state.isLoading` / `state.hasMissingData` first, as the example does.
 </Aside>
 
 ### Try it
@@ -105,33 +148,39 @@ Pages of five:
 
 <LiveApp demo="pagination" />
 
-- **Load more**: one more request, for the next five only (`after:` the last cursor).
-  The first page comes from the cache.
-- **Refresh**: one request with **both** loaded pages, cursors kept, the way a pull to
-  refresh behaves.
+- **Load more**: one more request, for the next five only (`after:` the last cursor),
+  merged into the list the first page started.
+- **Refresh**: one request for the **first page only** — a refresh resets the connection to
+  page one, and the list shows five launches again.
 
 ## The manual recipe
 
 `PaginatedQueryBuilder` is thin — this is what it does, and what you would write for a
-connection shape it does not fit:
+connection shape it does not fit (with the policy registered):
 
 ```dart
 class _LaunchesScreenState extends State<LaunchesScreen> {
   static const pageSize = 20;
-  final List<String?> _cursors = [null]; // null = first page
+  String? _loading; // the cursor of the page on its way
 
   @override
   Widget build(BuildContext context) => QueryBuilder<Query>(
     builder: (context, query, state) {
-      final pages = [
-        for (final cursor in _cursors) query.launches(first: pageSize, after: cursor),
-      ];
-      final launches = [for (final page in pages) ...?page?.nodes];
+      final list = query.launches(first: pageSize); // the merged list
+      final launches = [...?list?.nodes];
+      var hasMore = list?.pageInfo?.hasNextPage ?? false;
+      final endCursor = list?.pageInfo?.endCursor; // read during build, see below
+      final total = list?.totalCount;
 
-      final last = pages.last;
-      final hasMore = last?.pageInfo?.hasNextPage ?? false;
-      final endCursor = last?.pageInfo?.endCursor; // read during build, see below
-      final total = last?.totalCount;
+      if (_loading case final cursor?) {
+        final next = query.launches(first: pageSize, after: cursor);
+        if (next?.pageInfo?.hasNextPage == null) {
+          launches.addAll(next?.nodes ?? const []); // not merged yet: its skeleton
+          hasMore = false;
+        } else {
+          _loading = null; // merged: `list` has it now
+        }
+      }
 
       return CustomScrollView(slivers: [
         CupertinoSliverRefreshControl(onRefresh: state.refetch),
@@ -142,7 +191,7 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
         SliverToBoxAdapter(
           child: hasMore
               ? CupertinoButton.filled(
-                  onPressed: () => setState(() => _cursors.add(endCursor)),
+                  onPressed: () => setState(() => _loading = endCursor),
                   child: Text('Load more (${launches.length} / $total)'),
                 )
               : Text('${launches.length} launches'),
@@ -156,10 +205,10 @@ class _LaunchesScreenState extends State<LaunchesScreen> {
 <Aside type="caution" title="Read the cursor during build">
 The first version of this screen read `page.pageInfo.endCursor` inside `onPressed`. Since
 nothing had read `endCursor` during build, it was not fetched; the tap recorded a miss,
-fetched it, and meanwhile appended `null` — the first page — again. The request-counting
-test caught it. Always capture what a callback needs in a local during `build()` — this is
-why `ConnectionPage` asks for `endCursor` up front and `PaginatedState.loadMore()` takes no
-arguments.
+fetched it, and meanwhile asked for the page after `null` — the first page — again. The
+request-counting test caught it. Always capture what a callback needs in a local during
+`build()` — this is why `ConnectionPage` asks for `endCursor` up front and
+`PaginatedState.loadMore()` takes no arguments.
 </Aside>
 
 ## Offset pagination
@@ -174,9 +223,11 @@ final pages = [
 final launches = [for (final p in pages) ...?p];
 ```
 
-Changing `_filter` or `_order` changes the arguments, hence the alias, hence the cache
-entry — the old pages stay cached (useful if the user toggles back), the new ones are
-fetched.
+Without a policy every page is its own cache entry: changing `_filter` or `_order`
+changes the arguments, hence the alias, hence the entry — the old pages stay cached
+(useful if the user toggles back), the new ones are fetched. To merge offset pages into one
+list instead, give the field a [custom policy](/sling_gql/guides/caching/#a-custom-merge) whose
+`covers` says which offsets the entry holds.
 
 ## Nested connections
 
@@ -187,10 +238,5 @@ launch detail is one more sub-selection in the same request.
 final recent = launch.rocket?.launches(first: 5)?.nodes ?? const <Launch>[];
 ```
 
-## What is missing
-
-Each page's `nodes` is a list of references to `Launch:<id>` entities, so a launch that
-shows up in two pages is stored once and a future favourite mutation updates every row.
-What is still missing is a *connection merge policy*: the pages are separate cache
-entries stitched together by the widget, not one growing list in the cache (Apollo's
-`relayStylePagination`). See [Caching](/sling_gql/guides/caching/).
+To merge its pages too, register the policy under the class it is read through:
+`Rocket: TypePolicy(fields: {'launches': RelayStylePagination()})`.
