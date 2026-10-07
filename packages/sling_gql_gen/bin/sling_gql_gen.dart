@@ -7,7 +7,12 @@ import 'package:sling_gql_gen/sling_gql_gen.dart';
 
 Future<void> main(List<String> arguments) async {
   final parser = ArgParser()
-    ..addOption('schema', help: 'Path to a GraphQL introspection JSON file.')
+    ..addOption(
+      'schema',
+      help:
+          'Path to the schema: an introspection JSON file (.json) or SDL '
+          '(any other extension, e.g. schema.graphql).',
+    )
     ..addOption(
       'endpoint',
       help: 'GraphQL endpoint URL to introspect instead of --schema.',
@@ -58,7 +63,7 @@ Future<void> main(List<String> arguments) async {
 
   if (results['help'] as bool) {
     stdout.writeln(
-      'Usage: dart run sling_gql_gen (--schema <schema.json> | --endpoint <url>) --out <file.dart>',
+      'Usage: dart run sling_gql_gen (--schema <schema.json|schema.graphql> | --endpoint <url>) --out <file.dart>',
     );
     stdout.writeln(parser.usage);
     return;
@@ -90,7 +95,7 @@ Future<void> main(List<String> arguments) async {
     return;
   }
 
-  final Map<String, Object?> json;
+  final IntrospectionSchema schema;
   if (schemaPath != null) {
     final schemaFile = File(schemaPath);
     if (!schemaFile.existsSync()) {
@@ -98,7 +103,12 @@ Future<void> main(List<String> arguments) async {
       exitCode = 66;
       return;
     }
-    json = jsonDecode(await schemaFile.readAsString()) as Map<String, Object?>;
+    final source = await schemaFile.readAsString();
+    schema = schemaPath.endsWith('.json')
+        ? IntrospectionSchema.fromJson(
+            jsonDecode(source) as Map<String, Object?>,
+          )
+        : introspectionFromSdl(source);
   } else {
     final headers = {
       'content-type': 'application/json',
@@ -126,10 +136,9 @@ Future<void> main(List<String> arguments) async {
       exitCode = 69;
       return;
     }
-    json = data;
+    schema = IntrospectionSchema.fromJson(data);
     stdout.writeln('Introspected $endpoint');
   }
-  final schema = IntrospectionSchema.fromJson(json);
   final code = generate(
     schema,
     importPath: importPath,

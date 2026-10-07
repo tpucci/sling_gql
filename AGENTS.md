@@ -421,7 +421,8 @@ Design decisions worth knowing before changing things:
 
 ## Generator (`packages/sling_gql_gen`)
 
-Input: introspection JSON. Output: one Dart file. Rules are documented in the
+Input: introspection JSON, or SDL turned into the same `IntrospectionSchema`
+(`lib/src/sdl.dart`, via `package:gql`). Output: one Dart file. Rules are documented in the
 package README; the contract it must satisfy is the hand-written example at the
 top of `packages/sling_gql/test/core_test.dart` (unions/interfaces:
 `packages/sling_gql/test/fragments_test.dart`). If you change `Accessor`'s
@@ -432,7 +433,7 @@ adding a helper the generator starts calling is a minor of both, with the
 minimum `sling_gql` named in the generator's changelog. The library
 (`package:sling_gql_gen/sling_gql_gen.dart`) exports only `generate`,
 `generatedCodeHash`, `IntrospectionSchema` (+ `Gql*`, `TypeRef`),
-`ScalarMapping`, `introspectionQuery`; the emitter's helpers stay in `src/`.
+`ScalarMapping`, `introspectionQuery`, `introspectionFromSdl`; the emitter's helpers stay in `src/`.
 
 The generator emits the `Mutation` root (with `.root`) and an
 `extension SlingMutations on SlingClient<Query>` providing `client.mutate(...)`,

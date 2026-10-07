@@ -28,9 +28,11 @@ go digging for why an identifier looks the way it does.
 
 Flags:
 
-- `--schema` (one of `--schema` / `--endpoint`): path to a GraphQL
-  introspection JSON file, i.e. the standard `{"__schema": {...}}` result
-  of the introspection query.
+- `--schema` (one of `--schema` / `--endpoint`): path to the schema. A
+  `.json` file is read as introspection JSON, i.e. the standard
+  `{"__schema": {...}}` result of the introspection query; any other
+  extension as SDL (`schema.graphql`), e.g. the schema file a backend
+  keeps in its repository. Both produce the same output.
 - `--endpoint` (one of `--schema` / `--endpoint`): GraphQL URL to introspect
   instead; `-H` / `--header` (repeatable) adds HTTP headers to that request
   (`-H "Authorization: Bearer …"`).
