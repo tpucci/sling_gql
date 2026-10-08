@@ -931,9 +931,6 @@ void main() {
     });
 
     test('generic converter on a nullable input field serializes a local', () {
-      // `x == null ? null : ObjectIdConverter.serialize(x)` on the field
-      // itself doesn't compile: a public field isn't promoted after a null
-      // check.
       final code = generate(
         introspectionFromSdl('''
           scalar ObjectID
