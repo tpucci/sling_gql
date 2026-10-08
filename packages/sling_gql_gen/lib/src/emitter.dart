@@ -849,13 +849,19 @@ void _emitInputClass(StringBuffer out, GqlType type, ScalarRegistry registry) {
   out.writeln('  Map<String, Object?> toJson() => {');
   for (final f in type.inputFields) {
     final dartName = sanitizeIdentifier(f.name);
+    // Bound to a local: a public field can't be promoted after a null
+    // check, so `x == null ? null : Converter.serialize(x)` wouldn't compile.
     final valueExpr = argValueExpression(
-      dartName,
+      'v',
       f.type,
-      nonNull: false,
+      nonNull: true,
       scalars: registry,
     );
-    out.writeln("    if ($dartName != null) '${f.name}': $valueExpr,");
+    out.writeln(
+      valueExpr == 'v'
+          ? "    if ($dartName != null) '${f.name}': $dartName,"
+          : "    if ($dartName case final v?) '${f.name}': $valueExpr,",
+    );
   }
   out.writeln('  };');
   out.writeln('}');

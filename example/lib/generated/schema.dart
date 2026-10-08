@@ -216,7 +216,7 @@ const slingSchema = SlingSchema<Query, Mutation>(
   subscription: Subscription.root,
   keyField: 'id',
   fields: _slingFields,
-  hash: 'djiyvy1g5tneq',
+  hash: 'mh9vp50pvsyb0',
 );
 
 /// Typed, non-fetching cache access for this schema's keyed types:
@@ -694,7 +694,7 @@ class LaunchFilter {
   final bool? favorite;
 
   Map<String, Object?> toJson() => {
-    if (status != null) 'status': status?.toGraphQL(),
+    if (status case final v?) 'status': v.toGraphQL(),
     if (rocketId != null) 'rocketId': rocketId,
     if (year != null) 'year': year,
     if (upcoming != null) 'upcoming': upcoming,
@@ -724,7 +724,7 @@ class ScheduleLaunchInput {
     if (name != null) 'name': name,
     if (rocketId != null) 'rocketId': rocketId,
     if (launchpadId != null) 'launchpadId': launchpadId,
-    if (date != null) 'date': date?.toIso8601String(),
+    if (date case final v?) 'date': v.toIso8601String(),
     if (details != null) 'details': details,
     if (payloadNames != null) 'payloadNames': payloadNames,
   };

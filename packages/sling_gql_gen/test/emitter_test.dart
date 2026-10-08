@@ -796,12 +796,12 @@ void main() {
     expect(code, contains('final List<UserStatus>? statusIn;'));
     expect(
       code,
-      contains("if (status != null) 'status': status?.toGraphQL(),"),
+      contains("if (status case final v?) 'status': v.toGraphQL(),"),
     );
     expect(
       code,
       contains(
-        "if (statusIn != null) 'statusIn': statusIn?.map((e) => e.toGraphQL()).toList(),",
+        "if (statusIn case final v?) 'statusIn': v.map((e) => e.toGraphQL()).toList(),",
       ),
     );
   });
@@ -839,7 +839,7 @@ void main() {
     expect(
       code,
       contains(
-        "if (\$and != null) '_and': \$and?.map((e) => e?.toJson()).toList(),",
+        "if (\$and case final v?) '_and': v.map((e) => e?.toJson()).toList(),",
       ),
     );
   });
@@ -928,6 +928,30 @@ void main() {
       );
       // No longer flagged as an unknown custom scalar once mapped.
       expect(mapped, isNot(contains('Unknown custom scalar `ObjectID`')));
+    });
+
+    test('generic converter on a nullable input field serializes a local', () {
+      // `x == null ? null : ObjectIdConverter.serialize(x)` on the field
+      // itself doesn't compile: a public field isn't promoted after a null
+      // check.
+      final code = generate(
+        introspectionFromSdl('''
+          scalar ObjectID
+          input Filter { id: ObjectID }
+          type Query { a(f: Filter): Int }
+        '''),
+        scalars: [
+          const ScalarMapping(
+            'ObjectID',
+            'ObjectId',
+            converter: 'ObjectIdConverter',
+          ),
+        ],
+      );
+      expect(
+        code,
+        contains("if (id case final v?) 'id': ObjectIdConverter.serialize(v),"),
+      );
     });
   });
 
