@@ -1,3 +1,7 @@
+## 1.1.1
+
+ - **FIX**(sling_gql_gen): converter scalars on nullable input fields compile. ([20e2b4cd](https://github.com/tpucci/sling_gql/commit/20e2b4cd5996b239b56184b437d6e33a9807385c))
+
 ## 1.1.0
 
  - **FEAT**(sling_gql_gen): accept an SDL schema file in --schema. ([3aacab0f](https://github.com/tpucci/sling_gql/commit/3aacab0fd4b0f0a2457e28a7b3554c21aaac2300))
