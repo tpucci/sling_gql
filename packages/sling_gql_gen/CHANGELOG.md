@@ -1,3 +1,7 @@
+## 1.1.0
+
+ - **FEAT**(sling_gql_gen): accept an SDL schema file in --schema. ([3aacab0f](https://github.com/tpucci/sling_gql/commit/3aacab0fd4b0f0a2457e28a7b3554c21aaac2300))
+
 ## 1.0.0
 
 > Note: This release has breaking changes.
