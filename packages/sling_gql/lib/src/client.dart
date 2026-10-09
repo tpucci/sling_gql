@@ -408,6 +408,10 @@ class QueryScope<Q extends Accessor> implements Recorder {
   /// what children and rows read after [run] in the same frame is in it.
   bool _fetchWhole = false;
 
+  /// This scope put fields in the next request (a miss no request in flight
+  /// covers, or a whole-selection fetch): that request is the one to wake it.
+  bool _askedNext = false;
+
   /// [_root] plus the subtrees this scope's rows read through. A row that
   /// did not re-run since this scope's last [run] recorded its fields in the
   /// previous tree; without them a revalidation never refreshes the row's
@@ -578,8 +582,9 @@ class QueryScope<Q extends Accessor> implements Recorder {
     // elapses) so a failing query does not loop:
     // build → miss → fetch → fail → rebuild → miss → …
     if (_errorBlocksFetch()) return;
-    if (client._enqueueLeaf(leaf) && _missesAreWaterfall) {
-      _waterfallLeaves.add(leaf);
+    if (client._enqueueLeaf(leaf, this)) {
+      _askedNext = true;
+      if (_missesAreWaterfall) _waterfallLeaves.add(leaf);
     }
     _awaiting = true;
     _backgroundFetch = false;
@@ -2522,7 +2527,11 @@ class SlingClient<Q extends Accessor> {
   final Set<RowScope> _rows = {};
 
   Selection _pending = Selection.root('query');
-  Selection? _inflight;
+
+  /// Query batches sent and not landed yet, oldest first. Each one wakes only
+  /// the scopes that wait for it: a batch landing early must not wake a
+  /// scope whose data is still on its way in another one.
+  final List<_Batch<Q>> _inflight = [];
   Set<QueryScope<Q>> _pendingScopes = {};
   bool _flushScheduled = false;
 
@@ -2584,7 +2593,7 @@ class SlingClient<Q extends Accessor> {
   /// `sling_gql_test`) loop on exactly that. Offline mutations waiting in
   /// the queue for the network do not count; one being sent does.
   bool get isIdle =>
-      !_flushScheduled && _inflight == null && _mutationsInFlight == 0;
+      !_flushScheduled && _inflight.isEmpty && _mutationsInFlight == 0;
 
   /// Completes once [isIdle] is true (immediately if it already is).
   Future<void> get whenIdle =>
@@ -2921,10 +2930,16 @@ class SlingClient<Q extends Accessor> {
     return touched;
   }
 
-  /// Adds [leaf] to the next request. Returns `false` when an in-flight
-  /// request already covers it (no new request will be caused).
-  bool _enqueueLeaf(Selection leaf) {
-    if (_inflight?.covers(_singleton(leaf)) ?? false) return false;
+  /// Adds [leaf] to the next request. Returns `false` when a request in
+  /// flight already covers it: [scope] then waits for that one instead (no
+  /// new request will be caused).
+  bool _enqueueLeaf(Selection leaf, QueryScope<Q> scope) {
+    final single = _singleton(leaf);
+    for (final batch in _inflight) {
+      if (!batch.tree.covers(single)) continue;
+      batch.scopes.add(scope);
+      return false;
+    }
     if (_insideMergedField(leaf)) {
       _pending.ensureFillPath(leaf, _cachedPages);
     } else {
@@ -2985,6 +3000,7 @@ class SlingClient<Q extends Accessor> {
     for (final scope in _pendingScopes) {
       if (!scope._fetchWhole) continue;
       scope._fetchWhole = false;
+      scope._askedNext = true;
       scope._enqueueWhole();
     }
     // A merged entry's fetch selects what every argument set of it read
@@ -3001,19 +3017,24 @@ class SlingClient<Q extends Accessor> {
     _pending = Selection.root('query');
     _pendingScopes = {};
     _flushScheduled = false;
+    // The others only missed fields a request in flight already brings:
+    // they wait for that one (see [_enqueueLeaf]).
+    final senders = {
+      for (final s in scopes)
+        if (s._askedNext) s,
+    };
+    for (final s in scopes) {
+      s._askedNext = false;
+    }
 
     if (tree.isLeaf) {
-      if (_inflight != null) {
-        // Everything was covered by an in-flight request; those scopes will
-        // be notified when it lands.
-        _inflightScopes.addAll(scopes);
-      } else {
-        // Nothing to fetch (e.g. refetch on a scope that never ran).
-        for (final s in scopes) {
-          s._settle(null);
-        }
-        _checkIdle();
+      // Everything was covered by requests in flight: their scopes joined
+      // them (see [_enqueueLeaf]) and are notified when they land. The
+      // others had nothing to fetch (e.g. refetch on a scope that never ran).
+      for (final s in scopes) {
+        if (!_inflight.any((b) => b.scopes.contains(s))) s._settle(null);
       }
+      _checkIdle();
       return;
     }
 
@@ -3025,7 +3046,7 @@ class SlingClient<Q extends Accessor> {
         _now().difference(failedAt) >= retryFailedAfter!;
     if (op.document == _failedDocument && !expired) {
       // Same document already failed: surface the error without a round trip.
-      for (final s in scopes) {
+      for (final s in senders) {
         if (s._disposed) continue;
         s._waterfallLeaves.clear();
         s._settle(_lastError);
@@ -3039,24 +3060,24 @@ class SlingClient<Q extends Accessor> {
       _failedDocument = null;
       _failedAt = null;
     }
-    if (scopes.every((s) => s._disposed)) {
+    if (senders.every((s) => s._disposed)) {
       // Everyone who asked is gone (a screen popped before its first frame
       // ended): nothing to send.
       _checkIdle();
       return;
     }
 
-    final cancel = _inflightCancel = _CancelToken();
-    _inflight = tree;
+    final batch = _Batch<Q>(tree)..scopes.addAll(senders);
+    final cancel = batch.cancel;
+    _inflight.add(batch);
     _rememberLists(tree);
-    _inflightScopes.addAll(scopes);
-    for (final s in scopes) {
+    for (final s in senders) {
       final warning = s._requestSent();
       if (warning != null && warnOnWaterfall) onWaterfall(warning);
     }
     onOperation?.call(op);
     final record = _track('query', op, tree, [
-      for (final s in scopes) s.debugLabel,
+      for (final s in senders) s.debugLabel,
     ]);
 
     _Received? received;
@@ -3065,21 +3086,20 @@ class SlingClient<Q extends Accessor> {
       received = await _execute(
         op,
         record: record,
-        timeout: _batchTimeout(scopes),
+        timeout: _batchTimeout(senders),
         retry: retry,
         cancel: cancel,
       );
     } on SlingException catch (e) {
       error = e;
     }
-    if (identical(_inflightCancel, cancel)) _inflightCancel = null;
     if (cancel.isCancelled) {
-      _abandon(record);
+      _abandon(batch, record);
       return;
     }
     // Synchronous from here: one cache change for the response, list-rule
     // edits and an automatic gc (see `Cache.batch`).
-    cache.batch(() => _land(op, record, received, error));
+    cache.batch(() => _land(batch, op, record, received, error));
   }
 
   /// The longest timeout of [scopes]; `null` (no limit) if one has none.
@@ -3093,22 +3113,21 @@ class SlingClient<Q extends Accessor> {
     return longest ?? timeout;
   }
 
-  /// Cancels the in-flight query batch when every scope waiting for it has
-  /// been disposed: the request is aborted and its response dropped.
+  /// Cancels each in-flight query batch whose every waiting scope has been
+  /// disposed: the request is aborted and its response dropped.
   void _scopeDisposed() {
-    final cancel = _inflightCancel;
-    if (cancel == null || cancel.isCancelled) return;
-    if (_inflightScopes.every((s) => s._disposed)) cancel.cancel();
+    for (final batch in _inflight) {
+      if (batch.cancel.isCancelled) continue;
+      if (batch.scopes.every((s) => s._disposed)) batch.cancel.cancel();
+    }
   }
 
   /// Ends a cancelled batch without writing anything. A scope that joined
   /// it after the cancellation re-runs and fetches again.
-  void _abandon(SlingRequest? record) {
+  void _abandon(_Batch<Q> batch, SlingRequest? record) {
     record?._finish(const SlingCancelledException());
-    _inflight = null;
-    final waiters = _inflightScopes;
-    _inflightScopes = {};
-    for (final s in waiters) {
+    _inflight.remove(batch);
+    for (final s in batch.scopes) {
       if (s._disposed) continue;
       s._settle(null);
       s._changedByClient();
@@ -3120,17 +3139,17 @@ class SlingClient<Q extends Accessor> {
   /// waited for it. Errored paths are pruned unless every live scope that
   /// selected their root field keeps them ([ErrorPolicy.all] / `ignore`).
   void _land(
+    _Batch<Q> batch,
     PrintedOperation op,
     SlingRequest? record,
     _Received? received,
     SlingException? error,
   ) {
-    _inflight = null;
+    _inflight.remove(batch);
     final waiters = {
-      for (final s in _inflightScopes)
+      for (final s in batch.scopes)
         if (!s._disposed) s,
     };
-    _inflightScopes = {};
     Set<String> touched = {};
     try {
       if (received != null) {
@@ -3199,8 +3218,6 @@ class SlingClient<Q extends Accessor> {
     return selected;
   }
 
-  Set<QueryScope<Q>> _inflightScopes = {};
-  _CancelToken? _inflightCancel;
   SlingException? _lastError;
 
   /// Rebuilds every scope that read one of the [touched] dependency keys
@@ -3437,7 +3454,9 @@ class SlingClient<Q extends Accessor> {
     for (final s in _subscriptions.toList()) {
       s.cancel();
     }
-    _inflightCancel?.cancel();
+    for (final batch in _inflight) {
+      batch.cancel.cancel();
+    }
     _requests.close();
     _queuedMutationFailed.close();
     if (_ownsHttp) _http.close();
@@ -3523,4 +3542,14 @@ class _CancelToken {
   void cancel() {
     if (!_cancelled.isCompleted) _cancelled.complete();
   }
+}
+
+/// A query request in flight: what it selects, the scopes it wakes when it
+/// lands, and the token that aborts it.
+class _Batch<Q extends Accessor> {
+  _Batch(this.tree);
+
+  final Selection tree;
+  final Set<QueryScope<Q>> scopes = {};
+  final _CancelToken cancel = _CancelToken();
 }
